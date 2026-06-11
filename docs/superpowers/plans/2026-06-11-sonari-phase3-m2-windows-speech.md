@@ -104,15 +104,22 @@ def install():
         wr.EnumKey = _enum
         sys.modules["winreg"] = wr
     # --- msvcrt (single-instance lock) ---
+    # Track locked INODES (not fds): real msvcrt.locking is a system-wide
+    # byte-range lock, so two handles to the SAME file conflict across
+    # processes. Modelling by inode makes the cross-process test meaningful.
     if "msvcrt" not in sys.modules:
         mc = types.ModuleType("msvcrt")
         mc.LK_NBLCK = 2; mc.LK_UNLCK = 0
         mc._locked = set()
         def _locking(fd, mode, nbytes):
+            import os as _os
+            ino = _os.fstat(fd).st_ino
             if mode == mc.LK_NBLCK:
-                if fd in mc._locked:
+                if ino in mc._locked:
                     raise OSError("locked")
-                mc._locked.add(fd)
+                mc._locked.add(ino)
+            elif mode == mc.LK_UNLCK:
+                mc._locked.discard(ino)
         mc.locking = _locking
         sys.modules["msvcrt"] = mc
     # --- winrt tree ---
@@ -206,13 +213,22 @@ def test_acquire_singleton_windows_branch(tmp_path, monkeypatch):
 def acquire_singleton(path):
     """Acquire an exclusive single-instance lock; return the held file object
     (keep a process-lifetime reference) or None if another process holds it.
-    POSIX: fcntl.flock. Windows: msvcrt.locking on a held-open file. The OS
-    releases the lock automatically on process death, so a crash never sticks."""
-    fh = open(str(path), "w")
+    POSIX: fcntl.flock (content-independent). Windows: msvcrt.locking on a FIXED
+    byte of a NON-truncated file — byte-range locks are system-wide, giving real
+    cross-process exclusion; truncating under another holder's lock is undefined,
+    and a moving file position would lock the wrong byte. The OS releases the
+    lock on process death, so a crash never sticks.
+
+    NOTE: cross-process exclusion on Windows MUST be confirmed on the box
+    (M2-WINDOWS-ACCEPTANCE.md). If msvcrt.locking proves unreliable, switch to a
+    named mutex (kernel32.CreateMutexW + GetLastError()==ERROR_ALREADY_EXISTS)."""
+    fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+    fh = os.fdopen(fd, "r+")
     if sys.platform == "win32":
         import msvcrt
+        fh.seek(0)
         try:
-            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)   # lock byte [0, 1)
         except OSError:
             fh.close()
             return None
@@ -224,12 +240,12 @@ def acquire_singleton(path):
             fh.close()
             return None
     try:
-        fh.write(str(os.getpid())); fh.flush()
+        fh.seek(0); fh.write(str(os.getpid())); fh.flush(); fh.truncate()
     except OSError:
         pass
     return fh
 ```
-(`msvcrt.locking` needs a non-empty region — it locks 1 byte from the current offset; writing the pid after is fine. The real-Windows nuance is covered by the acceptance checklist.)
+(The POSIX path is behaviourally identical to M1's `open("w")` flock — the full gate confirms macOS stays green; `os.open(O_RDWR|O_CREAT)` just makes the open cross-platform-safe.)
 
 - [ ] **Step 4: Run the singleton tests (POSIX + win branch) → PASS**, then full suite both interpreters.
 Run: `TMPDIR=/tmp /usr/bin/python3 -m pytest tests/test_transport.py -q` then the full gate.
@@ -383,12 +399,20 @@ def test_wait_timeout_raises(monkeypatch):
 def test_wpm_maps_to_multiplier():
     assert abs(wpm_to_speaking_rate(200) - 1.0) < 1e-6
     assert wpm_to_speaking_rate(400) > 1.0 and wpm_to_speaking_rate(100) < 1.0
+
+def test_run_falls_back_when_voice_name_unknown():
+    # a stale/foreign voice name (e.g. macOS "Samantha") must not be assigned
+    # as-is to synth.voice — run() resolves it or falls back to best_voice().
+    h = WinTtsBackend().run("hi", "Samantha", 200)  # fake has no such voice
+    assert h.wait(timeout=2.0) == 0   # did not crash on an unresolved name
 ```
 
 - [ ] **Step 2: Run → FAIL.**
 
 - [ ] **Step 3: Implement** `src/sonari/platform/windows/tts.py` with the **verified** code: lazy `winrt.*` imports inside `run()`/`best_voice()`/`list_voices()` (so the module imports even without the fakes, though tests use fakes); `wpm_to_speaking_rate(wpm)` = `max(0.5, min(6.0, wpm/200.0))`; `best_voice()` (en-US OneCore by id → any en-US → `default_voice` → `RuntimeError`); `run()` (options `appended_silence`/`punctuation_silence` MIN, `speaking_rate` try/AttributeError→SSML fallback, `synthesize_text_to_stream_async(text).get()`, `MediaPlayer` SPEECH category, `set_stream_source`, `_TtsHandle`, `play()`); `_TtsHandle` (`wait` raises `subprocess.TimeoutExpired`, `terminate` pause/close + `returncode=1`, GC-refs). Subclass `TtsBackend`. Implement from the verified reference (§Windows OneCore TTS — the full synth→stream→play pattern + `_TtsHandle`).
 > The ABC's `run(self, text, voice, rate)` takes the Sonari wpm `rate` (int) — map it internally via `wpm_to_speaking_rate`.
+>
+> **CRITICAL deviation from the reference — voice resolution.** `Speaker` passes `voice` as a voice-NAME **string** (from config) or `None` — but `synthesizer.voice` requires a `VoiceInformation` **object**. The reference's `synth.voice = voice` is wrong for our contract. `run()` must resolve: if `voice` is a non-empty string, find the matching `VoiceInformation` in `all_voices` by `display_name` (case-insensitive); if not found (e.g. a stale macOS voice name like `"Samantha"`), fall back to `best_voice()`; if `voice is None`, use `best_voice()`. Add a helper `_resolve_voice(name)`.
 
 - [ ] **Step 4: Run → PASS, full gate, commit**
 ```bash
@@ -557,7 +581,7 @@ git commit -m "test(windows): doctor rows compose from WinSupervisorBackend thro
   - ⚠ **Single-instance:** rapid hook activity yields **one** daemon (the `msvcrt.locking` guard) — `tasklist | findstr python`.
   - ⚠ **Autostart + restart:** log off/on → daemon returns; kill it → the supervisor restarts it (backoff).
   - ⚠ **Hooks fire:** confirm the exec-form hook actually reaches the daemon (resolve the exact Claude-Code Windows hooks path).
-  - **RISKS to probe explicitly (mock-blind):** (a) **SAPI/MediaPlayer audio from a `DETACHED_PROCESS|CREATE_NO_WINDOW` Task-Scheduler process** — neural `Speak()` can hang without an STA/`CoInitializeEx` pump; if speech hangs, the daemon needs COM init / a message pump. (b) `schtasks /xml` UTF-16 acceptance. (c) Store-stub avoidance on a machine where only Store Python exists. (d) `importlib.resources.as_file` temp-path lifetime for wheel installs.
+  - **RISKS to probe explicitly (mock-blind):** (a) **SAPI/MediaPlayer audio from a `DETACHED_PROCESS|CREATE_NO_WINDOW` Task-Scheduler process** — the #1 risk: neural `Speak()`/`MediaPlayer` may emit no audio or hang without an STA + `CoInitializeEx(COINIT_APARTMENTTHREADED)`; if so, add a defensive `CoInitializeEx` (via `ctypes.windll.ole32`) in the daemon/TTS thread startup. (b) **`IAsyncOperation.get()` actually blocks** and returns the stream from a plain daemon thread (vs requiring `await`). (c) **Single-instance truly excludes across processes** — spawn two daemons, confirm one survives; if `msvcrt.locking` doesn't exclude, switch to a named mutex (`kernel32.CreateMutexW` + `ERROR_ALREADY_EXISTS`). (d) `schtasks /xml` UTF-16 acceptance + non-admin LogonTrigger registration (no UAC). (e) Store-stub avoidance on a machine where only Store Python exists. (f) `importlib.resources.as_file` temp-path lifetime for wheel installs. (g) `winsound` rapid-earcon truncation (two earcons in quick succession). (h) PyWinRT projection availability for the target arch (win-amd64 confirmed; **win-arm64** may be unavailable → document).
   - **Residual:** Nima is low-vision (magnifier) — a fully-blind + NVDA pass is a separate pre-GA step.
 
 - [ ] **Step 2: Commit**
