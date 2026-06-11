@@ -83,12 +83,21 @@ def test_chirp_end_frequency(tmp_path):
         )
 
 
-def test_earcon_names_match_specs():
-    """_EARCON_NAMES in __init__ must equal the keys of _EARCON_SPECS in
-    generate.py — adding an earcon in one place and forgetting the other
-    should be caught here, not at runtime via FileNotFoundError.
+def test_earcon_wav_assets_exist_for_every_spec():
+    """Every key in _EARCON_SPECS must have a matching .wav asset file in the
+    package directory.  This catches a mis-named or missing asset file —
+    something the old tautological name-equality check could not catch
+    because _EARCON_NAMES is now derived directly from _EARCON_SPECS.keys().
     """
-    from sonari.platform.windows.earcons import _EARCON_NAMES
-    assert set(_EARCON_NAMES) == set(_EARCON_SPECS.keys()), (
-        f"_EARCON_NAMES={set(_EARCON_NAMES)} != _EARCON_SPECS keys={set(_EARCON_SPECS.keys())}"
+    import pathlib
+    from sonari.platform.windows.earcons import generate as _gen_mod
+    pkg_dir = pathlib.Path(_gen_mod.__file__).parent
+    missing = [
+        name
+        for name in _EARCON_SPECS
+        if not (pkg_dir / f"{name}.wav").exists()
+    ]
+    assert not missing, (
+        f"Missing .wav asset(s) in {pkg_dir}: {missing}\n"
+        "Run: python -m sonari.platform.windows.earcons.generate"
     )

@@ -50,14 +50,13 @@ def generate_earcon(
     release_n   = int(_RELEASE_S * sample_rate)
     frames: "list[bytes]" = []
 
-    # Chirp phase accumulator — initialised before the loop so it persists
-    # across iterations.  Using a phase accumulator (rather than computing
-    # sin(2π·f_inst·t)) gives a correct linear frequency sweep: the
-    # instantaneous frequency at sample i is exactly
-    #   f_inst = freq + (freq2 - freq) * i / (n - 1)
-    # Closed-form equivalent:
-    #   phi[i] = 2π/sr · (freq·i + (freq2-freq)·i²/(2·(n-1)))
-    _chirp_phi: float = 0.0
+    # Chirp-only constants — hoisted out of the loop so they are computed
+    # once per call rather than once per sample (O(1) vs O(n)).
+    # _chirp_phi is the phase accumulator; it is only used when
+    # wave_type == "chirp" and is meaningless for sine / dual.
+    if wave_type == "chirp":
+        _chirp_denom: int = max(n - 1, 1)
+        _chirp_phi: float = 0.0
 
     for i in range(n):
         t = i / sample_rate
@@ -86,8 +85,7 @@ def generate_earcon(
             # Phase accumulation gives the correct result; the naive
             # sin(2π·f_inst·t) formula doubles the sweep rate because
             # both f_inst and t grow with i.
-            denom = max(n - 1, 1)
-            f_inst = freq + (freq2 - freq) * (i / denom)
+            f_inst = freq + (freq2 - freq) * (i / _chirp_denom)
             _chirp_phi += 2 * math.pi * f_inst / sample_rate
             v = math.sin(_chirp_phi)
 
