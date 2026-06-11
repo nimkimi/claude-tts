@@ -92,7 +92,9 @@ def test_doctor_rows_include_task_and_neural_voice(monkeypatch):
     monkeypatch.setattr("sonari.paths.socket_connectable", lambda: True)
     names = [r[0] for r in sup.doctor_rows()]
     assert "Task Scheduler task" in names
+    assert "pythonw.exe" in names
     assert "neural voice" in names
+    assert "daemon running" in names
 
 
 def test_resolve_python_skips_store_stub(monkeypatch, tmp_path):
