@@ -8,5 +8,9 @@ from sonari.platform.windows.supervisor import WinSupervisorBackend
 
 
 def make_backend() -> PlatformBackend:
-    return PlatformBackend(tts=WinTtsBackend(), earcon=WinEarconBackend(),
-                           hotkey=WinHotkeyBackend(), supervisor=WinSupervisorBackend())
+    return PlatformBackend(
+        tts=WinTtsBackend(),
+        earcon=WinEarconBackend(),
+        hotkey=WinHotkeyBackend(),
+        supervisor=WinSupervisorBackend(),
+    )

@@ -17,6 +17,13 @@ def test_hotkey_stub_reports_deferred():
     assert ok is False and "M3" in detail
 
 
+def test_display_combo_labels_ctrl_alt_o():
+    from sonari.platform.windows.hotkeys import WinHotkeyBackend
+    # MSDN RegisterHotKey modifier bits: 0x0001=Alt, 0x0002=Ctrl, 0x0004=Shift
+    # 0x0003 == Ctrl | Alt; VK 0x4F == 'O'
+    assert WinHotkeyBackend().display_combo(0x0003, 0x4F) == "Ctrl+Alt+O"
+
+
 def test_get_platform_win32(monkeypatch):
     import sonari.platform as platform
     monkeypatch.setattr(platform.sys, "platform", "win32")
