@@ -73,7 +73,7 @@ claude "Say hello"
 
 Expected:
 - Claude's prose response is spoken aloud by a **OneCore** neural voice (not a legacy Desktop SAPI voice).
-- The voice is intelligible at the default rate (~150 wpm).
+- The voice is intelligible at the default rate (200 wpm — the value of `rate` in `config.DEFAULTS`).
 - There is no noticeable trailing silence longer than ~750 ms after the utterance ends (the `SpeechAppendedSilence.MIN` + `SpeechPunctuationSilence.MIN` options were applied).
 
 If no audio is heard, proceed to Risk (a) diagnostics.
@@ -112,7 +112,7 @@ Expected:
 Instrument a test script to verify:
 ```python
 from sonari.platform.windows.tts import WinTtsBackend
-h = WinTtsBackend().run("This is a long utterance that we will interrupt")
+h = WinTtsBackend().run("This is a long utterance that we will interrupt", None, 200)
 import time; time.sleep(0.2)
 h.terminate()
 assert h.returncode == 1
@@ -330,18 +330,11 @@ On a fresh Windows 11 install, `python` on PATH may point to `%LOCALAPPDATA%\Mic
 
 ### Risk (f): `importlib.resources.as_file` temp-path lifetime for wheel installs
 
-`default_earcons()` stores paths extracted via `importlib.resources.as_file()`. For wheel (`.whl`) installs the extracted temp file is cleaned up when the `with as_file(...)` context exits. The current implementation stores the resolved path inside the `with` block, which is safe for file-based (editable) installs but may produce a stale path for zip-based wheel installs.
+**RESOLVED IN IMPLEMENTATION — no probe required.**
 
-**Test:** Install Sonari from a wheel (`pip install sonari-*.whl`), then:
-```python
-from sonari.platform.windows.earcons import default_earcons
-paths = default_earcons()
-import pathlib
-for name, p in paths.items():
-    assert pathlib.Path(p).exists(), f"Missing: {p}"
-```
+`earcons/__init__.py` does not use `importlib.resources.as_file()` at all. It resolves earcon paths via `pathlib.Path(__file__).parent / fname`, which is a sibling-file lookup. This is reliable for all supported install modes (editable installs, unpacked wheels, sdist builds) and is explained in the `default_earcons()` docstring. The `as_file()` approach was explicitly evaluated and rejected precisely because it deletes the extracted temporary file when the `with` block exits.
 
-If paths are stale, fix: extract to a stable per-process tempdir registered with `atexit.register(shutil.rmtree, tmpdir)`.
+The sign-off table entry for this risk can be ticked as "N/A — resolved in code".
 
 ### Risk (g): `winsound` rapid-earcon truncation
 
@@ -401,7 +394,7 @@ If no arm64 wheel is found, document this as a known gap. Fallback: use the Wind
 | Risk (c): msvcrt cross-process | | | | |
 | Risk (d): UTF-16 + non-admin | | | | |
 | Risk (e): Store stub avoidance | | | | |
-| Risk (f): as_file temp lifetime | | | | |
+| Risk (f): as_file temp lifetime | N/A | — | N/A | Resolved in implementation; pathlib sibling lookup used instead |
 | Risk (g): rapid earcon truncation | | | | |
 | Risk (h): arm64 PyWinRT | | | | |
 | Residual: NVDA pass | | | | |
