@@ -409,10 +409,9 @@ def build_hooks_json(pythonw: str, hook_py: str) -> str:
     )
 
 
-# .gitattributes entry — prevents CRLF injection on Windows checkout.
+# .gitattributes entries — prevents CRLF injection on Windows checkout.
 # Created at repo root in Task 8; surfaced here for the install-time writer.
-_GITATTRIBUTES_LINE = "hooks/*.py  text eol=lf\n"
-GITATTRIBUTES_LINE = _GITATTRIBUTES_LINE  # public alias (reference name)
+GITATTRIBUTES_LINE = "hooks/*.py text eol=lf\nsrc/sonari/**/*.py text eol=lf\n"
 
 
 # ---------------------------------------------------------------------------
