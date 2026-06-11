@@ -249,6 +249,8 @@ def resolve_python_windows() -> "str | None":
 # The resolved pythonw.exe path is baked in at install time by
 # WinSupervisorBackend.install(). Claude Code supports separate 'command' +
 # 'args' (exec-form) — no bash shim required.
+# Event set mirrors hooks/hooks.json (the macOS hooks file), translated to
+# exec-form (command + args array) because there is no bash on Windows.
 HOOKS_JSON_TEMPLATE = '''{{
   "hooks": {{
     "MessageDisplay": [
@@ -266,6 +268,75 @@ HOOKS_JSON_TEMPLATE = '''{{
         ]
       }}
     ],
+    "PreToolUse": [
+      {{
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{pythonw}",
+            "args": [
+              "{hook_py}",
+              "PreToolUse"
+            ]
+          }}
+        ]
+      }},
+      {{
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{pythonw}",
+            "args": [
+              "{hook_py}",
+              "PreToolUse"
+            ]
+          }}
+        ]
+      }},
+      {{
+        "matcher": "",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{pythonw}",
+            "args": [
+              "{hook_py}",
+              "PreToolUse"
+            ]
+          }}
+        ]
+      }}
+    ],
+    "Notification": [
+      {{
+        "matcher": "permission_prompt",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{pythonw}",
+            "args": [
+              "{hook_py}",
+              "Notification"
+            ]
+          }}
+        ]
+      }},
+      {{
+        "matcher": "idle_prompt",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{pythonw}",
+            "args": [
+              "{hook_py}",
+              "Notification"
+            ]
+          }}
+        ]
+      }}
+    ],
     "Stop": [
       {{
         "matcher": "",
@@ -276,6 +347,51 @@ HOOKS_JSON_TEMPLATE = '''{{
             "args": [
               "{hook_py}",
               "Stop"
+            ]
+          }}
+        ]
+      }}
+    ],
+    "UserPromptSubmit": [
+      {{
+        "matcher": "",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{pythonw}",
+            "args": [
+              "{hook_py}",
+              "UserPromptSubmit"
+            ]
+          }}
+        ]
+      }}
+    ],
+    "SessionStart": [
+      {{
+        "matcher": "",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{pythonw}",
+            "args": [
+              "{hook_py}",
+              "SessionStart"
+            ]
+          }}
+        ]
+      }}
+    ],
+    "SessionEnd": [
+      {{
+        "matcher": "",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{pythonw}",
+            "args": [
+              "{hook_py}",
+              "SessionEnd"
             ]
           }}
         ]
