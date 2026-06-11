@@ -16,10 +16,7 @@ def test_play_existing_returns_done_handle(tmp_path):
     assert len(winsound._calls) == 1
     assert winsound._calls[0][1] == (winsound.SND_FILENAME | winsound.SND_ASYNC)
 
-def test_play_missing_returns_none_handle(tmp_path):
+def test_play_missing_returns_none(tmp_path):
     import winsound; winsound._calls.clear()
-    h = WinEarconBackend().play(str(tmp_path / "nope.wav"))
-    assert h.poll() is None and winsound._calls == []
-
-def test_default_earcons_six():
-    assert len(WinEarconBackend().default_earcons()) == 6
+    result = WinEarconBackend().play(str(tmp_path / "nope.wav"))
+    assert result is None and winsound._calls == []

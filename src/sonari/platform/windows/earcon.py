@@ -13,10 +13,8 @@ from sonari.platform.base import EarconBackend
 # on macOS/Linux (for tests / dev).
 try:
     import winsound as _winsound
-    _SND_FLAGS = _winsound.SND_FILENAME | _winsound.SND_ASYNC  # 0x20004 = 131076
-except ModuleNotFoundError:  # non-Windows; only reached at runtime, not import-time
+except ModuleNotFoundError:  # non-Windows; reached at import-time when winsound is absent
     _winsound = None  # type: ignore[assignment]
-    _SND_FLAGS = 0
 
 
 class _DoneHandle:
@@ -44,27 +42,21 @@ class _DoneHandle:
         return 0  # immediately "done" from Python's perspective
 
 
-class _MissingHandle:
-    """Returned when the .wav path does not exist."""
-    def poll(self) -> None:
-        return None
-
-
 class WinEarconBackend(EarconBackend):
     """Earcon backend for Windows using winsound.PlaySound."""
 
-    def play(self, path: str) -> _DoneHandle | _MissingHandle:
+    def play(self, path: str) -> _DoneHandle | None:
         """Play *path* asynchronously via winsound.
 
         Returns a handle whose .poll() mimics subprocess.Popen.poll():
-          0    -> sound was dispatched successfully
-          None -> file was missing (nothing played)
+          0    -> sound was dispatched successfully (returns _DoneHandle)
+          None -> file was missing (nothing played, returns None directly)
 
         Raises RuntimeError (from winsound itself) only if Windows cannot
         open the audio device, which is distinct from a missing file.
         """
         if not pathlib.Path(path).exists():
-            return _MissingHandle()
+            return None
         # Re-import at call time so that the _winfakes harness injected in
         # conftest.py is always picked up — even if the module-level try/except
         # ran before the fakes were installed.
