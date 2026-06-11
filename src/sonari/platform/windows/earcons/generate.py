@@ -50,6 +50,15 @@ def generate_earcon(
     release_n   = int(_RELEASE_S * sample_rate)
     frames: "list[bytes]" = []
 
+    # Chirp phase accumulator — initialised before the loop so it persists
+    # across iterations.  Using a phase accumulator (rather than computing
+    # sin(2π·f_inst·t)) gives a correct linear frequency sweep: the
+    # instantaneous frequency at sample i is exactly
+    #   f_inst = freq + (freq2 - freq) * i / (n - 1)
+    # Closed-form equivalent:
+    #   phi[i] = 2π/sr · (freq·i + (freq2-freq)·i²/(2·(n-1)))
+    _chirp_phi: float = 0.0
+
     for i in range(n):
         t = i / sample_rate
 
@@ -73,9 +82,14 @@ def generate_earcon(
         elif wave_type == "chirp":
             if freq2 is None:
                 raise ValueError("freq2 required for wave_type='chirp'")
-            # instantaneous frequency increases linearly over the clip
-            f_inst = freq + (freq2 - freq) * (i / n)
-            v = math.sin(2 * math.pi * f_inst * t)
+            # Instantaneous frequency sweeps linearly from freq to freq2.
+            # Phase accumulation gives the correct result; the naive
+            # sin(2π·f_inst·t) formula doubles the sweep rate because
+            # both f_inst and t grow with i.
+            denom = max(n - 1, 1)
+            f_inst = freq + (freq2 - freq) * (i / denom)
+            _chirp_phi += 2 * math.pi * f_inst / sample_rate
+            v = math.sin(_chirp_phi)
 
         else:
             raise ValueError(f"Unknown wave_type: {wave_type!r}")
