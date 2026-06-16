@@ -124,3 +124,18 @@ def test_resolve_python_skips_store_stub(monkeypatch, tmp_path):
 def test_spawn_flags_value():
     # Hex literal correctness — no subprocess import needed
     assert _SPAWN_FLAGS == 0x08000008
+
+
+def test_post_install_notes_runs(capsys):
+    from sonari.platform.windows.supervisor import WinSupervisorBackend
+    WinSupervisorBackend().post_install_notes()
+    out = capsys.readouterr().out
+    assert "sonari doctor" in out and "M3" in out   # next steps + hotkeys deferred
+
+
+def test_hooks_doctor_row_windows_absent(monkeypatch, tmp_path):
+    from sonari.platform.windows import supervisor as sup
+    monkeypatch.setattr(sup, "claude_settings_path",
+                        lambda: str(tmp_path / "settings.json"))
+    name, ok, _ = sup.WinSupervisorBackend().hooks_doctor_row()
+    assert name == "hooks installed" and ok is False   # no settings yet

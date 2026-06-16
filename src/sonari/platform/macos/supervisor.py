@@ -211,6 +211,24 @@ class MacSupervisorBackend(SupervisorBackend):
     def uninstall(self):
         pass
 
+    def post_install_notes(self) -> None:
+        """Print the macOS post-install next steps (moved verbatim from cli)."""
+        plugin_root = os.path.realpath(paths.repo_root())
+        print("")
+        print("Enable the Sonari plugin in Claude Code, then run 'sonari doctor'.")
+        print("  - Per session: claude --plugin-dir {0}".format(plugin_root))
+        print("  - Or enable 'sonari' from the /plugin menu (local marketplace).")
+        if not _local_bin_on_path():
+            print('Add ~/.local/bin to your PATH so `sonari` works in every shell:')
+            print('  export PATH="$HOME/.local/bin:$PATH"')
+
+    def hooks_doctor_row(self) -> tuple:
+        """macOS: hooks ship in the plugin's repo hooks/hooks.json manifest."""
+        hooks_json = os.path.join(paths.repo_root(), "hooks", "hooks.json")
+        present = os.path.exists(hooks_json)
+        return ("hooks installed", present,
+                hooks_json if present else "missing: {0}".format(hooks_json))
+
     def doctor_rows(self) -> list:
         """Return macOS-specific [(name, ok, detail), ...] diagnostic rows.
 

@@ -415,6 +415,35 @@ GITATTRIBUTES_LINE = "hooks/*.py text eol=lf\nsrc/sonari/**/*.py text eol=lf\n"
 
 
 # ---------------------------------------------------------------------------
+# ~/.claude/settings.json hook delivery (Windows uses exec-form hooks here,
+# since the plugin's shell-form manifest cannot spawn the Python hook on win32)
+# ---------------------------------------------------------------------------
+
+def claude_settings_path() -> str:
+    """Path to the user-scope Claude Code settings.json."""
+    return os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
+
+
+def settings_has_sonari_hooks(settings_path: str) -> bool:
+    """True if settings.json contains at least one Sonari hook entry."""
+    import json
+    try:
+        with open(settings_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return False
+    hooks = (data or {}).get("hooks", {}) if isinstance(data, dict) else {}
+    for entries in hooks.values():
+        for entry in entries:
+            for h in entry.get("hooks", []):
+                args = h.get("args") or []
+                blob = h.get("command", "") + " " + " ".join(map(str, args))
+                if "sonari-hook" in blob:
+                    return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # WinSupervisorBackend — the SupervisorBackend ABC implementation
 # ---------------------------------------------------------------------------
 
@@ -551,3 +580,18 @@ class WinSupervisorBackend(SupervisorBackend):
 
     def uninstall(self) -> None:
         task_uninstall()
+
+    def post_install_notes(self) -> None:
+        """Print the Windows post-install next steps."""
+        print("")
+        print("Sonari is installed. Run 'sonari doctor' to confirm everything is green.")
+        print("  - Enable the 'sonari' plugin for its slash commands (optional).")
+        print("  - Global hotkeys arrive in Milestone 3 (M3); speech works without them.")
+
+    def hooks_doctor_row(self) -> tuple:
+        """Windows: hooks live in the user-scope Claude settings.json."""
+        path = claude_settings_path()
+        ok = settings_has_sonari_hooks(path)
+        return ("hooks installed", ok,
+                path if ok else
+                "no Sonari hooks in {0} (run 'sonari install')".format(path))

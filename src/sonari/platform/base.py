@@ -72,6 +72,17 @@ class SupervisorBackend(abc.ABC):
     def doctor_rows(self) -> "list":
         """Return platform-specific [(name, ok, detail), ...] diagnostic rows."""
 
+    # Concrete defaults (overridden per platform) so existing subclasses and test
+    # doubles keep working without implementing them.
+    def post_install_notes(self) -> None:
+        """Print OS-specific post-install next steps. Default: nothing."""
+        return None
+
+    def hooks_doctor_row(self) -> "tuple":
+        """Return a (name, ok, detail) row describing whether Sonari's hooks are
+        installed. Default: unknown."""
+        return ("hooks installed", False, "unknown")
+
 
 @dataclass
 class PlatformBackend:

@@ -23,3 +23,15 @@ def test_doctor_rows_include_say_and_swiftc(monkeypatch):
                         lambda n: "/usr/bin/" + n)
     names = [r[0] for r in MacSupervisorBackend().doctor_rows()]
     assert "say" in names and "swiftc" in names
+
+
+def test_hooks_doctor_row_checks_repo_manifest():
+    name, ok, detail = MacSupervisorBackend().hooks_doctor_row()
+    assert name == "hooks installed"
+    assert detail.endswith("hooks.json") or "missing" in detail
+
+
+def test_post_install_notes_prints_next_steps(capsys):
+    MacSupervisorBackend().post_install_notes()
+    out = capsys.readouterr().out
+    assert "sonari doctor" in out
