@@ -140,6 +140,8 @@ class MacHotkeyBackend(HotkeyBackend):
         ok, detail = self.build()
         if not ok:
             return (ok, detail)
+        if agent_path is None:           # cli passes None; backend owns its path
+            agent_path = LAUNCH_AGENT_PATH
         plist_xml = _hotkeyd_plist(str(paths.HOTKEYD_BIN_PATH), log_path)
         os.makedirs(os.path.dirname(agent_path), exist_ok=True)
         with open(agent_path, "w", encoding="utf-8") as fh:

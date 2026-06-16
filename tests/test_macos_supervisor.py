@@ -63,3 +63,28 @@ def test_uninstall_removes_launchagent_and_launcher(tmp_path, monkeypatch):
     monkeypatch.setattr(sup, "launchctl", lambda a: 0)
     sup.uninstall()
     assert not plist.exists() and not launcher.exists()
+
+
+def test_doctor_rows_include_macos_checks(monkeypatch):
+    import sonari.platform.macos.supervisor as ms
+    sup = ms.MacSupervisorBackend()
+    monkeypatch.setattr(ms.shutil, "which", lambda n: "/usr/bin/" + n)
+    monkeypatch.setattr(sup, "launchctl", lambda a: 0)
+    monkeypatch.setattr("sonari.platform.macos.tts.MacTtsBackend.best_voice",
+                        lambda self: "Ava (Premium)")
+    names = {row[0] for row in sup.doctor_rows()}
+    assert {"say", "afplay", "swiftc", "hotkeyd binary",
+            "speechd LaunchAgent loaded"} <= names
+
+
+def test_place_launcher_writes_wrapper_execing_plugin_bin(tmp_path, monkeypatch):
+    import os
+    import sonari.platform.macos.supervisor as ms
+    launcher = tmp_path / ".local" / "bin" / "sonari"
+    monkeypatch.setattr(ms, "_launcher_path", lambda: str(launcher))
+    returned = ms.MacSupervisorBackend().place_launcher("/plug")
+    assert returned == str(launcher) and launcher.exists()
+    body = launcher.read_text()
+    assert body.startswith("#!/usr/bin/env bash")
+    # os.path.join uses the host separator; compare against the same join.
+    assert os.path.join("/plug", "bin", "sonari") in body
