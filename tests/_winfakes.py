@@ -71,7 +71,15 @@ def _install_winrt():
             self.id = id; self.language = language; self.display_name = display_name
     class SpeechSynthesizer:
         all_voices = [_Voice()]; default_voice = _Voice()
-        def __init__(self): self.voice = None; self.options = _Opts()
+        def __init__(self):
+            # Mirror real OneCore: activating a synthesizer on a box with no
+            # installed voices raises FileNotFoundError (WinError -2147024894).
+            # Read via type(self) so a monkeypatched class attr is honored.
+            if not type(self).all_voices:
+                raise FileNotFoundError(
+                    "[WinError -2147024894] The system cannot find the file specified."
+                )
+            self.voice = None; self.options = _Opts()
         def synthesize_text_to_stream_async(self, t): return _AsyncOp(_Stream())
         def synthesize_ssml_to_stream_async(self, t): return _AsyncOp(_Stream())
     synth.SpeechSynthesizer = SpeechSynthesizer
