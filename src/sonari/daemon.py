@@ -506,6 +506,13 @@ class SpeechDaemon:
         """Start the platform's global-hotkey listener. On Windows this spawns an
         in-process RegisterHotKey thread; on macOS it is a no-op (the hotkeyd is a
         separate process)."""
+        # Kill-switch: a ~/.sonari/no_hotkeys file (or SONARI_DISABLE_HOTKEYS=1)
+        # runs speech-only (no in-process hotkey thread). A FILE flag is honoured
+        # by EVERY daemon however it is spawned (hooks inherit their own env, not
+        # ours), so it reliably isolates the hotkey thread when diagnosing crashes.
+        flag = os.path.join(os.path.expanduser("~"), ".sonari", "no_hotkeys")
+        if os.environ.get("SONARI_DISABLE_HOTKEYS") or os.path.exists(flag):
+            return
         from sonari.platform import get_platform
         try:
             get_platform().hotkey.start(self._dispatch_hotkey)
