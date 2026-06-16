@@ -19,6 +19,7 @@ class MsgType:
     SET_FOREGROUND = "set_foreground"
     STOP = "stop"
     SKIP = "skip"
+    SKIP_BACK = "skip_back"
     REPEAT = "repeat"
     JUMP_DECISION = "jump_decision"
     CATCH_UP = "catch_up"

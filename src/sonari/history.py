@@ -53,6 +53,23 @@ class SessionHistory:
         last_id = d[-1].msg_id
         return [e for e in d if e.msg_id == last_id]
 
+    def nth_last_message(self, session: str, n: int) -> list:
+        """Entries of the n-th most recent message group, oldest first.
+        n=0 is the current/most-recent message (== last_message); n=1 is the one
+        before it, and so on. Returns [] if n is out of range. Powers skip-back
+        ('previous item') navigation."""
+        d = self._entries.get(session)
+        if not d or n < 0:
+            return []
+        ordered_ids = []                       # distinct msg_ids, most-recent first
+        for e in reversed(d):
+            if e.msg_id not in ordered_ids:
+                ordered_ids.append(e.msg_id)
+        if n >= len(ordered_ids):
+            return []
+        target = ordered_ids[n]
+        return [e for e in d if e.msg_id == target]
+
     def unheard(self, session: str) -> list:
         """All not-yet-completed entries for session, oldest first."""
         return [e for e in self._entries.get(session, ()) if not e.heard]

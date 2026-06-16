@@ -62,10 +62,11 @@ def test_action_messages_faster_has_delta_25():
 def test_default_keymap_macos_uses_ctrl_cmd(mac):
     d = keymap.default_keymap()
     assert set(d.keys()) == {
-        "stop", "repeat", "skip", "jump_decision", "catch_up",
+        "stop", "repeat", "skip", "skip_back", "jump_decision", "catch_up",
         "faster", "slower", "cycle_verbosity", "reread_options"}
     assert d["stop"]["key"] == "s" and d["stop"]["mods"] == ["ctrl", "cmd"]
     assert d["skip"]["key"] == "." and d["faster"]["key"] == "]"
+    assert d["skip_back"]["key"] == "left"
 
 
 def test_default_keymap_windows_uses_ctrl_shift_alt(win):
@@ -99,9 +100,9 @@ def test_resolve_faster_message_is_json_with_delta(mac):
     assert json.loads(entry["message"]) == {"type": "set_rate", "delta": 25}
 
 
-def test_resolve_default_keymap_has_nine_entries():
+def test_resolve_default_keymap_covers_all_actions():
     resolved = keymap.resolve_keymap(keymap.default_keymap())
-    assert len(resolved) == 9
+    assert len(resolved) == len(keymap._DEFAULT_KEYS)
     assert {e["action"] for e in resolved} == set(keymap._DEFAULT_KEYS.keys())
 
 
@@ -159,7 +160,7 @@ def test_write_resolved_emits_array_of_nine(monkeypatch, tmp_path):
     _patch_keymap_paths(monkeypatch, tmp_path)
     out_path = keymap.write_resolved()
     data = json.loads((tmp_path / "hotkeyd.resolved.json").read_text(encoding="utf-8"))
-    assert isinstance(data, list) and len(data) == 9
+    assert isinstance(data, list) and len(data) == len(keymap._DEFAULT_KEYS)
     for entry in data:
         assert isinstance(entry["keyCode"], int)
         assert isinstance(entry["modifiers"], int)

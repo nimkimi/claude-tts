@@ -45,6 +45,7 @@ class SpeechDaemon:
         self._voice_owner: "str | None" = None
         self._captured_msg: "set[str]" = set()
         self._pending_heard: dict = {}            # SpeechItem.id -> HistoryEntry
+        self._back_step: dict = {}                # session -> skip-back depth (0 = latest)
         self._current_item = None                 # item being spoken right now
         self._warned_immediate: set = set()
         self._guided_sessions: set = set()
@@ -240,6 +241,10 @@ class SpeechDaemon:
         session = msg.get("session", "")
         verbosity = self.config.get("verbosity", "everything")
 
+        # New content restarts skip-back navigation from the latest message.
+        if t in (MsgType.PROSE, MsgType.CHOICE, MsgType.PLAN, MsgType.PERMISSION):
+            self._back_step.pop(session, None)
+
         if t == MsgType.PROSE:
             a = self._assembler(session)
             chunks = a.feed(msg.get("delta", ""), msg.get("index", 0), msg.get("final", False))
@@ -360,10 +365,29 @@ class SpeechDaemon:
             self.speaker.cancel()
             return None
 
+        if t == MsgType.SKIP_BACK:
+            fg = self.sessions.foreground()
+            if fg is None:
+                return None
+            step = self._back_step.get(fg, 0) + 1
+            entries = self.history.nth_last_message(fg, step)
+            if not entries:
+                self._enqueue(fg, "prose", "Start of history.", False)
+                return None
+            self._back_step[fg] = step
+            # Jump to the previous message: cut current speech, clear the queue,
+            # then replay that whole group from its start.
+            self.speaker.cancel()
+            self._drop_pending(self.queue.flush_session(fg))
+            for e in entries:
+                self._enqueue(fg, e.kind, e.text, False, entry=e)
+            return None
+
         if t == MsgType.REPEAT:
             fg = self.sessions.foreground()
             if fg is None:
                 return None
+            self._back_step.pop(fg, None)   # repeat returns to the latest message
             entries = self.history.last_message(fg)
             if not entries:
                 self._enqueue(fg, "prose", "Nothing to repeat.", False)

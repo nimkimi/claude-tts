@@ -67,3 +67,20 @@ def test_other_session_excludes_the_given_session():
     h = SessionHistory()
     h.record("fg", "prose", "X.")
     assert h.other_session_with_unheard("fg") is None
+
+
+def test_nth_last_message_walks_back_through_groups():
+    from sonari.history import SessionHistory
+    h = SessionHistory()
+    # group 0: two prose sentences
+    h.record("s", "prose", "a1"); h.record("s", "prose", "a2"); h.end_message("s")
+    # group 1: one choice
+    h.record("s", "choice", "b1"); h.end_message("s")
+    # group 2: current (open) prose
+    h.record("s", "prose", "c1")
+    assert [e.text for e in h.nth_last_message("s", 0)] == ["c1"]       # current
+    assert [e.text for e in h.nth_last_message("s", 1)] == ["b1"]       # previous
+    assert [e.text for e in h.nth_last_message("s", 2)] == ["a1", "a2"] # two back
+    assert h.nth_last_message("s", 3) == []                            # out of range
+    assert h.nth_last_message("s", -1) == []
+    assert h.nth_last_message("missing", 0) == []
