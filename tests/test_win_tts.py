@@ -44,12 +44,15 @@ def test_terminate_sets_returncode_one():
 
 
 def test_wait_timeout_raises(monkeypatch):
-    # a player that never fires media_ended → wait must raise TimeoutExpired
-    import winrt.windows.media.playback as pb
-    monkeypatch.setattr(pb.MediaPlayer, "play", lambda self: None)
+    # A "long" clip: the completion timer hasn't fired, so a tiny wait must raise.
+    import sonari.platform.windows.tts as tts
+    monkeypatch.setattr(tts, "_wav_duration", lambda data: 100.0)
     h = WinTtsBackend().run("hello", None, 200)
-    with pytest.raises(subprocess.TimeoutExpired):
-        h.wait(timeout=0.05)
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            h.wait(timeout=0.05)
+    finally:
+        h.terminate()   # cancel the 100s timer so the test doesn't linger
 
 
 def test_wpm_maps_to_multiplier():
