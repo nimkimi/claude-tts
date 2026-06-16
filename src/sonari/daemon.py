@@ -516,22 +516,36 @@ class SpeechDaemon:
     def _speak_loop(self) -> None:
         self._running.set()
         while self._running.is_set():
-            item = self.queue.pop_next()
-            if item is not None:
-                with self._lock:
-                    self._current_item = item
-                try:
-                    completed = self.speaker.speak(item.text)
-                except Exception:  # noqa: BLE001 - one bad utterance must not kill the speak thread
-                    completed = False
-                self.note_spoken(item, completed)
-                continue
+            try:
+                self._speak_loop_once()
+            except Exception:  # noqa: BLE001 - NOTHING may permanently kill the
+                # speak thread. A crash in pop_next/note_spoken/etc. used to leave
+                # the daemon alive (earcons kept firing) but mute forever until a
+                # restart. Log the traceback (captured by the daemon log) and keep
+                # going; a short wait avoids a tight error-spin.
+                import sys
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                self._wake.wait(0.1)
+
+    def _speak_loop_once(self) -> None:
+        """One iteration of the speak loop. May raise; _speak_loop contains it."""
+        item = self.queue.pop_next()
+        if item is not None:
             with self._lock:
-                if self._voice_owner is not None and len(self.queue) == 0:
-                    self._voice_owner = None
-            # nothing to say: wait until woken by an enqueue or until stop()
-            self._wake.wait(self._poll_interval)
-            self._wake.clear()
+                self._current_item = item
+            try:
+                completed = self.speaker.speak(item.text)
+            except Exception:  # noqa: BLE001 - one bad utterance must not abort the item
+                completed = False
+            self.note_spoken(item, completed)
+            return
+        with self._lock:
+            if self._voice_owner is not None and len(self.queue) == 0:
+                self._voice_owner = None
+        # nothing to say: wait until woken by an enqueue or until stop()
+        self._wake.wait(self._poll_interval)
+        self._wake.clear()
 
     def _handle_conn(self, conn) -> None:
         try:
