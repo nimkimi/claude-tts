@@ -86,3 +86,22 @@ def test_doctor_subcommand_all_ok_returns_zero(capsys):
         rc = cli.main(["doctor"])
     assert rc == 0
     assert "say" in capsys.readouterr().out
+
+
+def test_doctor_includes_hotkey_rows(monkeypatch):
+    from tests._fakeplatform import fake_platform, FakeSupervisor
+
+    class HK:
+        def doctor_rows(self):
+            return [("hotkey chords", True, "no collisions")]
+
+    pb = fake_platform(supervisor=FakeSupervisor())
+    pb.hotkey = HK()
+    monkeypatch.setattr(cli, "_platform", lambda: pb)
+    monkeypatch.setattr("os.access", lambda *a, **k: True)
+    monkeypatch.setattr("sonari.paths.ensure_sonari_dir", lambda: None)
+    monkeypatch.setattr("sonari.client.send", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(cli, "_read_install_record", lambda: {"app_path": "/a"})
+    monkeypatch.setattr("os.path.exists", lambda p: True)
+    names = {r[0] for r in cli.doctor()}
+    assert "hotkey chords" in names

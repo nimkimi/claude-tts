@@ -58,6 +58,9 @@ class FakeHotkey:
     def display_combo(self, modifiers, key_code):
         return "Ctrl+Cmd+O"
 
+    def doctor_rows(self):
+        return []
+
 
 class FakeTts:
     def __init__(self, voice="Aria"):

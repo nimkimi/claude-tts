@@ -141,6 +141,8 @@ def doctor() -> list:
     # Platform-specific rows supplied by the OS backend (macOS: say/afplay/
     # swiftc/LaunchAgents/...; Windows: schtasks/Task/pythonw/neural voice/...).
     results.extend(_platform().supervisor.doctor_rows())
+    # Hotkey diagnostics (Windows: collisions + UIPI/elevation; macOS: none here).
+    results.extend(_platform().hotkey.doctor_rows())
 
     # Neutral rows (portable, keep inline).
     try:
