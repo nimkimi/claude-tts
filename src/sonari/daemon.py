@@ -47,7 +47,6 @@ class SpeechDaemon:
         self._pending_heard: dict = {}            # SpeechItem.id -> HistoryEntry
         self._nav_cursor: dict = {}               # session -> anchored message id (absent = latest)
         self._paused = threading.Event()          # play/pause: set == speech halted
-        self._paused_item = None                  # utterance interrupted by pause (replayed on resume)
         self._muted_sessions: set = set()         # sessions whose speech is muted
         self._current_item = None                 # item being spoken right now
         self._warned_immediate: set = set()
@@ -338,7 +337,6 @@ class SpeechDaemon:
             self._nav_cursor.pop(session, None)   # new prompt -> fresh navigation
             # A new prompt is a user action -> auto-resume from pause (temp pause).
             self._paused.clear()
-            self._paused_item = None
             self._wake.set()
             self._captured_msg.discard(session)
             self._options.pop(session, None)
@@ -393,7 +391,10 @@ class SpeechDaemon:
                 self._resume()
             else:
                 self._paused.set()
-                self._paused_item = self._current_item   # replay this on resume
+                # cancel() bumps the speaker's epoch, so even an utterance still
+                # mid-synthesis aborts. The speak loop re-queues the interrupted
+                # item (it sees completed=False while paused), so we don't capture
+                # it here — which also avoids replaying an already-finished item.
                 self.speaker.cancel()
             return None
 
@@ -606,13 +607,10 @@ class SpeechDaemon:
             self._enqueue(session, e.kind, e.text, False, entry=e)
 
     def _resume(self) -> None:
-        """Clear pause and re-speak the interrupted utterance first, so play/pause
-        picks back up where it stopped."""
+        """Clear pause and wake the speak loop. The interrupted utterance was
+        already re-queued at the front by the speak loop when its speak() returned
+        not-completed during the pause, so resume picks back up where it stopped."""
         self._paused.clear()
-        item = self._paused_item
-        self._paused_item = None
-        if item is not None:
-            self.queue.enqueue_front(item)
         self._wake.set()
 
     def _dispatch_hotkey(self, message: dict) -> None:
@@ -647,26 +645,43 @@ class SpeechDaemon:
             self._wake.wait(self._poll_interval)
             self._wake.clear()
             return
-        item = self.queue.pop_next()
-        if item is not None:
-            if item.session in self._muted_sessions and not item.mute_exempt:
-                # Muted session: drop the item without speaking it.
-                self._pending_heard.pop(item.id, None)
-                return
-            with self._lock:
-                self._current_item = item
-            try:
-                completed = self.speaker.speak(item.text)
-            except Exception:  # noqa: BLE001 - one bad utterance must not abort the item
-                completed = False
-            self.note_spoken(item, completed)
-            return
+        # Pop and CLAIM the item atomically under the lock. PAUSE/MUTE/FLUSH run
+        # under this same lock, so popping + setting _current_item together means
+        # they always observe a consistent current item and can't slip into the
+        # gap between pop and claim (losing the item or failing to cancel it).
         with self._lock:
-            if self._voice_owner is not None and len(self.queue) == 0:
-                self._voice_owner = None
-        # nothing to say: wait until woken by an enqueue or until stop()
-        self._wake.wait(self._poll_interval)
-        self._wake.clear()
+            item = self.queue.pop_next()
+            self._current_item = item
+            muted = (item is not None
+                     and item.session in self._muted_sessions
+                     and not item.mute_exempt)
+            if muted:
+                # Muted session: drop without speaking; release the claim.
+                self._current_item = None
+                self._pending_heard.pop(item.id, None)
+        if item is None:
+            with self._lock:
+                if self._voice_owner is not None and len(self.queue) == 0:
+                    self._voice_owner = None
+            # nothing to say: wait until woken by an enqueue or until stop()
+            self._wake.wait(self._poll_interval)
+            self._wake.clear()
+            return
+        if muted:
+            return
+        try:
+            completed = self.speaker.speak(item.text)
+        except Exception:  # noqa: BLE001 - one bad utterance must not abort the item
+            completed = False
+        if not completed and self._paused.is_set():
+            # A pause interrupted this utterance: re-queue it at the front so
+            # resume picks back up here, and KEEP its _pending_heard entry (don't
+            # note_spoken) so the eventual replay can still record it as heard.
+            with self._lock:
+                self._current_item = None
+                self.queue.enqueue_front(item)
+        else:
+            self.note_spoken(item, completed)
 
     def _handle_conn(self, conn) -> None:
         try:

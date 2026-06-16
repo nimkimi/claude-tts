@@ -23,6 +23,7 @@ class Speaker:
         self._earcons = dict(earcons) if earcons else {}
         self._current = None
         self._current_lock = threading.Lock()
+        self._cancel_epoch = 0          # bumped by cancel(); closes the synth-gap race
         self._earcon_procs: list = []
         self._wait_timeout = _wait_timeout
 
@@ -32,9 +33,22 @@ class Speaker:
         caller can leave it marked unheard (sentence-granular replay)."""
         if self._say_runner is None:
             return False
+        # Capture the cancel epoch BEFORE synthesis. say_runner (TTS synthesis)
+        # can take tens-hundreds of ms, during which there is no proc to cancel —
+        # a cancel() arriving in that window used to be a silent no-op and the
+        # utterance played anyway. If the epoch advanced while we synthesized, a
+        # cancel landed: honor it by terminating immediately and reporting the
+        # utterance as NOT completed (so the caller leaves it unheard / replays).
+        with self._current_lock:
+            epoch = self._cancel_epoch
         proc = self._say_runner(text, self._voice, self._rate)
         with self._current_lock:
-            self._current = proc
+            interrupted = self._cancel_epoch != epoch
+            if not interrupted:
+                self._current = proc
+        if interrupted:
+            proc.terminate()
+            return False
         try:
             try:
                 proc.wait(timeout=self._wait_timeout)
@@ -49,6 +63,7 @@ class Speaker:
 
     def cancel(self) -> None:
         with self._current_lock:
+            self._cancel_epoch += 1     # so a speak() mid-synthesis aborts on return
             proc = self._current
         if proc is not None:
             proc.terminate()

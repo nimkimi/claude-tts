@@ -308,3 +308,24 @@ def test_speak_returns_false_when_say_terminated():
     from sonari.speaker import Speaker
     s = Speaker(say_runner=lambda text, voice, rate: _KilledProc())
     assert s.speak("Hello there.") is False
+
+
+def test_cancel_during_synthesis_aborts_before_play():
+    """Regression (#2/#9): a cancel() that lands while say_runner is still
+    synthesizing — when there is no proc to terminate yet — must still abort the
+    utterance: speak() returns False and the just-created proc is terminated, not
+    waited on / played."""
+    made = []
+    sp = None
+
+    def runner(text, voice, rate):
+        sp.cancel()                      # cancel lands mid-synthesis, before a proc exists
+        proc = FakePopen()
+        made.append(proc)
+        return proc
+
+    sp = Speaker(say_runner=runner)
+    completed = sp.speak("hello")
+    assert completed is False              # not completed -> caller replays / leaves unheard
+    assert made[0].terminate_calls == 1    # the new proc was terminated
+    assert made[0].wait_calls == 0         # never waited on / played
