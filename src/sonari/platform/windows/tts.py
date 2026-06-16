@@ -93,12 +93,15 @@ class WinTtsBackend(TtsBackend):
         from winrt.windows.media.speechsynthesis import SpeechSynthesizer
         return list(SpeechSynthesizer.all_voices)
 
-    def best_voice(self, lang_prefix: str = "en-US"):
+    def _best_voice_info(self, lang_prefix: str = "en-US"):
         """Select a VoiceInformation in priority order:
           1. en-US OneCore (Neural/HQ) — Id path contains 'Speech_OneCore'
           2. Any en-US voice
           3. System default_voice
         Raises RuntimeError if no voices are installed at all.
+
+        Internal: returns the WinRT object (assigned to synth.voice). The public
+        ABC method best_voice() returns its display NAME (str).
         """
         from winrt.windows.media.speechsynthesis import SpeechSynthesizer
         voices = self.list_voices()
@@ -120,6 +123,10 @@ class WinTtsBackend(TtsBackend):
                 return v
         return SpeechSynthesizer.default_voice
 
+    def best_voice(self, lang_prefix: str = "en-US") -> str:
+        """ABC contract: return the best installed voice's display NAME (str)."""
+        return self._best_voice_info(lang_prefix).display_name
+
     def _resolve_voice(self, name):
         """Resolve a Sonari config voice-NAME (or None) to a VoiceInformation.
 
@@ -133,7 +140,7 @@ class WinTtsBackend(TtsBackend):
             for v in self.list_voices():
                 if (v.display_name or "").lower() == str(name).lower():
                     return v
-        return self.best_voice()
+        return self._best_voice_info()
 
     def run(self, text: str, voice, rate: int):
         """Synthesize *text* and begin playback immediately.

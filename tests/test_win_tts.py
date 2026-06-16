@@ -13,10 +13,23 @@ import pytest
 from sonari.platform.windows.tts import WinTtsBackend, wpm_to_speaking_rate
 
 
-def test_list_and_best_voice():
+def test_list_voices():
     b = WinTtsBackend()
     assert isinstance(b.list_voices(), list) and b.list_voices()
-    assert "speech_onecore" in (b.best_voice().id or "").lower()
+
+
+def test_best_voice_returns_display_name_string():
+    # ABC contract: best_voice() -> str. Holds for both the macOS fake voice
+    # and a real OneCore voice on Windows (no hard-coded name).
+    b = WinTtsBackend()
+    v = b.best_voice()
+    assert isinstance(v, str) and v
+    assert v == b._best_voice_info().display_name
+
+
+def test_best_voice_info_returns_object_with_onecore_id():
+    info = WinTtsBackend()._best_voice_info()
+    assert "speech_onecore" in (info.id or "").lower()
 
 
 def test_run_completes_returns_zero():
