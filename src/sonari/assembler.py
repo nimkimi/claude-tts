@@ -13,12 +13,11 @@ _FENCE = "```"
 # a complete sentence ends at . ! or ? followed by whitespace or end-of-string
 _SENTENCE = re.compile(r"(.+?[.!?])(?:\s+|$)", flags=re.DOTALL)
 
-# A paragraph boundary = a blank line. We mark it with a private-use sentinel
-# BEFORE clean_markdown collapses whitespace (which would otherwise erase it),
-# then split on the sentinel after cleaning. feed() yields PARAGRAPH_BREAK between
+# A paragraph boundary = a blank line. We split the RAW buffer on this (before
+# clean_markdown collapses whitespace) so the boundary survives even when the
+# blank line straddles two streamed deltas. feed() yields PARAGRAPH_BREAK between
 # paragraphs so the daemon can group history by paragraph (the nav 'item' unit).
 _PARA = re.compile(r"\n[ \t]*\n")
-_SENTINEL = ""
 
 # Sentinel object emitted in the feed() output stream between paragraphs.
 PARAGRAPH_BREAK = object()
@@ -27,7 +26,8 @@ PARAGRAPH_BREAK = object()
 class ProseAssembler:
     def __init__(self) -> None:
         self._seen: set[int] = set()
-        self._buf = ""                 # pending prose text (outside fences)
+        self._buf = ""                 # pending prose text (RAW, outside fences)
+        self._emitted = 0              # chars of the CURRENT paragraph's CLEANED text already emitted
         self._pending = ""             # raw tail not yet split into a line/fence token
         self._in_fence = False
         self._fence_lang = ""
@@ -162,36 +162,52 @@ class ProseAssembler:
 
     def _split_sentences(self) -> list:
         """Emit complete sentences from _buf, with PARAGRAPH_BREAK markers between
-        paragraphs (blank-line boundaries). Keeps the trailing partial sentence."""
+        paragraphs (blank-line boundaries). Keeps the trailing partial sentence.
+
+        _buf is kept RAW (uncleaned). Cleaning collapses whitespace, so storing the
+        cleaned remainder used to erase the trailing newline of a blank line that
+        straddles two streamed deltas — the break was lost and the paragraphs
+        merged. Instead we split the RAW buffer on blank lines (preserving the
+        straddling newline for the next delta) and track how much of the current
+        paragraph's CLEANED text has already been emitted (_emitted), so re-cleaning
+        the growing raw buffer never re-emits or drops a sentence."""
         out: list = []
-        # Mark paragraph breaks BEFORE cleaning (the whitespace collapse would
-        # otherwise erase them), then split on the surviving sentinel.
-        cleaned = clean_markdown(_PARA.sub(_SENTINEL, self._buf))
-        if not cleaned:
-            self._buf = ""
-            return out
-        segments = cleaned.split(_SENTINEL)
-        for seg in segments[:-1]:                       # complete paragraphs
-            sents, _ = self._sentences_of(seg, keep_remainder=False)
+        raw_paragraphs = _PARA.split(self._buf)
+        # All but the last are COMPLETE paragraphs (each was followed by a blank line).
+        for raw_para in raw_paragraphs[:-1]:
+            cleaned = clean_markdown(raw_para)
+            start = min(self._emitted, len(cleaned))
+            sents, _ = self._sentences_of(cleaned[start:], keep_remainder=False)
             out.extend(sents)
             out.append(PARAGRAPH_BREAK)
-        # the last segment is the current, possibly-incomplete paragraph
-        sents, self._buf = self._sentences_of(segments[-1], keep_remainder=True)
+            self._emitted = 0                # paragraph done; the next one starts fresh
+        # The last raw paragraph is the current, possibly-incomplete one.
+        last_raw = raw_paragraphs[-1]
+        cleaned_last = clean_markdown(last_raw)
+        start = min(self._emitted, len(cleaned_last))
+        sents, remainder = self._sentences_of(cleaned_last[start:], keep_remainder=True)
         out.extend(sents)
+        self._emitted = len(cleaned_last) - len(remainder)
+        self._buf = last_raw                 # keep RAW so a straddling blank line survives
         return out
 
     def _flush_prose(self) -> list[str]:
         if not self._buf:
+            self._emitted = 0
             return []
         cleaned = clean_markdown(self._buf)
+        start = min(self._emitted, len(cleaned))
+        tail = cleaned[start:]               # only the not-yet-emitted remainder
         self._buf = ""
-        if len(cleaned) > 1:
-            return [cleaned]
+        self._emitted = 0
+        if len(tail) > 1:
+            return [tail]
         return []
 
     def _reset(self) -> None:
         self._seen = set()
         self._buf = ""
+        self._emitted = 0
         self._pending = ""
         self._in_fence = False
         self._fence_lang = ""
