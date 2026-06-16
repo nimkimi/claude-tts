@@ -23,6 +23,11 @@ _SINGLETON = None
 RATE_MIN = 100
 RATE_MAX = 400
 
+# Cap on concurrent connection-handler threads. Legitimate clients are short-lived
+# (one request each), so this bound is generous; it just stops a misbehaving or
+# hostile peer from leaking unbounded threads by opening many connections.
+_MAX_CONN_THREADS = 32
+
 
 class SpeechDaemon:
     def __init__(self, queue, speaker, sessions, config) -> None:
@@ -51,6 +56,7 @@ class SpeechDaemon:
         self._current_item = None                 # item being spoken right now
         self._warned_immediate: set = set()
         self._guided_sessions: set = set()
+        self._conn_sem = threading.BoundedSemaphore(_MAX_CONN_THREADS)
 
     def _alloc_id(self) -> int:
         self._next_id += 1
@@ -717,8 +723,7 @@ class SpeechDaemon:
                             msg = decode(line)
                         except (ValueError, UnicodeDecodeError):
                             continue
-                        with self._lock:
-                            reply = self.handle_message(msg)
+                        reply = self._handle_message_guarded(msg)
                         if reply is not None:
                             try:
                                 conn.sendall(encode(reply))
@@ -734,6 +739,44 @@ class SpeechDaemon:
         except OSError:
             return
 
+    def _handle_message_guarded(self, msg):
+        """Dispatch one socket message under the lock, contained so a malformed or
+        buggy message logs a traceback instead of silently killing the connection
+        thread (mirrors the _dispatch_hotkey guard). Returns the reply or None."""
+        try:
+            with self._lock:
+                return self.handle_message(msg)
+        except Exception:  # noqa: BLE001 - one bad message must not drop the connection
+            import sys
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            return None
+
+    def _handle_conn_guarded(self, conn) -> None:
+        """Run _handle_conn, contain any crash (log it, don't die silently), and
+        always release the concurrency permit so capacity recovers."""
+        try:
+            self._handle_conn(conn)
+        except Exception:  # noqa: BLE001 - a handler crash must be logged, not silent
+            import sys
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+        finally:
+            self._conn_sem.release()
+
+    def _spawn_conn_handler(self, conn) -> bool:
+        """Spawn a handler thread for *conn* if under the concurrency cap; else
+        drop (close) the connection. Returns True iff a handler was spawned."""
+        if not self._conn_sem.acquire(blocking=False):
+            try:
+                conn.close()
+            except OSError:
+                pass
+            return False
+        th = threading.Thread(target=self._handle_conn_guarded, args=(conn,), daemon=True)
+        th.start()
+        return True
+
     def _accept_loop(self) -> None:
         srv = self._server
         while self._running.is_set():
@@ -741,8 +784,7 @@ class SpeechDaemon:
                 conn, _ = srv.accept()
             except OSError:
                 return
-            th = threading.Thread(target=self._handle_conn, args=(conn,), daemon=True)
-            th.start()
+            self._spawn_conn_handler(conn)
 
     def run(self) -> None:
         ensure_sonari_dir()
