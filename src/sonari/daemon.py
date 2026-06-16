@@ -481,12 +481,37 @@ class SpeechDaemon:
     def stop(self) -> None:
         self._running.clear()
         self._wake.set()
+        self._stop_hotkeys()
         srv = self._server
         if srv is not None:
             try:
                 srv.close()
             except OSError:
                 pass
+
+    def _start_hotkeys(self) -> None:
+        """Start the platform's global-hotkey listener. On Windows this spawns an
+        in-process RegisterHotKey thread; on macOS it is a no-op (the hotkeyd is a
+        separate process)."""
+        from sonari.platform import get_platform
+        try:
+            get_platform().hotkey.start(self._dispatch_hotkey)
+        except Exception:  # noqa: BLE001 - hotkeys are non-essential; speech must run
+            pass
+
+    def _stop_hotkeys(self) -> None:
+        from sonari.platform import get_platform
+        try:
+            get_platform().hotkey.stop()
+        except Exception:  # noqa: BLE001 - shutdown must not raise
+            pass
+
+    def _dispatch_hotkey(self, message: dict) -> None:
+        """A hotkey fire is handled exactly like an inbound socket message."""
+        try:
+            self.handle_message(message)
+        except Exception:  # noqa: BLE001 - one bad hotkey must not kill the pump
+            pass
 
     def _speak_loop(self) -> None:
         self._running.set()
@@ -582,6 +607,7 @@ class SpeechDaemon:
         self._threads = [speak_thread, accept_thread]
         speak_thread.start()
         accept_thread.start()
+        self._start_hotkeys()
 
         try:
             while self._running.is_set():

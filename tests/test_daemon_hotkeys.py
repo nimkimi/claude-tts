@@ -1,0 +1,56 @@
+"""The daemon owns the in-process hotkey thread: run() starts it, stop() stops it,
+and a fire is routed through the same handle_message() as a socket command."""
+from tests.daemon_helpers import make_daemon
+
+
+class _FakeHotkey:
+    def __init__(self):
+        self.started = None
+        self.stopped = False
+
+    def start(self, dispatch):
+        self.started = dispatch
+
+    def stop(self):
+        self.stopped = True
+
+
+class _FakePlatform:
+    def __init__(self):
+        self.hotkey = _FakeHotkey()
+
+
+def test_start_hotkeys_passes_a_dispatch_callback(monkeypatch):
+    pb = _FakePlatform()
+    monkeypatch.setattr("sonari.platform.get_platform", lambda: pb)
+    daemon = make_daemon()[0]
+    daemon._start_hotkeys()
+    assert callable(pb.hotkey.started)
+
+
+def test_dispatch_routes_through_handle_message(monkeypatch):
+    pb = _FakePlatform()
+    monkeypatch.setattr("sonari.platform.get_platform", lambda: pb)
+    daemon = make_daemon()[0]
+    daemon._start_hotkeys()
+    handled = []
+    monkeypatch.setattr(daemon, "handle_message", lambda m: handled.append(m))
+    pb.hotkey.started({"type": "skip"})       # simulate a hotkey fire
+    assert handled == [{"type": "skip"}]
+
+
+def test_stop_stops_the_hotkey_listener(monkeypatch):
+    pb = _FakePlatform()
+    monkeypatch.setattr("sonari.platform.get_platform", lambda: pb)
+    daemon = make_daemon()[0]
+    daemon._stop_hotkeys()
+    assert pb.hotkey.stopped is True
+
+
+def test_one_bad_hotkey_does_not_raise(monkeypatch):
+    pb = _FakePlatform()
+    monkeypatch.setattr("sonari.platform.get_platform", lambda: pb)
+    daemon = make_daemon()[0]
+    monkeypatch.setattr(daemon, "handle_message",
+                        lambda m: (_ for _ in ()).throw(RuntimeError("boom")))
+    daemon._dispatch_hotkey({"type": "stop"})   # swallowed, no raise
