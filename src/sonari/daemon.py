@@ -310,6 +310,8 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.EARCON:
+            # Instant: the Windows earcon backend plays on a separate audio path
+            # that mixes with the speech, so it no longer cuts the reading.
             self.speaker.earcon(msg.get("kind", ""))
             return None
 
