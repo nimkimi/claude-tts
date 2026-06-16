@@ -51,8 +51,9 @@ def test_next_clamps_at_last_no_wrap():
     _nav(daemon, "next"); assert [s.text for s in _drain(queue)] == ["m1"]
     _nav(daemon, "next"); assert [s.text for s in _drain(queue)] == ["m2"]
     _nav(daemon, "next")                                       # at last -> re-read m2
-    assert [s.text for s in _drain(queue)] == ["m2"]
-    assert daemon._nav_cursor["fg"] == 2                        # never wrapped to 0
+    assert [s.text for s in _drain(queue)] == ["m2"]           # never wrapped to 0
+    # reaching the latest clears the cursor: "following live" again, not pinned
+    assert daemon._nav_cursor.get("fg") is None
 
 
 def test_first_and_last_jump():
@@ -79,6 +80,29 @@ def test_streaming_content_does_not_move_the_cursor_but_flush_resets_it():
     # a new prompt clears navigation
     daemon.handle_message({"type": "flush", "session": "fg"})
     assert "fg" not in daemon._nav_cursor
+
+
+def test_live_prose_suppressed_while_reading_past_then_resumes_at_last():
+    # #4: while parked on an earlier message, live prose is recorded but NOT
+    # enqueued (no interleaving with the replay); returning to the latest clears
+    # the cursor so subsequent live prose is spoken again.
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    _seed(daemon)                                   # m0, m1, m2
+    _drain(queue)
+    _nav(daemon, "first"); _drain(queue)            # park on m0 (a past message)
+    assert daemon._nav_cursor.get("fg") is not None
+    # live prose streams in -> recorded to history, but not queued
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "Live paragraph.\n\n", "index": 7, "final": False})
+    assert len(queue) == 0
+    assert any("Live paragraph" in e.text for e in daemon.history.unheard("fg"))
+    # return to the latest -> cursor clears (follow live)
+    _nav(daemon, "last"); _drain(queue)
+    assert daemon._nav_cursor.get("fg") is None
+    # subsequent live prose is spoken again
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "Another live one.\n\n", "index": 8, "final": False})
+    assert any("Another live one" in s.text for s in _drain(queue))
 
 
 def test_nav_with_empty_history_announces():
