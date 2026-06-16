@@ -256,10 +256,6 @@ class SpeechDaemon:
             if chunks:
                 from sonari.assembler import PARAGRAPH_BREAK
                 speak = verbosity != "quiet" and self._may_speak(session)
-                # While the user is navigating earlier messages, record live prose
-                # to history (so it's navigable / catch-up-able) but don't enqueue
-                # it — speaking it now would interleave with the replay (#4).
-                reading_past = self._reading_past(session)
                 for chunk in chunks:
                     if chunk is PARAGRAPH_BREAK:
                         # A blank-line boundary: start a new message group so the
@@ -267,9 +263,9 @@ class SpeechDaemon:
                         self.history.end_message(session)
                         continue
                     entry = self.history.record(session, "prose", chunk)
-                    if speak and not reading_past:
+                    if speak:
                         self._enqueue(session, "prose", chunk, False, entry=entry)
-                    elif not speak:
+                    else:
                         self._captured_msg.add(session)
             if msg.get("final", False):
                 self.history.end_message(session)
@@ -586,14 +582,16 @@ class SpeechDaemon:
             pass
 
     def _nav(self, session: str, to: str) -> None:
-        """Move the per-session message cursor and replay the target message.
+        """Move the per-session message cursor and play from there to the end.
 
         The cursor indexes the current turn's messages (history resets each
         prompt), oldest..newest; absent == the latest. 'next'/'prev' step one
         message and CLAMP at the ends (no wrap; at the newest, 'next' just
         re-reads it); 'first'/'last' jump to the start/end of the turn. Every
         move cuts current speech, clears the queue, and reads the target message
-        from its start."""
+        AND every later one (seek-and-play) so playback continues instead of
+        stopping after a single item. Newly streamed prose enqueues after these
+        and continues seamlessly."""
         ids = self.history.message_ids(session)
         if not ids:
             self._enqueue(session, "prose", "Nothing to navigate yet.", False)
@@ -615,24 +613,20 @@ class SpeechDaemon:
         else:
             return
         if new >= n - 1:
-            # Reached the latest message: resume following live (an absent cursor
-            # means "the latest"), so newly streamed prose is spoken again instead
-            # of being suppressed as replay-of-the-past.
+            # Reached the latest message: clear the cursor so it tracks the live
+            # edge again (absent == latest), and so a following 'prev' steps back
+            # from the newest rather than a stale anchor.
             self._nav_cursor.pop(session, None)
         else:
             self._nav_cursor[session] = ids[new]   # parked on a past message
-        entries = self.history.entries_for_message(session, ids[new])
         self.speaker.cancel()
         self._drop_pending(self.queue.flush_session(session))
-        for e in entries:
-            self._enqueue(session, e.kind, e.text, False, entry=e)
-
-    def _reading_past(self, session: str) -> bool:
-        """True when the nav cursor is parked on an earlier message — the user is
-        replaying history, so live prose is recorded but not spoken now, to avoid
-        interleaving the replay with newly streamed deltas (#4). Cleared when nav
-        returns to the latest message or on FLUSH."""
-        return self._nav_cursor.get(session) is not None
+        # Seek-and-play: enqueue the target item AND every later item, so nav reads
+        # from here forward (not just one item). Newly streamed prose enqueues after
+        # these and continues seamlessly — no jump from the replay into a live delta.
+        for mid in ids[new:]:
+            for e in self.history.entries_for_message(session, mid):
+                self._enqueue(session, e.kind, e.text, False, entry=e)
 
     def _resume(self) -> None:
         """Clear pause and wake the speak loop. The interrupted utterance was
