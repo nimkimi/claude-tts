@@ -1,0 +1,17 @@
+from sonari.platform.windows import keytables as wk
+
+
+def test_vk_codes_for_default_action_keys():
+    # Virtual-Key codes (Win32): letters are their ASCII uppercase ordinals.
+    assert wk.KEY_CODES["s"] == 0x53 and wk.KEY_CODES["o"] == 0x4F
+    assert wk.KEY_CODES["."] == 0xBE          # VK_OEM_PERIOD
+    assert wk.KEY_CODES["]"] == 0xDD and wk.KEY_CODES["["] == 0xDB
+
+
+def test_mod_masks_are_registerhotkey_fsmodifiers():
+    assert wk.MOD_MASKS["alt"] == 0x0001 and wk.MOD_MASKS["ctrl"] == 0x0002
+    assert wk.MOD_MASKS["shift"] == 0x0004 and wk.MOD_MASKS["win"] == 0x0008
+
+
+def test_default_mods_is_ctrl_shift_alt():
+    assert wk.DEFAULT_MODS == ["ctrl", "shift", "alt"]

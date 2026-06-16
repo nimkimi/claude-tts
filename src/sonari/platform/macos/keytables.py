@@ -13,3 +13,6 @@ MOD_MASKS = {
     "opt": 2048, "option": 2048,
     "ctrl": 4096, "control": 4096,
 }
+
+# Default chord on macOS (Ctrl+Cmd, avoids VoiceOver's Ctrl+Opt).
+DEFAULT_MODS = ["ctrl", "cmd"]
