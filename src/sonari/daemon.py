@@ -495,7 +495,10 @@ class SpeechDaemon:
             if item is not None:
                 with self._lock:
                     self._current_item = item
-                completed = self.speaker.speak(item.text)
+                try:
+                    completed = self.speaker.speak(item.text)
+                except Exception:  # noqa: BLE001 - one bad utterance must not kill the speak thread
+                    completed = False
                 self.note_spoken(item, completed)
                 continue
             with self._lock:
