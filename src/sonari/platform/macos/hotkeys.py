@@ -24,6 +24,7 @@ _KEY_DISPLAY_BY_NAME = {
     "period": ".", ".": ".",
     "rightbracket": "]", "]": "]",
     "leftbracket": "[", "[": "[",
+    "left": "Left", "right": "Right", "up": "Up", "down": "Down",
 }
 
 # Canonical display label + ordering for each canonical modifier name.
