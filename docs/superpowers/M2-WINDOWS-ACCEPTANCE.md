@@ -400,3 +400,44 @@ If no arm64 wheel is found, document this as a known gap. Fallback: use the Wind
 | Residual: NVDA pass | | | | |
 | Residual: uninstall path | | | | |
 | Residual: upgrade path | | | | |
+
+---
+
+## 10. Install seam (2026-06-16) — `sonari install` writes settings.json hooks + launcher
+
+> Added when `cli.install/uninstall/doctor` were wired through the platform seam
+> (`docs/superpowers/specs/2026-06-16-windows-install-seam-design.md`). These verify the
+> Windows install path produces NO macOS artifacts and the hooks land in user settings.
+
+### 10a. Install writes exec-form hooks to user settings.json
+
+```powershell
+sonari install
+```
+
+Confirm:
+- Output mentions "Registered Task Scheduler task", "Wrote Sonari hooks to: …\.claude\settings.json", "Placed launcher", and a real voice **name** (not a `<winrt…VoiceInformation object>` repr).
+- **No** macOS output (`LaunchAgent`, `launchctl`, `swiftc`, `xcode-select`, `~/.local/bin/sonari` bash wrapper).
+- `%USERPROFILE%\.claude\settings.json` now contains a `hooks` block whose entries are exec-form: `"command"` = the resolved `pythonw.exe` (absolute), `"args"` = `["…\bin\sonari-hook", "MessageDisplay"]` (and the other events). Any pre-existing keys/hooks in that file are preserved.
+- `install.json` records a **real** `pythonw.exe` (not `…\WindowsApps\python3.exe`, the Store stub).
+- `%USERPROFILE%\.local\bin\sonari.cmd` exists and `sonari doctor` runs through it.
+
+### 10b. Double-fire constraint (do NOT also enable the plugin's shell-form hooks)
+
+The plugin's committed `hooks/hooks.json` is **shell-form** (macOS-only); on Windows it cannot spawn the Python hook. Because Claude Code **merges** plugin-manifest hooks with settings.json hooks, enabling both would fire every event twice. On Windows, Sonari's hooks must come from `settings.json` **only** — do not also enable the plugin's manifest hooks.
+
+### 10c. Uninstall reverses only Sonari's changes
+
+```powershell
+sonari uninstall
+```
+
+Confirm:
+- The Task Scheduler task is gone (`schtasks /query /tn Sonari.Speechd` → not found).
+- **Only** Sonari's hook entries are removed from `settings.json` (any non-Sonari hooks and other keys survive).
+- `%USERPROFILE%\.local\bin\sonari.cmd` is removed.
+- `config.json` and `keymap.json` are preserved.
+
+### 10d. `sonari doctor` shows Windows rows
+
+`sonari doctor` reports the Windows supervisor rows (schtasks, Task Scheduler task, pythonw.exe, neural voice, daemon running) and a "hooks installed" row that reflects whether `settings.json` carries Sonari's hooks — no macOS rows (`say`/`afplay`/`swiftc`/`LaunchAgent`).
