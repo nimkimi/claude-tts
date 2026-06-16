@@ -519,6 +519,26 @@ def merge_hooks_into_settings(settings_path: str, pythonw: str, hook_py: str) ->
 
 
 # ---------------------------------------------------------------------------
+# Windows launcher (the ~/.local/bin/sonari analogue: a sonari.cmd shim)
+# ---------------------------------------------------------------------------
+
+def _local_bin_dir() -> str:
+    return os.path.join(os.path.expanduser("~"), ".local", "bin")
+
+
+def _console_python(pythonw: str) -> str:
+    """python.exe sibling of pythonw.exe (console interpreter, for the CLI launcher)."""
+    cand = pythonw.replace("pythonw.exe", "python.exe")
+    return cand if os.path.isfile(cand) else pythonw
+
+
+def _hook_py() -> str:
+    """Absolute path to the plugin's bin/sonari-hook (pure-Python hook entry)."""
+    from sonari import paths
+    return os.path.join(paths.repo_root(), "bin", "sonari-hook")
+
+
+# ---------------------------------------------------------------------------
 # WinSupervisorBackend — the SupervisorBackend ABC implementation
 # ---------------------------------------------------------------------------
 
@@ -649,12 +669,48 @@ class WinSupervisorBackend(SupervisorBackend):
         return rows
 
     def install(self, python: str, app_dir: str) -> None:
+        # 1. Task Scheduler autostart (pythonw runs the supervisor loop).
         supervisor_py = os.path.join(app_dir, "sonari", "platform",
                                      "windows", "supervisor_loop.py")
-        task_install(python, supervisor_py)
+        rc = task_install(python, supervisor_py)
+        if rc == 0:
+            print("Registered Task Scheduler task: {0}".format(TASK_NAME))
+        else:
+            print("warning: schtasks /create returned {0}; autostart may not be "
+                  "registered.".format(rc))
+        # 2. Exec-form hooks merged into the user's Claude settings.json.
+        settings = claude_settings_path()
+        merge_hooks_into_settings(settings, python, _hook_py())
+        print("Wrote Sonari hooks to: {0}".format(settings))
+        # 3. sonari.cmd launcher on ~/.local/bin.
+        launcher = self._place_launcher(python, app_dir)
+        print("Placed launcher: {0}".format(launcher))
+
+    def _place_launcher(self, python: str, app_dir: str) -> str:
+        path = os.path.join(_local_bin_dir(), "sonari.cmd")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        body = (
+            "@echo off\r\n"
+            'set "PYTHONPATH={app}"\r\n'
+            '"{py}" -m sonari.cli %*\r\n'
+        ).format(app=app_dir, py=_console_python(python))
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(body)
+        return path
 
     def uninstall(self) -> None:
-        task_uninstall()
+        rc = task_uninstall()
+        print("Removed Task Scheduler task: {0}".format(TASK_NAME) if rc == 0
+              else "No Task Scheduler task to remove.")
+        remove_hooks_from_settings(claude_settings_path(), _hook_py())
+        print("Removed Sonari hooks from: {0}".format(claude_settings_path()))
+        launcher = os.path.join(_local_bin_dir(), "sonari.cmd")
+        if os.path.exists(launcher):
+            try:
+                os.remove(launcher)
+                print("Removed launcher: {0}".format(launcher))
+            except OSError:
+                pass
 
     def post_install_notes(self) -> None:
         """Print the Windows post-install next steps."""

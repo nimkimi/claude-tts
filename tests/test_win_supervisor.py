@@ -139,3 +139,33 @@ def test_hooks_doctor_row_windows_absent(monkeypatch, tmp_path):
                         lambda: str(tmp_path / "settings.json"))
     name, ok, _ = sup.WinSupervisorBackend().hooks_doctor_row()
     assert name == "hooks installed" and ok is False   # no settings yet
+
+
+def test_install_registers_task_merges_hooks_and_places_launcher(tmp_path, monkeypatch):
+    from sonari.platform.windows import supervisor as sup
+    calls = []
+    monkeypatch.setattr(sup, "task_install", lambda pw, spy: calls.append(("task", pw)) or 0)
+    monkeypatch.setattr(sup, "claude_settings_path",
+                        lambda: str(tmp_path / "settings.json"))
+    monkeypatch.setattr(sup, "_local_bin_dir", lambda: str(tmp_path / "bin"))
+    monkeypatch.setattr("sonari.paths.repo_root", lambda: str(tmp_path / "plug"))
+    s = sup.WinSupervisorBackend()
+    s.install(r"C:\Py\pythonw.exe", str(tmp_path / "app"))
+    assert ("task", r"C:\Py\pythonw.exe") in calls
+    assert sup.settings_has_sonari_hooks(str(tmp_path / "settings.json"))
+    assert (tmp_path / "bin" / "sonari.cmd").exists()
+
+
+def test_uninstall_removes_task_hooks_and_launcher(tmp_path, monkeypatch):
+    from sonari.platform.windows import supervisor as sup
+    monkeypatch.setattr(sup, "task_install", lambda pw, spy: 0)
+    monkeypatch.setattr(sup, "task_uninstall", lambda: 0)
+    monkeypatch.setattr(sup, "claude_settings_path",
+                        lambda: str(tmp_path / "settings.json"))
+    monkeypatch.setattr(sup, "_local_bin_dir", lambda: str(tmp_path / "bin"))
+    monkeypatch.setattr("sonari.paths.repo_root", lambda: str(tmp_path / "plug"))
+    s = sup.WinSupervisorBackend()
+    s.install(r"C:\Py\pythonw.exe", str(tmp_path / "app"))
+    s.uninstall()
+    assert not sup.settings_has_sonari_hooks(str(tmp_path / "settings.json"))
+    assert not (tmp_path / "bin" / "sonari.cmd").exists()
