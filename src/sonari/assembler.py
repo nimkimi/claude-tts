@@ -13,6 +13,16 @@ _FENCE = "```"
 # a complete sentence ends at . ! or ? followed by whitespace or end-of-string
 _SENTENCE = re.compile(r"(.+?[.!?])(?:\s+|$)", flags=re.DOTALL)
 
+# A paragraph boundary = a blank line. We mark it with a private-use sentinel
+# BEFORE clean_markdown collapses whitespace (which would otherwise erase it),
+# then split on the sentinel after cleaning. feed() yields PARAGRAPH_BREAK between
+# paragraphs so the daemon can group history by paragraph (the nav 'item' unit).
+_PARA = re.compile(r"\n[ \t]*\n")
+_SENTINEL = ""
+
+# Sentinel object emitted in the feed() output stream between paragraphs.
+PARAGRAPH_BREAK = object()
+
 
 class ProseAssembler:
     def __init__(self) -> None:
@@ -131,22 +141,43 @@ class ProseAssembler:
             return f"{n}-line {lang} code block"
         return f"{n}-line code block"
 
-    def _split_sentences(self) -> list[str]:
-        """Emit complete sentences from _buf, keeping the trailing partial."""
-        out: list[str] = []
-        cleaned = clean_markdown(self._buf)
-        if not cleaned:
-            self._buf = ""
-            return out
+    def _sentences_of(self, text: str, keep_remainder: bool):
+        """Split *text* into sentences. Return (sentences, remainder). When
+        keep_remainder is False the trailing fragment is emitted too (a complete
+        paragraph) and remainder is ''."""
+        out: list = []
         last_end = 0
-        for m in _SENTENCE.finditer(cleaned):
+        for m in _SENTENCE.finditer(text):
             sentence = m.group(1).strip()
             if len(sentence) > 1:
                 out.append(sentence)
             last_end = m.end()
-        remainder = cleaned[last_end:]
-        # keep the (cleaned) remainder as the buffer; a trailing space means done
-        self._buf = remainder
+        remainder = text[last_end:]
+        if not keep_remainder:
+            tail = remainder.strip()
+            if len(tail) > 1:
+                out.append(tail)
+            remainder = ""
+        return out, remainder
+
+    def _split_sentences(self) -> list:
+        """Emit complete sentences from _buf, with PARAGRAPH_BREAK markers between
+        paragraphs (blank-line boundaries). Keeps the trailing partial sentence."""
+        out: list = []
+        # Mark paragraph breaks BEFORE cleaning (the whitespace collapse would
+        # otherwise erase them), then split on the surviving sentinel.
+        cleaned = clean_markdown(_PARA.sub(_SENTINEL, self._buf))
+        if not cleaned:
+            self._buf = ""
+            return out
+        segments = cleaned.split(_SENTINEL)
+        for seg in segments[:-1]:                       # complete paragraphs
+            sents, _ = self._sentences_of(seg, keep_remainder=False)
+            out.extend(sents)
+            out.append(PARAGRAPH_BREAK)
+        # the last segment is the current, possibly-incomplete paragraph
+        sents, self._buf = self._sentences_of(segments[-1], keep_remainder=True)
+        out.extend(sents)
         return out
 
     def _flush_prose(self) -> list[str]:

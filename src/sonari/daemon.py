@@ -249,8 +249,14 @@ class SpeechDaemon:
             a = self._assembler(session)
             chunks = a.feed(msg.get("delta", ""), msg.get("index", 0), msg.get("final", False))
             if chunks:
+                from sonari.assembler import PARAGRAPH_BREAK
                 speak = verbosity != "quiet" and self._may_speak(session)
                 for chunk in chunks:
+                    if chunk is PARAGRAPH_BREAK:
+                        # A blank-line boundary: start a new message group so the
+                        # nav cursor treats each paragraph as its own 'item'.
+                        self.history.end_message(session)
+                        continue
                     entry = self.history.record(session, "prose", chunk)
                     if speak:
                         self._enqueue(session, "prose", chunk, False, entry=entry)

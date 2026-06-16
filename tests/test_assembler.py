@@ -87,3 +87,26 @@ def test_fence_spanning_multiple_feed_calls_emits_n_line_summary():
     # Delta 4: closing fence — summary must fire here
     out4 = a.feed("```", 4, True)
     assert out4 == ["3-line python code block"]
+
+
+def test_paragraph_break_emitted_between_paragraphs():
+    from sonari.assembler import ProseAssembler, PARAGRAPH_BREAK
+    a = ProseAssembler()
+    out = a.feed("First paragraph here.\n\nSecond paragraph here.", 0, True)
+    assert "First paragraph here." in out and "Second paragraph here." in out
+    assert PARAGRAPH_BREAK in out
+    assert out.index("First paragraph here.") < out.index(PARAGRAPH_BREAK) < out.index("Second paragraph here.")
+
+
+def test_no_paragraph_break_within_one_paragraph():
+    from sonari.assembler import ProseAssembler, PARAGRAPH_BREAK
+    a = ProseAssembler()
+    out = a.feed("One sentence. Two sentences. Still one paragraph.", 0, True)
+    assert PARAGRAPH_BREAK not in out
+
+
+def test_three_paragraphs_two_breaks():
+    from sonari.assembler import ProseAssembler, PARAGRAPH_BREAK
+    a = ProseAssembler()
+    out = a.feed("Para one.\n\nPara two.\n\nPara three.", 0, True)
+    assert out.count(PARAGRAPH_BREAK) == 2

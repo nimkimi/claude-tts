@@ -78,3 +78,20 @@ def test_nav_with_empty_history_announces():
     daemon, queue, *_ = make_daemon(foreground="fg")
     _nav(daemon, "prev")
     assert any("Nothing to navigate" in s.text for s in _drain(queue))
+
+
+def test_nav_steps_by_paragraph_within_one_message():
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    daemon.handle_message({
+        "type": "prose", "session": "fg",
+        "delta": "Para one sentence.\n\nPara two sentence.\n\nPara three sentence.",
+        "index": 0, "final": True})
+    _drain(queue)                                   # clear the spoken queue
+    # the one message became three paragraph 'items'
+    assert len(daemon.history.message_ids("fg")) == 3
+    _nav(daemon, "prev")                            # latest(para3) -> para2
+    assert [s.text for s in _drain(queue)] == ["Para two sentence."]
+    _nav(daemon, "first")                           # -> para1
+    assert [s.text for s in _drain(queue)] == ["Para one sentence."]
+    _nav(daemon, "last")                            # -> para3
+    assert [s.text for s in _drain(queue)] == ["Para three sentence."]
