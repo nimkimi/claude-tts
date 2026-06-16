@@ -15,3 +15,10 @@ def test_mod_masks_are_registerhotkey_fsmodifiers():
 
 def test_default_mods_is_ctrl_shift_alt():
     assert wk.DEFAULT_MODS == ["ctrl", "shift", "alt"]
+
+
+def test_arrow_key_vk_codes():
+    assert wk.KEY_CODES["left"] == 0x25 and wk.KEY_CODES["up"] == 0x26
+    assert wk.KEY_CODES["right"] == 0x27 and wk.KEY_CODES["down"] == 0x28
+    # aliases resolve to the same codes
+    assert wk.KEY_CODES["rightarrow"] == wk.KEY_CODES["right"]

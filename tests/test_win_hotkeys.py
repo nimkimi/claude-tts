@@ -83,3 +83,11 @@ def test_display_combo_labels():
     hk = WinHotkeyBackend()
     assert hk.display_combo(0x0002 | 0x0004 | 0x0001, 0x4F) == "Ctrl+Shift+Alt+O"
     assert hk.display_combo(0x0002, 0x53) == "Ctrl+S"
+
+
+def test_display_combo_arrow_labels():
+    hk = WinHotkeyBackend()
+    assert hk.display_combo(0x0001, 0x27) == "Alt+Right"
+    assert hk.display_combo(0x0001, 0x25) == "Alt+Left"
+    assert hk.display_combo(0x0001, 0x26) == "Alt+Up"
+    assert hk.display_combo(0x0001, 0x28) == "Alt+Down"

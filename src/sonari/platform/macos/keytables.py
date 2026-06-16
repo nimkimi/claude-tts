@@ -6,6 +6,11 @@ KEY_CODES = {
     "period": 47, ".": 47,
     "rightbracket": 30, "]": 30,
     "leftbracket": 33, "[": 33,
+    # Arrow keys (Carbon virtual key codes), with aliases.
+    "left": 123, "leftarrow": 123,
+    "right": 124, "rightarrow": 124,
+    "down": 125, "downarrow": 125,
+    "up": 126, "uparrow": 126,
 }
 
 MOD_MASKS = {

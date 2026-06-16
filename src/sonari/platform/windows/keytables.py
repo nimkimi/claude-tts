@@ -7,6 +7,11 @@ KEY_CODES = {
     "period": 0xBE, ".": 0xBE,        # VK_OEM_PERIOD
     "rightbracket": 0xDD, "]": 0xDD,  # VK_OEM_6
     "leftbracket": 0xDB, "[": 0xDB,   # VK_OEM_4
+    # Arrow keys (VK_LEFT/UP/RIGHT/DOWN), with aliases.
+    "left": 0x25, "leftarrow": 0x25,
+    "up": 0x26, "uparrow": 0x26,
+    "right": 0x27, "rightarrow": 0x27,
+    "down": 0x28, "downarrow": 0x28,
 }
 
 # RegisterHotKey fsModifiers (WinUser.h). NOT the Carbon masks.
