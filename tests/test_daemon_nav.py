@@ -64,13 +64,20 @@ def test_first_and_last_jump():
     assert [s.text for s in _drain(queue)] == ["m2"]
 
 
-def test_new_content_resets_cursor_to_latest():
+def test_streaming_content_does_not_move_the_cursor_but_flush_resets_it():
+    # The streaming-nav bug fix: new paragraphs arriving while you navigate must
+    # NOT yank the cursor to latest; only a new prompt (FLUSH) clears it.
     daemon, queue, *_ = make_daemon(foreground="fg")
     _seed(daemon)
     _nav(daemon, "prev")
-    assert daemon._nav_cursor.get("fg") == 1
+    anchored = daemon._nav_cursor.get("fg")
+    assert anchored is not None
+    # more content streams in -> cursor stays put
     daemon.handle_message({"type": "prose", "session": "fg",
-                           "delta": "new", "index": 0, "final": True})
+                           "delta": "More streamed text.", "index": 9, "final": False})
+    assert daemon._nav_cursor.get("fg") == anchored
+    # a new prompt clears navigation
+    daemon.handle_message({"type": "flush", "session": "fg"})
     assert "fg" not in daemon._nav_cursor
 
 

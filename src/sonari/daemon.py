@@ -241,10 +241,6 @@ class SpeechDaemon:
         session = msg.get("session", "")
         verbosity = self.config.get("verbosity", "everything")
 
-        # New content snaps the navigation cursor back to the latest message.
-        if t in (MsgType.PROSE, MsgType.CHOICE, MsgType.PLAN, MsgType.PERMISSION):
-            self._nav_cursor.pop(session, None)
-
         if t == MsgType.PROSE:
             a = self._assembler(session)
             chunks = a.feed(msg.get("delta", ""), msg.get("index", 0), msg.get("final", False))
@@ -333,6 +329,7 @@ class SpeechDaemon:
                 self._voice_owner = None
             self._assemblers.pop(session, None)
             self.history.reset(session)
+            self._nav_cursor.pop(session, None)   # new prompt -> fresh navigation
             self._captured_msg.discard(session)
             self._options.pop(session, None)
             return None
@@ -546,10 +543,11 @@ class SpeechDaemon:
             self._enqueue(session, "prose", "Nothing to navigate yet.", False)
             return
         n = len(ids)
-        cur = self._nav_cursor.get(session)
-        if cur is None:
-            cur = n - 1                       # default: the latest message
-        cur = max(0, min(cur, n - 1))
+        # Anchor on a STABLE message id, not a position: new paragraphs streaming
+        # in append ids without shifting where the cursor points. Unset/stale ->
+        # the latest. The cursor only clears on a new prompt (FLUSH).
+        cur_id = self._nav_cursor.get(session)
+        cur = ids.index(cur_id) if cur_id in ids else n - 1
         if to == "next":
             new = min(cur + 1, n - 1)
         elif to == "prev":
@@ -560,7 +558,7 @@ class SpeechDaemon:
             new = n - 1
         else:
             return
-        self._nav_cursor[session] = new
+        self._nav_cursor[session] = ids[new]   # store the stable id
         entries = self.history.entries_for_message(session, ids[new])
         self.speaker.cancel()
         self._drop_pending(self.queue.flush_session(session))
