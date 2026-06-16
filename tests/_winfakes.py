@@ -61,7 +61,21 @@ def _install_winrt():
     class SpeechPunctuationSilence: DEFAULT = 0; MIN = 1
     class _Opts:
         appended_silence = 0; punctuation_silence = 0; speaking_rate = 1.0
-    class _Stream: pass
+
+    # A real tiny WAV (1ch, 8kHz, ~0.01s of silence) so the production code's
+    # synth -> bytes -> winsound path + WAV-duration math run for real on fakes.
+    import io as _io, wave as _wave
+    _wbuf = _io.BytesIO()
+    with _wave.open(_wbuf, "w") as _w:
+        _w.setnchannels(1); _w.setsampwidth(2); _w.setframerate(8000)
+        _w.writeframes(b"\x00\x00" * 80)
+    _WAV = _wbuf.getvalue()
+
+    class _InputStream:
+        def __init__(self, data): self._data = data
+    class _Stream:
+        size = len(_WAV)
+        def get_input_stream_at(self, pos): return _InputStream(_WAV)
     class _AsyncOp:
         def __init__(self, r): self._r = r
         def get(self): return self._r
@@ -85,6 +99,15 @@ def _install_winrt():
     synth.SpeechSynthesizer = SpeechSynthesizer
     synth.SpeechAppendedSilence = SpeechAppendedSilence
     synth.SpeechPunctuationSilence = SpeechPunctuationSilence
+
+    # --- winrt.windows.storage.streams.DataReader (synth bytes -> buffer) ---
+    mk("winrt.windows.storage"); streams = mk("winrt.windows.storage.streams")
+    class DataReader:
+        def __init__(self, input_stream): self._data = input_stream._data
+        def load_async(self, n): return _AsyncOp(n)
+        def read_bytes(self, buf):
+            buf[:] = self._data[:len(buf)]
+    streams.DataReader = DataReader
 
     class MediaPlayerAudioCategory: SPEECH = 3
     class MediaPlayer:
