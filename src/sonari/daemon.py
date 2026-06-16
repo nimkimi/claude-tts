@@ -531,9 +531,12 @@ class SpeechDaemon:
             pass
 
     def _dispatch_hotkey(self, message: dict) -> None:
-        """A hotkey fire is handled exactly like an inbound socket message."""
+        """A hotkey fire is handled exactly like an inbound socket message —
+        including holding the daemon lock, so an enqueue-based action (repeat /
+        skip_back / catch_up) can't race the speak/socket threads and get lost."""
         try:
-            self.handle_message(message)
+            with self._lock:
+                self.handle_message(message)
         except Exception:  # noqa: BLE001 - one bad hotkey must not kill the pump
             pass
 
