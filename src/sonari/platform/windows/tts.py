@@ -1,30 +1,35 @@
-"""Windows OneCore TTS backend via PyWinRT — a subprocess-like playback handle.
+"""Windows OneCore TTS backend via PyWinRT — synthesize + winsound playback.
 
-OneCore (Windows.Media.SpeechSynthesis) has no subprocess: it synthesizes a
-stream and plays it through a MediaPlayer on a WinRT thread-pool callback.  To
-fit Sonari's say_runner contract (the Speaker orchestrates a proc-like object),
-run() returns a _TtsHandle whose .wait(timeout)/.terminate()/.returncode mimic
-subprocess.Popen.
+OneCore (Windows.Media.SpeechSynthesis) synthesizes a WAV stream; we play it
+with stdlib ``winsound`` from a temp file. The earlier MediaPlayer-based
+playback crashed the process with a native access violation after ~80 utterances
+(a PyWinRT MediaPlayer fragility — synthesis is fine, playback is not), which is
+the daemon-death bug. ``winsound`` is COM-free, in-process, and stress-survives.
 
-WINDOWS-only: every winrt.* import is LAZY (done inside the methods that need
-it) so this module imports cleanly on macOS/Linux.  Tests exercise it via the
-fake winrt tree injected by tests/_winfakes.py.  "Working" under the mocks is
-NOT a claim that real OneCore playback works — that can only be verified on
-Windows.
+To fit Sonari's say_runner contract (the Speaker orchestrates a proc-like
+object), run() returns a _TtsHandle whose .wait(timeout)/.terminate()/
+.returncode mimic subprocess.Popen.
+
+WINDOWS-only: every winrt.* / winsound import is LAZY (inside methods) so this
+module imports cleanly on macOS/Linux for the mock test suite. "Working" under
+the mocks is NOT a claim that real OneCore playback works — only Windows is.
 
 Requirements (Windows only):
     pip install winrt-runtime winrt-Windows.Media.SpeechSynthesis \
-                winrt-Windows.Media.Playback winrt-Windows.Media.Core \
                 winrt-Windows.Storage.Streams
 
-Source pattern: pywinrt text_to_speech sample +
-https://learn.microsoft.com/en-us/uwp/api/windows.media.speechsynthesis ;
-https://learn.microsoft.com/en-us/uwp/api/windows.media.playback.mediaplayer
+NOTE: winsound is a single output channel shared with earcons — an earcon that
+fires mid-utterance cuts the current speech. Acceptable tradeoff vs a daemon that
+crashes every ~80 utterances; refine later (e.g. an earcon audio path off winsound).
 """
 from __future__ import annotations
 
+import io
+import os
 import subprocess
+import tempfile
 import threading
+import wave
 from typing import Optional
 
 from sonari.platform.base import TtsBackend
@@ -41,28 +46,48 @@ def wpm_to_speaking_rate(wpm: float) -> float:
     return max(0.5, min(6.0, wpm / _BASELINE_WPM))
 
 
+def _wav_duration(data: bytes) -> float:
+    """Seconds of audio in a WAV byte string (for the completion timer)."""
+    try:
+        with wave.open(io.BytesIO(data)) as w:
+            frames = w.getnframes()
+            rate = w.getframerate() or 1
+            return frames / float(rate)
+    except Exception:
+        return 4.0   # safe fallback so wait() can't block forever
+
+
 class _TtsHandle:
-    """Subprocess-like handle for in-flight TTS playback.
+    """Subprocess-like handle for an in-flight winsound utterance.
 
     returncode: None while playing, 0 = completed normally, 1 = interrupted.
-    Holds GC-refs to the stream/synth/callback so COM's underlying WinRT
-    objects are not released while playback is still in flight.
+    Playback is async (winsound SND_ASYNC); a timer marks completion after the
+    clip's duration. terminate() purges playback. The temp WAV is removed when
+    playback ends (completion or terminate).
     """
 
-    def __init__(self, player, stream, synth):
-        self._player = player
-        self._stream = stream    # GC-ref: must outlive playback
-        self._synth = synth      # GC-ref: must outlive stream
+    def __init__(self, wav_path: str, duration: float):
+        import winsound
+        self._winsound = winsound
+        self._path = wav_path
         self._done = threading.Event()
         self.returncode: Optional[int] = None
+        # +0.25s guard so the temp file isn't unlinked while still being read.
+        self._timer = threading.Timer(duration + 0.25, self._complete)
+        self._timer.daemon = True
+        self._timer.start()
 
-        def _on_media_ended(sender, args) -> None:
-            if self.returncode is None:
-                self.returncode = 0
-            self._done.set()
+    def _cleanup(self) -> None:
+        try:
+            os.unlink(self._path)
+        except OSError:
+            pass
 
-        self._cb = _on_media_ended   # prevent GC of callback closure
-        self._token = player.add_media_ended(_on_media_ended)
+    def _complete(self) -> None:
+        if self.returncode is None:
+            self.returncode = 0
+        self._cleanup()
+        self._done.set()
 
     def wait(self, timeout: Optional[float] = None) -> int:
         completed = self._done.wait(timeout=timeout)
@@ -74,19 +99,40 @@ class _TtsHandle:
         if self.returncode is None:
             self.returncode = 1
         try:
-            self._player.pause()
-            self._player.close()
+            self._winsound.PlaySound(None, self._winsound.SND_PURGE)
         except Exception:
             pass
+        try:
+            self._timer.cancel()
+        except Exception:
+            pass
+        self._cleanup()
         self._done.set()
 
     def poll(self) -> Optional[int]:
-        """subprocess-like: returncode if finished, else None."""
         return self.returncode
 
 
 class WinTtsBackend(TtsBackend):
-    """OneCore TTS backend. All winrt.* imports are lazy (inside methods)."""
+    """OneCore TTS via PyWinRT synthesis + winsound playback.
+
+    The SpeechSynthesizer is created ONCE and reused (synthesis is stable). All
+    winrt.*/winsound imports are lazy (inside methods)."""
+
+    def __init__(self) -> None:
+        self._synth = None         # reused SpeechSynthesizer (lazy)
+
+    def _get_synth(self):
+        if self._synth is None:
+            from winrt.windows.media.speechsynthesis import (
+                SpeechSynthesizer, SpeechAppendedSilence, SpeechPunctuationSilence,
+            )
+            s = SpeechSynthesizer()
+            opts = s.options
+            opts.appended_silence = SpeechAppendedSilence.MIN
+            opts.punctuation_silence = SpeechPunctuationSilence.MIN
+            self._synth = s
+        return self._synth
 
     def list_voices(self) -> list:
         """Return all installed VoiceInformation objects (may be empty)."""
@@ -95,13 +141,11 @@ class WinTtsBackend(TtsBackend):
 
     def _best_voice_info(self, lang_prefix: str = "en-US"):
         """Select a VoiceInformation in priority order:
-          1. en-US OneCore (Neural/HQ) — Id path contains 'Speech_OneCore'
-          2. Any en-US voice
-          3. System default_voice
-        Raises RuntimeError if no voices are installed at all.
+          1. en-US OneCore (Id path contains 'Speech_OneCore'); 2. any en-US;
+          3. default_voice. Raises RuntimeError if no voices are installed.
 
-        Internal: returns the WinRT object (assigned to synth.voice). The public
-        ABC method best_voice() returns its display NAME (str).
+        Internal: returns the WinRT object. The public ABC best_voice() returns
+        its display NAME (str).
         """
         from winrt.windows.media.speechsynthesis import SpeechSynthesizer
         voices = self.list_voices()
@@ -130,11 +174,9 @@ class WinTtsBackend(TtsBackend):
     def _resolve_voice(self, name):
         """Resolve a Sonari config voice-NAME (or None) to a VoiceInformation.
 
-        Speaker passes the configured voice as a display-name string or None,
-        but synth.voice requires a VoiceInformation object.  If *name* is a
-        non-empty string, match it against all_voices by display_name
-        (case-insensitive); if not found (e.g. a stale macOS name like
-        "Samantha"), or if *name* is None/empty, fall back to best_voice().
+        Speaker passes the configured voice as a display-name string or None, but
+        synth.voice requires a VoiceInformation object. Match by display_name
+        (case-insensitive); fall back to best_voice() if unknown/None.
         """
         if name:
             for v in self.list_voices():
@@ -142,58 +184,27 @@ class WinTtsBackend(TtsBackend):
                     return v
         return self._best_voice_info()
 
-    def run(self, text: str, voice, rate: int):
-        """Synthesize *text* and begin playback immediately.
-
-        Returns a _TtsHandle the caller can .wait()/.terminate()/.poll().
-
-        Args:
-            text:  Utterance to speak.
-            voice: configured voice NAME (str) or None — resolved internally.
-            rate:  Sonari wpm (int) — mapped via wpm_to_speaking_rate().
-        """
-        from winrt.windows.media.speechsynthesis import (
-            SpeechSynthesizer,
-            SpeechAppendedSilence,
-            SpeechPunctuationSilence,
-        )
-        from winrt.windows.media.playback import (
-            MediaPlayer,
-            MediaPlayerAudioCategory,
-        )
+    def _synthesize_wav(self, text: str, voice, rate: int) -> bytes:
+        """Synthesize *text* to WAV bytes (no playback)."""
+        from winrt.windows.storage.streams import DataReader
 
         speaking_rate = wpm_to_speaking_rate(rate)
-
-        # Resolve the voice BEFORE constructing the synthesizer. On a box with
-        # no OneCore voices, SpeechSynthesizer() activation itself throws a
-        # cryptic FileNotFoundError (WinError -2147024894); resolving first lets
-        # best_voice() raise the actionable "install a voice" message instead.
-        resolved_voice = self._resolve_voice(voice)
-
-        synth = SpeechSynthesizer()
+        resolved_voice = self._resolve_voice(voice)   # raises if no voices
+        synth = self._get_synth()
         synth.voice = resolved_voice
-
         opts = synth.options
-        opts.appended_silence = SpeechAppendedSilence.MIN
-        opts.punctuation_silence = SpeechPunctuationSilence.MIN
 
         use_ssml = False
         try:
             opts.speaking_rate = float(speaking_rate)
         except AttributeError:
-            # Win10 < 1709: speaking_rate not available; fall back to SSML.
+            # Win10 < 1709: speaking_rate unavailable; fall back to SSML.
             pct = int(speaking_rate * 100)
-            safe_txt = (
-                text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-            )
-            text = (
-                '<speak version="1.0" '
-                'xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">'
-                f'<prosody rate="{pct}%">{safe_txt}</prosody>'
-                '</speak>'
-            )
+            safe = (text.replace("&", "&amp;").replace("<", "&lt;")
+                    .replace(">", "&gt;"))
+            text = ('<speak version="1.0" '
+                    'xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">'
+                    '<prosody rate="{0}%">{1}</prosody></speak>'.format(pct, safe))
             use_ssml = True
 
         if use_ssml:
@@ -201,10 +212,26 @@ class WinTtsBackend(TtsBackend):
         else:
             stream = synth.synthesize_text_to_stream_async(text).get()
 
-        player = MediaPlayer()
-        player.audio_category = MediaPlayerAudioCategory.SPEECH
-        player.set_stream_source(stream)
+        size = stream.size
+        reader = DataReader(stream.get_input_stream_at(0))
+        reader.load_async(size).get()
+        buf = bytearray(size)
+        reader.read_bytes(buf)
+        return bytes(buf)
 
-        handle = _TtsHandle(player=player, stream=stream, synth=synth)
-        player.play()
-        return handle
+    def run(self, text: str, voice, rate: int):
+        """Synthesize *text*, write a temp WAV, and start async winsound playback.
+        Returns a _TtsHandle the caller can .wait()/.terminate()/.poll()."""
+        import winsound
+
+        data = self._synthesize_wav(text, voice, rate)
+        fd, path = tempfile.mkstemp(suffix=".wav", prefix="sonari-tts-")
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
+        duration = _wav_duration(data)
+        # SND_ASYNC: returns immediately; a new PlaySound (next utterance or an
+        # earcon) replaces it. SND_FILENAME plays from the temp path.
+        winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+        return _TtsHandle(path, duration)

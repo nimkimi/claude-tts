@@ -712,7 +712,28 @@ def ensure_running() -> None:
     subprocess.Popen(argv, **kwargs)
 
 
+_FAULT_FILE = None
+
+
+def _arm_faulthandler() -> None:
+    """Dump every thread's Python stack to ~/.sonari/faulthandler.log on a NATIVE
+    crash (access violation / segfault in WinRT, ctypes, or winsound) — the only
+    way to see otherwise-silent C-level daemon deaths. Never raises."""
+    global _FAULT_FILE
+    try:
+        import faulthandler
+        path = os.path.join(os.path.expanduser("~"), ".sonari", "faulthandler.log")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _FAULT_FILE = open(path, "a", encoding="utf-8")
+        _FAULT_FILE.write("=== faulthandler armed: pid {0} ===\n".format(os.getpid()))
+        _FAULT_FILE.flush()
+        faulthandler.enable(file=_FAULT_FILE, all_threads=True)
+    except Exception:  # noqa: BLE001 - diagnostics must never break startup
+        pass
+
+
 def main() -> None:
+    _arm_faulthandler()
     # Single-instance guard. The fast path avoids work when a daemon is clearly
     # already serving. The AUTHORITATIVE guard is the exclusive flock below:
     # with an ephemeral TCP port, bind() never collides (unlike the old fixed
