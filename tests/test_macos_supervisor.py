@@ -35,3 +35,31 @@ def test_post_install_notes_prints_next_steps(capsys):
     MacSupervisorBackend().post_install_notes()
     out = capsys.readouterr().out
     assert "sonari doctor" in out
+
+
+def test_install_writes_and_loads_launchagent(tmp_path, monkeypatch):
+    import sonari.platform.macos.supervisor as ms
+    plist = tmp_path / "speechd.plist"
+    monkeypatch.setattr(ms, "LAUNCH_AGENT_PATH", str(plist))
+    calls = []
+    sup = ms.MacSupervisorBackend()
+    monkeypatch.setattr(sup, "launchctl", lambda a: calls.append(a) or 0)
+    monkeypatch.setattr(sup, "place_launcher", lambda root: str(tmp_path / "sonari"))
+    monkeypatch.setattr(ms.shutil, "which", lambda n: "/usr/bin/swiftc")
+    sup.install("/usr/bin/python3", str(tmp_path / "app"))
+    assert plist.exists()
+    assert ["load", str(plist)] in calls and ["unload", str(plist)] in calls
+
+
+def test_uninstall_removes_launchagent_and_launcher(tmp_path, monkeypatch):
+    import sonari.platform.macos.supervisor as ms
+    plist = tmp_path / "speechd.plist"
+    plist.write_text("<plist/>", encoding="utf-8")
+    launcher = tmp_path / "sonari"
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(ms, "LAUNCH_AGENT_PATH", str(plist))
+    monkeypatch.setattr(ms, "_launcher_path", lambda: str(launcher))
+    sup = ms.MacSupervisorBackend()
+    monkeypatch.setattr(sup, "launchctl", lambda a: 0)
+    sup.uninstall()
+    assert not plist.exists() and not launcher.exists()

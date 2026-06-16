@@ -151,7 +151,21 @@ class MacHotkeyBackend(HotkeyBackend):
         return (True, str(paths.HOTKEYD_BIN_PATH))
 
     def uninstall(self) -> None:
-        try:
-            os.remove(str(paths.HOTKEYD_BIN_PATH))
-        except OSError:
-            pass
+        """Unload + remove the hotkeyd LaunchAgent and the compiled binary.
+        (LaunchAgent teardown moved here from cli.uninstall.)"""
+        from sonari.platform.macos.supervisor import MacSupervisorBackend
+        if os.path.exists(LAUNCH_AGENT_PATH):
+            MacSupervisorBackend().launchctl(["unload", LAUNCH_AGENT_PATH])
+            try:
+                os.remove(LAUNCH_AGENT_PATH)
+                print("Removed LaunchAgent: {0}".format(LAUNCH_AGENT_PATH))
+            except OSError as exc:
+                print("warning: could not remove {0}: {1}".format(
+                    LAUNCH_AGENT_PATH, exc))
+        if os.path.exists(str(paths.HOTKEYD_BIN_PATH)):
+            try:
+                os.remove(str(paths.HOTKEYD_BIN_PATH))
+                print("Removed hotkey daemon binary: {0}".format(
+                    paths.HOTKEYD_BIN_PATH))
+            except OSError:
+                pass

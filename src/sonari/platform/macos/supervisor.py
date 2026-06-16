@@ -205,11 +205,51 @@ class MacSupervisorBackend(SupervisorBackend):
         from sonari import paths as _p
         return _p.socket_connectable()
 
-    def install(self, python, app_dir):  # filled in when Task 7 moves install
-        pass
+    def install(self, python, app_dir):
+        """Write + load the speechd LaunchAgent and place the ~/.local/bin launcher.
+        (Hotkeyd is installed separately via MacHotkeyBackend.install in cli.)
+        Moved verbatim from cli.install()'s macOS body."""
+        if shutil.which("swiftc") is None:
+            print("Xcode Command Line Tools not found; global hotkeys disabled. "
+                  "Install them with:  xcode-select --install   then re-run: "
+                  "sonari install")
+        log = str(paths.LOG_PATH)
+        xml = self.launchagent_plist(python_executable=python, src_path=app_dir,
+                                     log_path=log)
+        os.makedirs(os.path.dirname(LAUNCH_AGENT_PATH), exist_ok=True)
+        with open(LAUNCH_AGENT_PATH, "w", encoding="utf-8") as f:
+            f.write(xml)
+        print("Wrote LaunchAgent: {0}".format(LAUNCH_AGENT_PATH))
+        self.launchctl(["unload", LAUNCH_AGENT_PATH])
+        rc = self.launchctl(["load", LAUNCH_AGENT_PATH])
+        if rc == 0:
+            print("Loaded LaunchAgent {0}.".format(LAUNCH_AGENT_LABEL))
+        else:
+            print("warning: 'launchctl load' returned {0}; "
+                  "the daemon will still autostart on next login.".format(rc))
+        launcher = self.place_launcher(os.path.realpath(paths.repo_root()))
+        print("Placed launcher: {0}".format(launcher))
 
     def uninstall(self):
-        pass
+        """Unload + remove the speechd LaunchAgent and the ~/.local/bin launcher.
+        (Hotkeyd teardown is in MacHotkeyBackend.uninstall.)"""
+        if os.path.exists(LAUNCH_AGENT_PATH):
+            self.launchctl(["unload", LAUNCH_AGENT_PATH])
+            try:
+                os.remove(LAUNCH_AGENT_PATH)
+                print("Removed LaunchAgent: {0}".format(LAUNCH_AGENT_PATH))
+            except OSError as exc:
+                print("warning: could not remove {0}: {1}".format(
+                    LAUNCH_AGENT_PATH, exc))
+        else:
+            print("No LaunchAgent installed.")
+        path = _launcher_path()
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                print("Removed launcher: {0}".format(path))
+            except OSError:
+                pass
 
     def post_install_notes(self) -> None:
         """Print the macOS post-install next steps (moved verbatim from cli)."""
