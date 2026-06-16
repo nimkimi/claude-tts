@@ -485,7 +485,12 @@ class SpeechDaemon:
                 except (ValueError, TypeError):
                     return None
             else:
-                rate = msg.get("rate")
+                # Validate/clamp the absolute rate just like the delta branch — an
+                # unvalidated value here is persisted to disk and breaks synthesis.
+                try:
+                    rate = max(RATE_MIN, min(RATE_MAX, int(msg.get("rate"))))
+                except (TypeError, ValueError):
+                    return None
             self.config["rate"] = rate
             self.speaker.set_rate(rate)
             save_config(self.config)
