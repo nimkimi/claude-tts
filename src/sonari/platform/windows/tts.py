@@ -232,6 +232,15 @@ class WinTtsBackend(TtsBackend):
             os.close(fd)
         duration = _wav_duration(data)
         # SND_ASYNC: returns immediately; a new PlaySound (next utterance or an
-        # earcon) replaces it. SND_FILENAME plays from the temp path.
-        winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+        # earcon) replaces it. SND_FILENAME plays from the temp path. If PlaySound
+        # raises before the _TtsHandle takes ownership of the file, unlink it here
+        # so a failed utterance doesn't leak a temp WAV.
+        try:
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+        except Exception:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
         return _TtsHandle(path, duration)

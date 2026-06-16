@@ -6,6 +6,7 @@ works on real Windows.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 
 import pytest
@@ -65,6 +66,25 @@ def test_run_falls_back_when_voice_name_unknown():
     # as-is to synth.voice — run() resolves it or falls back to best_voice().
     h = WinTtsBackend().run("hi", "Samantha", 200)  # fake has no such voice
     assert h.wait(timeout=2.0) == 0   # did not crash on an unresolved name
+
+
+def test_run_unlinks_temp_wav_when_playsound_raises(monkeypatch, tmp_path):
+    # Regression #7: if PlaySound raises before the _TtsHandle owns the file, run()
+    # must unlink the temp WAV (else it leaks one file per failed utterance) and
+    # propagate the error.
+    import sonari.platform.windows.tts as tts
+    import winsound
+    leak = tmp_path / "sonari-tts-leak.wav"
+    fd = os.open(str(leak), os.O_RDWR | os.O_CREAT)
+    monkeypatch.setattr(tts.tempfile, "mkstemp", lambda *a, **k: (fd, str(leak)))
+
+    def boom(*a, **k):
+        raise RuntimeError("PlaySound failed")
+
+    monkeypatch.setattr(winsound, "PlaySound", boom)
+    with pytest.raises(RuntimeError):
+        WinTtsBackend().run("hello", None, 200)
+    assert not leak.exists()    # cleaned up, not leaked
 
 
 def test_run_raises_actionable_error_when_no_voices(monkeypatch):
