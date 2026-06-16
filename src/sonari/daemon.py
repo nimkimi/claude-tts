@@ -45,7 +45,7 @@ class SpeechDaemon:
         self._voice_owner: "str | None" = None
         self._captured_msg: "set[str]" = set()
         self._pending_heard: dict = {}            # SpeechItem.id -> HistoryEntry
-        self._back_step: dict = {}                # session -> skip-back depth (0 = latest)
+        self._nav_cursor: dict = {}               # session -> message index (None/absent = latest)
         self._current_item = None                 # item being spoken right now
         self._warned_immediate: set = set()
         self._guided_sessions: set = set()
@@ -241,9 +241,9 @@ class SpeechDaemon:
         session = msg.get("session", "")
         verbosity = self.config.get("verbosity", "everything")
 
-        # New content restarts skip-back navigation from the latest message.
+        # New content snaps the navigation cursor back to the latest message.
         if t in (MsgType.PROSE, MsgType.CHOICE, MsgType.PLAN, MsgType.PERMISSION):
-            self._back_step.pop(session, None)
+            self._nav_cursor.pop(session, None)
 
         if t == MsgType.PROSE:
             a = self._assembler(session)
@@ -365,29 +365,18 @@ class SpeechDaemon:
             self.speaker.cancel()
             return None
 
-        if t == MsgType.SKIP_BACK:
+        if t == MsgType.NAV:
             fg = self.sessions.foreground()
             if fg is None:
                 return None
-            step = self._back_step.get(fg, 0) + 1
-            entries = self.history.nth_last_message(fg, step)
-            if not entries:
-                self._enqueue(fg, "prose", "Start of history.", False)
-                return None
-            self._back_step[fg] = step
-            # Jump to the previous message: cut current speech, clear the queue,
-            # then replay that whole group from its start.
-            self.speaker.cancel()
-            self._drop_pending(self.queue.flush_session(fg))
-            for e in entries:
-                self._enqueue(fg, e.kind, e.text, False, entry=e)
+            self._nav(fg, msg.get("to", "prev"))
             return None
 
         if t == MsgType.REPEAT:
             fg = self.sessions.foreground()
             if fg is None:
                 return None
-            self._back_step.pop(fg, None)   # repeat returns to the latest message
+            self._nav_cursor.pop(fg, None)   # repeat returns to the latest message
             entries = self.history.last_message(fg)
             if not entries:
                 self._enqueue(fg, "prose", "Nothing to repeat.", False)
@@ -529,6 +518,41 @@ class SpeechDaemon:
             get_platform().hotkey.stop()
         except Exception:  # noqa: BLE001 - shutdown must not raise
             pass
+
+    def _nav(self, session: str, to: str) -> None:
+        """Move the per-session message cursor and replay the target message.
+
+        The cursor indexes the current turn's messages (history resets each
+        prompt), oldest..newest; absent == the latest. 'next'/'prev' step one
+        message and CLAMP at the ends (no wrap; at the newest, 'next' just
+        re-reads it); 'first'/'last' jump to the start/end of the turn. Every
+        move cuts current speech, clears the queue, and reads the target message
+        from its start."""
+        ids = self.history.message_ids(session)
+        if not ids:
+            self._enqueue(session, "prose", "Nothing to navigate yet.", False)
+            return
+        n = len(ids)
+        cur = self._nav_cursor.get(session)
+        if cur is None:
+            cur = n - 1                       # default: the latest message
+        cur = max(0, min(cur, n - 1))
+        if to == "next":
+            new = min(cur + 1, n - 1)
+        elif to == "prev":
+            new = max(cur - 1, 0)
+        elif to == "first":
+            new = 0
+        elif to == "last":
+            new = n - 1
+        else:
+            return
+        self._nav_cursor[session] = new
+        entries = self.history.entries_for_message(session, ids[new])
+        self.speaker.cancel()
+        self._drop_pending(self.queue.flush_session(session))
+        for e in entries:
+            self._enqueue(session, e.kind, e.text, False, entry=e)
 
     def _dispatch_hotkey(self, message: dict) -> None:
         """A hotkey fire is handled exactly like an inbound socket message —

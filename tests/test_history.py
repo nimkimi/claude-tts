@@ -84,3 +84,16 @@ def test_nth_last_message_walks_back_through_groups():
     assert h.nth_last_message("s", 3) == []                            # out of range
     assert h.nth_last_message("s", -1) == []
     assert h.nth_last_message("missing", 0) == []
+
+
+def test_message_ids_and_entries_for_message():
+    from sonari.history import SessionHistory
+    h = SessionHistory()
+    h.record("s", "prose", "a1"); h.record("s", "prose", "a2"); h.end_message("s")
+    h.record("s", "choice", "b1"); h.end_message("s")
+    h.record("s", "prose", "c1")
+    ids = h.message_ids("s")
+    assert ids == [0, 1, 2]                                   # oldest -> newest
+    assert [e.text for e in h.entries_for_message("s", 0)] == ["a1", "a2"]
+    assert [e.text for e in h.entries_for_message("s", 1)] == ["b1"]
+    assert h.message_ids("missing") == []

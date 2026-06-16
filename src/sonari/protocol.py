@@ -19,7 +19,7 @@ class MsgType:
     SET_FOREGROUND = "set_foreground"
     STOP = "stop"
     SKIP = "skip"
-    SKIP_BACK = "skip_back"
+    NAV = "nav"          # message-cursor navigation: msg["to"] in next|prev|first|last
     REPEAT = "repeat"
     JUMP_DECISION = "jump_decision"
     CATCH_UP = "catch_up"

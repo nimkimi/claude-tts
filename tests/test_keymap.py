@@ -62,11 +62,10 @@ def test_action_messages_faster_has_delta_25():
 def test_default_keymap_macos_uses_ctrl_cmd(mac):
     d = keymap.default_keymap()
     assert set(d.keys()) == {
-        "stop", "repeat", "skip", "skip_back", "jump_decision", "catch_up",
+        "stop", "repeat", "skip", "jump_decision", "catch_up",
         "faster", "slower", "cycle_verbosity", "reread_options"}
     assert d["stop"]["key"] == "s" and d["stop"]["mods"] == ["ctrl", "cmd"]
     assert d["skip"]["key"] == "." and d["faster"]["key"] == "]"
-    assert d["skip_back"]["key"] == "left"
 
 
 def test_default_keymap_windows_uses_ctrl_shift_alt(win):
@@ -171,3 +170,9 @@ def test_write_resolved_no_tmp_leftover(monkeypatch, tmp_path):
     _patch_keymap_paths(monkeypatch, tmp_path)
     keymap.write_resolved()
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_resolve_nav_action_message(win):
+    resolved = keymap.resolve_keymap({"nav_next": {"key": "right", "mods": ["alt"]}})
+    assert resolved[0]["action"] == "nav_next"
+    assert json.loads(resolved[0]["message"]) == {"type": "nav", "to": "next"}

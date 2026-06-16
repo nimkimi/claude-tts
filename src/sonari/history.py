@@ -53,6 +53,28 @@ class SessionHistory:
         last_id = d[-1].msg_id
         return [e for e in d if e.msg_id == last_id]
 
+    def message_ids(self, session: str) -> list:
+        """Distinct message ids for the session, oldest first. Each id is one
+        'item' (one assistant message) within the current turn; the list is the
+        current turn's messages (history resets on each new prompt). Powers the
+        next/prev/first/last navigation cursor."""
+        d = self._entries.get(session)
+        if not d:
+            return []
+        ids = []
+        for e in d:
+            if not ids or ids[-1] != e.msg_id:
+                if e.msg_id not in ids:
+                    ids.append(e.msg_id)
+        return ids
+
+    def entries_for_message(self, session: str, msg_id: int) -> list:
+        """All entries of a given message id, oldest first."""
+        d = self._entries.get(session)
+        if not d:
+            return []
+        return [e for e in d if e.msg_id == msg_id]
+
     def nth_last_message(self, session: str, n: int) -> list:
         """Entries of the n-th most recent message group, oldest first.
         n=0 is the current/most-recent message (== last_message); n=1 is the one

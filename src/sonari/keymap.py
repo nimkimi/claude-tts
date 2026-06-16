@@ -25,7 +25,11 @@ ACTION_MESSAGES = {
     "stop": {"type": "stop"},
     "repeat": {"type": "repeat"},
     "skip": {"type": "skip"},
-    "skip_back": {"type": "skip_back"},
+    # Message-cursor navigation over the current turn (next/prev/first/last item).
+    "nav_next": {"type": "nav", "to": "next"},
+    "nav_prev": {"type": "nav", "to": "prev"},
+    "nav_first": {"type": "nav", "to": "first"},
+    "nav_last": {"type": "nav", "to": "last"},
     "jump_decision": {"type": "jump_decision"},
     "catch_up": {"type": "catch_up"},
     "faster": {"type": "set_rate", "delta": 25},
@@ -37,8 +41,8 @@ ACTION_MESSAGES = {
 # Shared action -> key. The chord modifiers are platform-defaulted (macOS:
 # Ctrl+Cmd; Windows: Ctrl+Shift+Alt) via the active backend's default_mods().
 _DEFAULT_KEYS = {
-    "stop": "s", "repeat": "r", "skip": ".", "skip_back": "left",
-    "jump_decision": "d", "catch_up": "l", "faster": "]", "slower": "[",
+    "stop": "s", "repeat": "r", "skip": ".", "jump_decision": "d",
+    "catch_up": "l", "faster": "]", "slower": "[",
     "cycle_verbosity": "v", "reread_options": "o",
 }
 
