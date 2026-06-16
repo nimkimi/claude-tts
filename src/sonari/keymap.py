@@ -30,6 +30,8 @@ ACTION_MESSAGES = {
     "nav_prev": {"type": "nav", "to": "prev"},
     "nav_first": {"type": "nav", "to": "first"},
     "nav_last": {"type": "nav", "to": "last"},
+    "pause": {"type": "pause"},     # play/pause toggle
+    "mute": {"type": "mute"},       # sticky per-session mute toggle
     "jump_decision": {"type": "jump_decision"},
     "catch_up": {"type": "catch_up"},
     "faster": {"type": "set_rate", "delta": 25},

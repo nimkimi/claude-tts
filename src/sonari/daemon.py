@@ -45,7 +45,9 @@ class SpeechDaemon:
         self._voice_owner: "str | None" = None
         self._captured_msg: "set[str]" = set()
         self._pending_heard: dict = {}            # SpeechItem.id -> HistoryEntry
-        self._nav_cursor: dict = {}               # session -> message index (None/absent = latest)
+        self._nav_cursor: dict = {}               # session -> anchored message id (absent = latest)
+        self._paused = threading.Event()          # play/pause: set == speech halted
+        self._muted_sessions: set = set()         # sessions whose speech is muted
         self._current_item = None                 # item being spoken right now
         self._warned_immediate: set = set()
         self._guided_sessions: set = set()
@@ -375,6 +377,31 @@ class SpeechDaemon:
             self._nav(fg, msg.get("to", "prev"))
             return None
 
+        if t == MsgType.PAUSE:
+            # Toggle play/pause of the whole speak loop.
+            if self._paused.is_set():
+                self._paused.clear()
+                self._wake.set()            # resume: wake the speak loop
+            else:
+                self._paused.set()
+                self.speaker.cancel()       # stop the current utterance now
+            return None
+
+        if t == MsgType.MUTE:
+            # Toggle a sticky per-session mute. Earcons still fire (alerts).
+            fg = self.sessions.foreground()
+            if fg is None:
+                return None
+            if fg in self._muted_sessions:
+                self._muted_sessions.discard(fg)
+            else:
+                self._muted_sessions.add(fg)
+                self._drop_pending(self.queue.flush_session(fg))
+                cur = self._current_item
+                if cur is not None and cur.session == fg:
+                    self.speaker.cancel()
+            return None
+
         if t == MsgType.REPEAT:
             fg = self.sessions.foreground()
             if fg is None:
@@ -592,8 +619,17 @@ class SpeechDaemon:
 
     def _speak_loop_once(self) -> None:
         """One iteration of the speak loop. May raise; _speak_loop contains it."""
+        if self._paused.is_set():
+            # Play/pause: hold the loop without consuming the queue.
+            self._wake.wait(self._poll_interval)
+            self._wake.clear()
+            return
         item = self.queue.pop_next()
         if item is not None:
+            if item.session in self._muted_sessions:
+                # Muted session: drop the item without speaking it.
+                self._pending_heard.pop(item.id, None)
+                return
             with self._lock:
                 self._current_item = item
             try:

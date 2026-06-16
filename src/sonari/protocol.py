@@ -20,6 +20,8 @@ class MsgType:
     STOP = "stop"
     SKIP = "skip"
     NAV = "nav"          # message-cursor navigation: msg["to"] in next|prev|first|last
+    PAUSE = "pause"      # toggle play/pause of the whole speak loop
+    MUTE = "mute"        # toggle a sticky per-session mute (earcons still fire)
     REPEAT = "repeat"
     JUMP_DECISION = "jump_decision"
     CATCH_UP = "catch_up"
