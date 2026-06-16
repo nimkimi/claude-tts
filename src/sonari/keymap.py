@@ -46,6 +46,11 @@ _DEFAULT_KEYS = {
     "stop": "s", "repeat": "r", "skip": ".", "jump_decision": "d",
     "catch_up": "l", "faster": "]", "slower": "[",
     "cycle_verbosity": "v", "reread_options": "o",
+    # Paragraph-item navigation + play/pause + sticky mute. Arrow keys for nav
+    # (prev/next/first/last), p/m for pause/mute. All under the platform chord;
+    # keys are distinct so there is no collision within the default chord.
+    "nav_prev": "left", "nav_next": "right", "nav_first": "up", "nav_last": "down",
+    "pause": "p", "mute": "m",
 }
 
 

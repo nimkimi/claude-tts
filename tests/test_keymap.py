@@ -61,11 +61,12 @@ def test_action_messages_faster_has_delta_25():
 
 def test_default_keymap_macos_uses_ctrl_cmd(mac):
     d = keymap.default_keymap()
-    assert set(d.keys()) == {
-        "stop", "repeat", "skip", "jump_decision", "catch_up",
-        "faster", "slower", "cycle_verbosity", "reread_options"}
+    assert set(d.keys()) == set(keymap.ACTION_MESSAGES.keys())  # every action bound
     assert d["stop"]["key"] == "s" and d["stop"]["mods"] == ["ctrl", "cmd"]
     assert d["skip"]["key"] == "." and d["faster"]["key"] == "]"
+    # the chord applies to the nav/pause/mute bindings too
+    assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
+    assert d["pause"]["key"] == "p" and d["mute"]["key"] == "m"
 
 
 def test_default_keymap_windows_uses_ctrl_shift_alt(win):
@@ -100,9 +101,21 @@ def test_resolve_faster_message_is_json_with_delta(mac):
 
 
 def test_resolve_default_keymap_covers_all_actions():
+    # The default keymap must bind EVERY action Sonari defines — otherwise a
+    # feature (nav/pause/mute) ships unreachable on a fresh install. Assert
+    # against ACTION_MESSAGES, not _DEFAULT_KEYS (which would be self-referential).
     resolved = keymap.resolve_keymap(keymap.default_keymap())
-    assert len(resolved) == len(keymap._DEFAULT_KEYS)
-    assert {e["action"] for e in resolved} == set(keymap._DEFAULT_KEYS.keys())
+    assert {e["action"] for e in resolved} == set(keymap.ACTION_MESSAGES.keys())
+
+
+def test_default_keymap_binds_nav_pause_mute():
+    """Regression: nav_next/prev/first/last, pause and mute were defined in
+    ACTION_MESSAGES but absent from _DEFAULT_KEYS, so no hotkey was ever
+    registered for them on a default install."""
+    km = keymap.default_keymap()
+    for action in ("nav_next", "nav_prev", "nav_first", "nav_last", "pause", "mute"):
+        assert action in km, f"{action} has no default binding"
+        assert km[action]["key"], f"{action} default binding has no key"
 
 
 def test_resolve_unknown_key_raises():
