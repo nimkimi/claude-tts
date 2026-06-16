@@ -49,7 +49,12 @@ This spec completes that move for **both** platforms.
 - `sonari doctor` reports Windows rows via `WinSupervisorBackend.doctor_rows()`; no macOS rows
   leak; the portable "hooks installed" row is OS-aware.
 - **macOS behavior is unchanged.** The full existing suite stays green on macOS; the macOS
-  install/uninstall/doctor produce byte-identical artifacts and output.
+  install/uninstall/doctor produce identical artifacts and the same stdout **line set**. (One
+  accepted deviation: because launcher placement now lives in `supervisor.install()` while hotkeyd
+  install stays a separate `hotkey.install()` step, the relative **order** of the `Placed/Removed
+  launcher` line vs the hotkeyd lines differs from the pre-refactor sequence. The lines and
+  artifacts are identical; only their ordering during a one-time install/uninstall shifts. A
+  stdout-lock test asserts the macOS line set survives.)
 - `cli.py` contains **no** `import sonari.platform.macos...` and no `sys.platform` branch — every
   OS-specific operation is dispatched through `get_platform()`.
 - The voice contract is honored: `TtsBackend.best_voice() -> str` on both platforms.

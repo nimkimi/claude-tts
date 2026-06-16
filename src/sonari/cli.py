@@ -280,9 +280,10 @@ def _copy_app(plugin_root: str) -> str:
 
 
 def install() -> int:
-    """Install Sonari as a self-contained plugin: resolve python, build hotkeyd,
-    write both LaunchAgents (resolved interp + PYTHONPATH), place the launcher.
-    """
+    """Install Sonari: resolve python, copy the runtime, write the install
+    record, then delegate OS-specific autostart + hooks + launcher + hotkeys to
+    the platform backend (macOS: LaunchAgents + hotkeyd; Windows: Task Scheduler
+    + settings.json hooks + sonari.cmd)."""
     paths.ensure_sonari_dir()
     sup = _platform().supervisor
 
@@ -321,13 +322,12 @@ def install() -> int:
     # 5. OS-specific autostart + hooks + launcher (the platform backend owns it).
     sup.install(python, app_dir)
 
-    # 6. Global hotkeys (macOS: build + load hotkeyd; Windows: deferred to M3).
+    # 6. Global hotkeys. Each backend prints its own outcome (macOS: build +
+    #    load hotkeyd; Windows: deferred to M3, announced in post_install_notes).
     hk_log = os.path.join(os.path.dirname(str(paths.LOG_PATH)), "hotkeyd.log")
     launchctl_fn = getattr(sup, "launchctl", None) or (lambda a: 0)
-    ok, detail = _platform().hotkey.install(
+    _platform().hotkey.install(
         log_path=hk_log, agent_path=None, launchctl_fn=launchctl_fn)
-    if not ok:
-        print(f"note: global hotkeys not enabled ({detail}); speech still works.")
 
     # 7. Voice check (best_voice() is a display-name str on every platform).
     try:

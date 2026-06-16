@@ -139,6 +139,8 @@ class MacHotkeyBackend(HotkeyBackend):
         """
         ok, detail = self.build()
         if not ok:
+            print("warning: hotkey daemon not built ({0}); "
+                  "global hotkeys disabled, but speech still works.".format(detail))
             return (ok, detail)
         if agent_path is None:           # cli passes None; backend owns its path
             agent_path = LAUNCH_AGENT_PATH
@@ -146,10 +148,14 @@ class MacHotkeyBackend(HotkeyBackend):
         os.makedirs(os.path.dirname(agent_path), exist_ok=True)
         with open(agent_path, "w", encoding="utf-8") as fh:
             fh.write(plist_xml)
+        print("Wrote LaunchAgent: {0}".format(agent_path))
         launchctl_fn(["unload", agent_path])
         load_rc = launchctl_fn(["load", agent_path])
         if load_rc != 0:
+            print("warning: launchctl load returned {0} for the hotkey "
+                  "daemon.".format(load_rc))
             return (True, "launchctl load returned {0}".format(load_rc))
+        print("Loaded LaunchAgent {0}.".format(LAUNCH_AGENT_LABEL))
         return (True, str(paths.HOTKEYD_BIN_PATH))
 
     def uninstall(self) -> None:
