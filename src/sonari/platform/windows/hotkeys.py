@@ -18,6 +18,18 @@ _VK_LABELS: dict[int, str] = {
 class WinHotkeyBackend(HotkeyBackend):
     """Stub hotkey backend.  Hotkeys land in Milestone 3."""
 
+    def key_codes(self) -> dict:
+        from sonari.platform.windows import keytables
+        return dict(keytables.KEY_CODES)
+
+    def mod_masks(self) -> dict:
+        from sonari.platform.windows import keytables
+        return dict(keytables.MOD_MASKS)
+
+    def default_mods(self) -> list:
+        from sonari.platform.windows import keytables
+        return list(keytables.DEFAULT_MODS)
+
     def install(self, log_path: str, agent_path: str, launchctl_fn) -> tuple:
         return (False, "Windows hotkeys land in M3 (Milestone 3).")
 

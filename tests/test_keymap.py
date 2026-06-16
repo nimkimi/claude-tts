@@ -3,6 +3,26 @@ import json
 import pytest
 
 from sonari import keymap
+import sonari.platform as platform
+
+
+def _force(monkeypatch, plat):
+    monkeypatch.setattr(platform.sys, "platform", plat)
+    platform._CACHE = None
+
+
+@pytest.fixture
+def mac(monkeypatch):
+    _force(monkeypatch, "darwin")
+    yield
+    platform._CACHE = None
+
+
+@pytest.fixture
+def win(monkeypatch):
+    _force(monkeypatch, "win32")
+    yield
+    platform._CACHE = None
 
 
 def _patch_keymap_paths(monkeypatch, tmp_path):
@@ -16,22 +36,20 @@ def _patch_keymap_paths(monkeypatch, tmp_path):
     return km, resolved
 
 
-# --- constants ---------------------------------------------------------------
+# --- keytables come from the active platform backend ------------------------
 
-def test_key_codes_cover_default_keys():
+def test_macos_keytables_via_backend(mac):
+    kc, mm = keymap._keytables()
     for k in ("s", "r", "d", "l", "v", "o", ".", "]", "["):
-        assert k in keymap.KEY_CODES
-    assert keymap.KEY_CODES["s"] == 1
-    assert keymap.KEY_CODES["."] == 47
-    assert keymap.KEY_CODES["]"] == 30
-    assert keymap.KEY_CODES["["] == 33
+        assert k in kc
+    assert kc["s"] == 1 and kc["."] == 47 and kc["]"] == 30 and kc["["] == 33
+    assert mm["cmd"] == 256 and mm["shift"] == 512 and mm["ctrl"] == 4096
 
 
-def test_mod_masks_values():
-    assert keymap.MOD_MASKS["cmd"] == 256
-    assert keymap.MOD_MASKS["shift"] == 512
-    assert keymap.MOD_MASKS["opt"] == 2048
-    assert keymap.MOD_MASKS["ctrl"] == 4096
+def test_windows_keytables_via_backend(win):
+    kc, mm = keymap._keytables()
+    assert kc["s"] == 0x53 and kc["."] == 0xBE
+    assert mm["ctrl"] == 0x0002 and mm["shift"] == 0x0004 and mm["alt"] == 0x0001
 
 
 def test_action_messages_faster_has_delta_25():
@@ -39,48 +57,57 @@ def test_action_messages_faster_has_delta_25():
     assert keymap.ACTION_MESSAGES["slower"] == {"type": "set_rate", "delta": -25}
 
 
-def test_default_keymap_has_nine_actions():
-    assert set(keymap.DEFAULT_KEYMAP.keys()) == {
+# --- default_keymap: per-OS chord -------------------------------------------
+
+def test_default_keymap_macos_uses_ctrl_cmd(mac):
+    d = keymap.default_keymap()
+    assert set(d.keys()) == {
         "stop", "repeat", "skip", "jump_decision", "catch_up",
-        "faster", "slower", "cycle_verbosity", "reread_options",
-    }
-    assert keymap.DEFAULT_KEYMAP["stop"]["key"] == "s"
-    assert keymap.DEFAULT_KEYMAP["stop"]["mods"] == ["ctrl", "cmd"]
-    assert keymap.DEFAULT_KEYMAP["skip"]["key"] == "."
-    assert keymap.DEFAULT_KEYMAP["faster"]["key"] == "]"
-    assert keymap.DEFAULT_KEYMAP["slower"]["key"] == "["
+        "faster", "slower", "cycle_verbosity", "reread_options"}
+    assert d["stop"]["key"] == "s" and d["stop"]["mods"] == ["ctrl", "cmd"]
+    assert d["skip"]["key"] == "." and d["faster"]["key"] == "]"
 
 
-# --- resolve_keymap ----------------------------------------------------------
+def test_default_keymap_windows_uses_ctrl_shift_alt(win):
+    d = keymap.default_keymap()
+    assert d["stop"]["mods"] == ["ctrl", "shift", "alt"]
+    assert d["reread_options"]["key"] == "o"
 
-def test_resolve_stop_entry_exact():
+
+# --- resolve_keymap ---------------------------------------------------------
+
+def test_resolve_macos_carbon_codes(mac):
     resolved = keymap.resolve_keymap({"stop": {"key": "s", "mods": ["ctrl", "cmd"]}})
     assert resolved == [{
-        "action": "stop",
-        "keyCode": 1,
-        "modifiers": 4352,  # 4096 | 256
-        "message": '{"type": "stop"}',
-    }]
+        "action": "stop", "keyCode": 1, "modifiers": 4352,  # 4096 | 256
+        "message": '{"type": "stop"}'}]
 
 
-def test_resolve_faster_message_is_json_with_delta():
+def test_resolve_windows_vk_codes(win):
+    resolved = keymap.resolve_keymap(
+        {"stop": {"key": "s", "mods": ["ctrl", "shift", "alt"]}})
+    row = resolved[0]
+    assert row["keyCode"] == 0x53                            # VK 'S'
+    assert row["modifiers"] == (0x0002 | 0x0004 | 0x0001)    # ctrl|shift|alt
+    assert row["action"] == "stop"
+
+
+def test_resolve_faster_message_is_json_with_delta(mac):
     resolved = keymap.resolve_keymap({"faster": {"key": "]", "mods": ["ctrl", "cmd"]}})
     entry = resolved[0]
-    assert entry["keyCode"] == 30
-    assert entry["modifiers"] == 4352
+    assert entry["keyCode"] == 30 and entry["modifiers"] == 4352
     assert json.loads(entry["message"]) == {"type": "set_rate", "delta": 25}
 
 
 def test_resolve_default_keymap_has_nine_entries():
-    resolved = keymap.resolve_keymap(keymap.DEFAULT_KEYMAP)
+    resolved = keymap.resolve_keymap(keymap.default_keymap())
     assert len(resolved) == 9
-    actions = {e["action"] for e in resolved}
-    assert actions == set(keymap.DEFAULT_KEYMAP.keys())
+    assert {e["action"] for e in resolved} == set(keymap._DEFAULT_KEYS.keys())
 
 
 def test_resolve_unknown_key_raises():
     with pytest.raises(ValueError):
-        keymap.resolve_keymap({"stop": {"key": "zzz", "mods": ["ctrl", "cmd"]}})
+        keymap.resolve_keymap({"stop": {"key": "zzz", "mods": ["ctrl"]}})
 
 
 def test_resolve_unknown_mod_raises():
@@ -90,18 +117,17 @@ def test_resolve_unknown_mod_raises():
 
 def test_resolve_unknown_action_raises():
     with pytest.raises(ValueError):
-        keymap.resolve_keymap({"frobnicate": {"key": "s", "mods": ["ctrl", "cmd"]}})
+        keymap.resolve_keymap({"frobnicate": {"key": "s", "mods": ["ctrl"]}})
 
 
-# --- load_keymap -------------------------------------------------------------
+# --- load_keymap ------------------------------------------------------------
 
 def test_load_keymap_returns_defaults_when_missing(monkeypatch, tmp_path):
     _patch_keymap_paths(monkeypatch, tmp_path)
     loaded = keymap.load_keymap()
-    assert loaded == keymap.DEFAULT_KEYMAP
-    # must be an independent copy
-    loaded["stop"]["key"] = "x"
-    assert keymap.DEFAULT_KEYMAP["stop"]["key"] == "s"
+    assert loaded == keymap.default_keymap()
+    loaded["stop"]["key"] = "x"  # independent copy
+    assert keymap.default_keymap()["stop"]["key"] == "s"
 
 
 def test_load_keymap_merges_user_override(monkeypatch, tmp_path):
@@ -109,38 +135,31 @@ def test_load_keymap_merges_user_override(monkeypatch, tmp_path):
     km.write_text(json.dumps({"stop": {"key": "x", "mods": ["cmd"]}}), encoding="utf-8")
     loaded = keymap.load_keymap()
     assert loaded["stop"] == {"key": "x", "mods": ["cmd"]}
-    # untouched actions keep defaults
-    assert loaded["repeat"] == keymap.DEFAULT_KEYMAP["repeat"]
+    assert loaded["repeat"] == keymap.default_keymap()["repeat"]
 
 
 def test_load_keymap_tolerates_corrupt_file(monkeypatch, tmp_path):
     km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
     km.write_text("{ not json", encoding="utf-8")
-    assert keymap.load_keymap() == keymap.DEFAULT_KEYMAP
+    assert keymap.load_keymap() == keymap.default_keymap()
 
-
-# --- write_default_keymap_if_absent -----------------------------------------
 
 def test_write_default_keymap_if_absent_writes_once(monkeypatch, tmp_path):
     km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
     assert not km.exists()
     assert keymap.write_default_keymap_if_absent() is True
     assert km.exists()
-    on_disk = json.loads(km.read_text(encoding="utf-8"))
-    assert on_disk == keymap.DEFAULT_KEYMAP
-    # second call is a no-op
+    assert json.loads(km.read_text(encoding="utf-8")) == keymap.default_keymap()
     assert keymap.write_default_keymap_if_absent() is False
 
 
-# --- write_resolved ----------------------------------------------------------
+# --- write_resolved ---------------------------------------------------------
 
 def test_write_resolved_emits_array_of_nine(monkeypatch, tmp_path):
-    km, resolved = _patch_keymap_paths(monkeypatch, tmp_path)
+    _patch_keymap_paths(monkeypatch, tmp_path)
     out_path = keymap.write_resolved()
-    assert out_path == str(resolved)
-    data = json.loads(resolved.read_text(encoding="utf-8"))
-    assert isinstance(data, list)
-    assert len(data) == 9
+    data = json.loads((tmp_path / "hotkeyd.resolved.json").read_text(encoding="utf-8"))
+    assert isinstance(data, list) and len(data) == 9
     for entry in data:
         assert isinstance(entry["keyCode"], int)
         assert isinstance(entry["modifiers"], int)
@@ -148,20 +167,6 @@ def test_write_resolved_emits_array_of_nine(monkeypatch, tmp_path):
 
 
 def test_write_resolved_no_tmp_leftover(monkeypatch, tmp_path):
-    km, resolved = _patch_keymap_paths(monkeypatch, tmp_path)
+    _patch_keymap_paths(monkeypatch, tmp_path)
     keymap.write_resolved()
     assert list(tmp_path.glob("*.tmp")) == []
-
-
-def test_keytables_wired_into_resolution_path():
-    """Verify that KEY_CODES/MOD_MASKS from the macos backend are actually used
-    by resolve_keymap() — i.e. the tables are live in the resolution path after
-    the move to platform/macos/keytables."""
-    # "o" (reread_options default key) maps to Carbon code 31;
-    # ctrl+cmd = 4096 | 256 = 4352.
-    resolved = keymap.resolve_keymap({"reread_options": {"key": "o", "mods": ["ctrl", "cmd"]}})
-    assert len(resolved) == 1
-    entry = resolved[0]
-    assert entry["action"] == "reread_options"
-    assert entry["keyCode"] == 31   # Carbon code for "o"
-    assert entry["modifiers"] == 4352  # ctrl (4096) | cmd (256)

@@ -16,14 +16,9 @@ from sonari.paths import (
     ensure_sonari_dir,
 )
 
-# NOTE: This is an unconditional macOS-specific import.  keytables.py itself has
-# no platform dependencies (it's pure data), so this works today even when the
-# broader platform/macos package is partially assembled.  However, once
-# platform/macos/__init__.py adds a platform guard (see "Assembled in Task 9"),
-# this bare import will fail on non-macOS hosts.  When that guard lands, this
-# line must be made conditional (e.g. wrapped in a sys.platform check or moved
-# behind the platform-dispatch layer).
-from sonari.platform.macos.keytables import KEY_CODES, MOD_MASKS
+# Key/modifier tables and the default chord are platform-specific; the resolver
+# pulls them from the active backend via get_platform() at call time (lazy — no
+# import-time OS dispatch). The ONLY sys.platform branch stays in platform/__init__.
 
 # action -> the speechd protocol message it sends.
 ACTION_MESSAGES = {
@@ -38,18 +33,28 @@ ACTION_MESSAGES = {
     "reread_options": {"type": "reread_options"},
 }
 
-# Default bindings (modifier Ctrl+Cmd, chosen to avoid VoiceOver's Ctrl+Opt).
-DEFAULT_KEYMAP = {
-    "stop": {"key": "s", "mods": ["ctrl", "cmd"]},
-    "repeat": {"key": "r", "mods": ["ctrl", "cmd"]},
-    "skip": {"key": ".", "mods": ["ctrl", "cmd"]},
-    "jump_decision": {"key": "d", "mods": ["ctrl", "cmd"]},
-    "catch_up": {"key": "l", "mods": ["ctrl", "cmd"]},
-    "faster": {"key": "]", "mods": ["ctrl", "cmd"]},
-    "slower": {"key": "[", "mods": ["ctrl", "cmd"]},
-    "cycle_verbosity": {"key": "v", "mods": ["ctrl", "cmd"]},
-    "reread_options": {"key": "o", "mods": ["ctrl", "cmd"]},
+# Shared action -> key. The chord modifiers are platform-defaulted (macOS:
+# Ctrl+Cmd; Windows: Ctrl+Shift+Alt) via the active backend's default_mods().
+_DEFAULT_KEYS = {
+    "stop": "s", "repeat": "r", "skip": ".", "jump_decision": "d",
+    "catch_up": "l", "faster": "]", "slower": "[",
+    "cycle_verbosity": "v", "reread_options": "o",
 }
+
+
+def _keytables():
+    """(key_codes, mod_masks) for the active platform (lazy — no import-time dispatch)."""
+    from sonari.platform import get_platform
+    hk = get_platform().hotkey
+    return hk.key_codes(), hk.mod_masks()
+
+
+def default_keymap() -> dict:
+    """The default action->binding map for the active platform (per-OS chord)."""
+    from sonari.platform import get_platform
+    mods = get_platform().hotkey.default_mods()
+    return {action: {"key": key, "mods": list(mods)}
+            for action, key in _DEFAULT_KEYS.items()}
 
 
 def _copy_keymap(km: dict) -> dict:
@@ -70,23 +75,24 @@ def resolve_keymap(keymap=None) -> list:
     on an unknown key name, unknown modifier name, or unknown action.
     """
     if keymap is None:
-        keymap = DEFAULT_KEYMAP
+        keymap = default_keymap()
+    key_codes, mod_masks = _keytables()
     resolved = []
     for action, binding in keymap.items():
         if action not in ACTION_MESSAGES:
             raise ValueError("unknown action: {0}".format(action))
         key = (binding.get("key") or "").lower()
-        if key not in KEY_CODES:
+        if key not in key_codes:
             raise ValueError("unknown key: {0}".format(binding.get("key")))
         mask = 0
         for mod in binding.get("mods", []):
             m = (mod or "").lower()
-            if m not in MOD_MASKS:
+            if m not in mod_masks:
                 raise ValueError("unknown modifier: {0}".format(mod))
-            mask |= MOD_MASKS[m]
+            mask |= mod_masks[m]
         resolved.append({
             "action": action,
-            "keyCode": KEY_CODES[key],
+            "keyCode": key_codes[key],
             "modifiers": mask,
             "message": json.dumps(ACTION_MESSAGES[action]),
         })
@@ -99,7 +105,7 @@ def load_keymap() -> dict:
     Missing or corrupt files yield a fresh DEFAULT_KEYMAP copy. A user entry
     fully replaces the default binding for that action.
     """
-    merged = _copy_keymap(DEFAULT_KEYMAP)
+    merged = _copy_keymap(default_keymap())
     try:
         with open(KEYMAP_PATH, "r", encoding="utf-8") as fh:
             user = json.load(fh)
@@ -123,7 +129,7 @@ def write_default_keymap_if_absent() -> bool:
         return False
     ensure_sonari_dir()
     with open(KEYMAP_PATH, "w", encoding="utf-8") as fh:
-        json.dump(DEFAULT_KEYMAP, fh, indent=2)
+        json.dump(default_keymap(), fh, indent=2)
         fh.flush()
         os.fsync(fh.fileno())
     return True

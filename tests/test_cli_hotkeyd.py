@@ -83,15 +83,21 @@ def test_build_hotkeyd_recompiles_when_source_changes(tmp_path, monkeypatch):
 
 
 def test_keymap_subcommand_prints_all_nine_actions(capsys, tmp_path, monkeypatch):
-    # Force the macOS hotkey backend so display_combo yields Ctrl+Cmd labels
-    # deterministically regardless of the host OS running the test.
+    # Force the REAL platform to macOS so BOTH resolve_keymap (keytables) and
+    # display_combo (labels) agree -> deterministic Ctrl+Cmd output on any host.
+    import sonari.platform as platform
+    monkeypatch.setattr(platform.sys, "platform", "darwin")
+    platform._CACHE = None
+    cli._PLATFORM = None
     monkeypatch.setattr(cli.keymap, "KEYMAP_PATH", tmp_path / "keymap.json")
-    pb = types.SimpleNamespace(hotkey=MacHotkeyBackend())
-    monkeypatch.setattr(cli, "_platform", lambda: pb)
-    rc = cli.main(["keymap"])
-    assert rc == 0
-    out = capsys.readouterr().out
-    for action in ("stop", "repeat", "skip", "jump_decision", "catch_up",
-                   "faster", "slower", "cycle_verbosity", "reread_options"):
-        assert action in out
-    assert "Ctrl" in out and "Cmd" in out
+    try:
+        rc = cli.main(["keymap"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        for action in ("stop", "repeat", "skip", "jump_decision", "catch_up",
+                       "faster", "slower", "cycle_verbosity", "reread_options"):
+            assert action in out
+        assert "Ctrl" in out and "Cmd" in out
+    finally:
+        platform._CACHE = None
+        cli._PLATFORM = None
