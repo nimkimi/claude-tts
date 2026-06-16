@@ -98,6 +98,19 @@ class MacHotkeyBackend(HotkeyBackend):
         parts.append(self._keycode_display.get(key_code, "key{0}".format(key_code)))
         return "+".join(parts)
 
+    # --- keytables for the portable keymap resolver (data lives in keytables.py) ---
+    def key_codes(self) -> dict:
+        from sonari.platform.macos import keytables
+        return dict(keytables.KEY_CODES)
+
+    def mod_masks(self) -> dict:
+        from sonari.platform.macos import keytables
+        return dict(keytables.MOD_MASKS)
+
+    def default_mods(self) -> list:
+        from sonari.platform.macos import keytables
+        return list(keytables.DEFAULT_MODS)
+
     def build(self):
         """Compile sonari-hotkeyd if swiftc is present and the source changed.
         Returns (ok: bool, detail: str). (Verbatim move of cli._build_hotkeyd.)"""

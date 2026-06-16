@@ -52,6 +52,33 @@ class HotkeyBackend(abc.ABC):
     def display_combo(self, modifiers: int, key_code: int) -> str:
         """Human label for a (modifiers, key_code) pair, e.g. 'Ctrl+Cmd+O'."""
 
+    # --- keytables (consumed by the portable keymap resolver) ---
+    def key_codes(self) -> "dict":
+        """Map key-name -> OS key code for this platform."""
+        return {}
+
+    def mod_masks(self) -> "dict":
+        """Map modifier-name -> OS modifier mask for this platform."""
+        return {}
+
+    def default_mods(self) -> "list":
+        """The platform's default modifier chord (e.g. ['ctrl','cmd'])."""
+        return []
+
+    # --- in-process lifecycle (Windows runs a thread; macOS runs a process) ---
+    def start(self, dispatch) -> None:
+        """Begin listening for global hotkeys. *dispatch* is callable(message: dict)
+        invoked on each fire. Default: no-op (macOS hotkeyd is a separate process)."""
+        return None
+
+    def stop(self) -> None:
+        """Stop listening. Default: no-op."""
+        return None
+
+    def doctor_rows(self) -> "list":
+        """Platform hotkey diagnostics (collisions, integrity). Default: none."""
+        return []
+
 
 class SupervisorBackend(abc.ABC):
     @abc.abstractmethod
