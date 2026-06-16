@@ -76,6 +76,23 @@ def test_launch_spec_creationflags(monkeypatch):
     assert not kwargs.get("start_new_session", False), "must NOT combine with DETACHED_PROCESS"
 
 
+def test_launch_spec_sets_pythonpath_to_src(monkeypatch):
+    # The lazily-spawned daemon runs `pythonw -m sonari.daemon` in a fresh
+    # process; without PYTHONPATH it cannot import sonari, dies instantly, and
+    # every hook event respawns it -> a relaunch storm. The spawn env must put
+    # the repo's src/ first on PYTHONPATH.
+    import os
+    from sonari import paths
+
+    sup = WinSupervisorBackend()
+    monkeypatch.setattr(sup, "resolve_python", lambda: r"C:\Python311\pythonw.exe")
+    argv, kwargs = sup.launch_spec()
+    env = kwargs.get("env")
+    assert env is not None, "launch_spec must pass an env so the daemon can import sonari"
+    src = os.path.join(paths.repo_root(), "src")
+    assert env.get("PYTHONPATH", "").split(os.pathsep)[0] == src
+
+
 def test_is_installed_calls_schtasks_query(monkeypatch):
     sup = WinSupervisorBackend()
     calls = []

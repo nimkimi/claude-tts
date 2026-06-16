@@ -482,13 +482,23 @@ class WinSupervisorBackend(SupervisorBackend):
 
     def launch_spec(self) -> tuple:
         """Return (argv, spawn_kwargs) for lazy daemon start."""
+        from sonari import paths
         pw = self.resolve_python() or "pythonw.exe"
         argv = [pw, "-m", "sonari.daemon"]
+        # The daemon runs in a fresh process; without PYTHONPATH it cannot import
+        # 'sonari' -> it exits instantly -> every hook event respawns it (a
+        # relaunch storm). Put the plugin's own src/ first so the lazy start
+        # resolves the package self-containedly.
+        env = dict(os.environ)
+        src = os.path.join(paths.repo_root(), "src")
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = src + (os.pathsep + existing if existing else "")
         kwargs = dict(
             creationflags=_SPAWN_FLAGS,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=env,
         )
         return argv, kwargs
 
