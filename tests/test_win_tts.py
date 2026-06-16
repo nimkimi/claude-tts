@@ -49,3 +49,13 @@ def test_run_falls_back_when_voice_name_unknown():
     # as-is to synth.voice — run() resolves it or falls back to best_voice().
     h = WinTtsBackend().run("hi", "Samantha", 200)  # fake has no such voice
     assert h.wait(timeout=2.0) == 0   # did not crash on an unresolved name
+
+
+def test_run_raises_actionable_error_when_no_voices(monkeypatch):
+    # On a box with no OneCore voices, run() must surface the actionable
+    # "install a voice" RuntimeError — NOT the raw FileNotFoundError that real
+    # SpeechSynthesizer activation throws. Regression: nimkimi/sonari#2.
+    import winrt.windows.media.speechsynthesis as ss
+    monkeypatch.setattr(ss.SpeechSynthesizer, "all_voices", [])
+    with pytest.raises(RuntimeError, match="No TTS voices installed"):
+        WinTtsBackend().run("hello", None, 200)

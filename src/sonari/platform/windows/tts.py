@@ -157,8 +157,14 @@ class WinTtsBackend(TtsBackend):
 
         speaking_rate = wpm_to_speaking_rate(rate)
 
+        # Resolve the voice BEFORE constructing the synthesizer. On a box with
+        # no OneCore voices, SpeechSynthesizer() activation itself throws a
+        # cryptic FileNotFoundError (WinError -2147024894); resolving first lets
+        # best_voice() raise the actionable "install a voice" message instead.
+        resolved_voice = self._resolve_voice(voice)
+
         synth = SpeechSynthesizer()
-        synth.voice = self._resolve_voice(voice)
+        synth.voice = resolved_voice
 
         opts = synth.options
         opts.appended_silence = SpeechAppendedSilence.MIN
