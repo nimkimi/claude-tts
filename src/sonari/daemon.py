@@ -321,17 +321,9 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.EARCON:
-            kind = msg.get("kind", "")
-            fg = self.sessions.foreground()
-            # turn_done / ready are end-of-turn / idle signals. winsound is a
-            # single channel, so playing them now would purge the speech still
-            # being read. Queue them instead so the beep follows the reading.
-            # Decision/error earcons stay instant (they are alerts).
-            pending = len(self.queue) > 0 or self._current_item is not None
-            if kind in ("turn_done", "ready") and fg is not None and pending:
-                self._enqueue(fg, "earcon", kind, False, mute_exempt=True)
-            else:
-                self.speaker.earcon(kind)   # instant: alerts, or nothing to follow
+            # Instant: the Windows earcon backend plays on a separate audio path
+            # that mixes with the speech, so it no longer cuts the reading.
+            self.speaker.earcon(msg.get("kind", ""))
             return None
 
         if t == MsgType.FLUSH:
@@ -659,13 +651,6 @@ class SpeechDaemon:
         if item is not None:
             if item.session in self._muted_sessions and not item.mute_exempt:
                 # Muted session: drop the item without speaking it.
-                self._pending_heard.pop(item.id, None)
-                return
-            if item.kind == "earcon":
-                # A deferred earcon: play it in its queue slot (after the speech
-                # it was meant to follow), then move on. No TTS conflict — the
-                # speak loop is sequential, so prior utterances have finished.
-                self.speaker.earcon(item.text)
                 self._pending_heard.pop(item.id, None)
                 return
             with self._lock:

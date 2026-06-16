@@ -45,28 +45,35 @@ class _DoneHandle:
 class WinEarconBackend(EarconBackend):
     """Earcon backend for Windows using winsound.PlaySound."""
 
-    def play(self, path: str) -> _DoneHandle | None:
-        """Play *path* asynchronously via winsound.
+    # CREATE_NO_WINDOW | DETACHED_PROCESS — windowless, no console flash.
+    _SPAWN_FLAGS = 0x08000000 | 0x00000008
 
-        Returns a handle whose .poll() mimics subprocess.Popen.poll():
-          0    -> sound was dispatched successfully (returns _DoneHandle)
-          None -> file was missing (nothing played, returns None directly)
+    def play(self, path: str):
+        """Play *path* in a SEPARATE, windowless helper process.
 
-        Raises RuntimeError (from winsound itself) only if Windows cannot
-        open the audio device, which is distinct from a missing file.
+        The daemon plays SPEECH on winsound, which is a single channel — playing
+        an earcon on the SAME process's winsound would purge the speech. A
+        separate process has its own audio session, so the earcon MIXES with the
+        speech (shared-mode audio) and plays simultaneously without cutting it.
+
+        Returns the Popen handle (has .poll()), or None if the file is missing.
         """
         if not pathlib.Path(path).exists():
             return None
-        # Re-import at call time so that the _winfakes harness injected in
-        # conftest.py is always picked up — even if the module-level try/except
-        # ran before the fakes were installed.
+        import subprocess
+        import sys
         try:
-            import winsound as _ws
-        except ModuleNotFoundError:
-            _ws = _winsound  # type: ignore[assignment]
-        flags = _ws.SND_FILENAME | _ws.SND_ASYNC
-        _ws.PlaySound(path, flags)
-        return _DoneHandle()
+            return subprocess.Popen(
+                [sys.executable, "-c",
+                 "import winsound,sys;winsound.PlaySound(sys.argv[1],winsound.SND_FILENAME)",
+                 path],
+                creationflags=self._SPAWN_FLAGS,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            return None
 
     def default_earcons(self) -> dict:
         """Return the platform's default {kind: sound_path} mapping."""
