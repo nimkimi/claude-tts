@@ -443,6 +443,81 @@ def settings_has_sonari_hooks(settings_path: str) -> bool:
     return False
 
 
+def _build_hooks_dict(pythonw: str, hook_py: str) -> dict:
+    """Return {event: [entry, ...]} for Sonari's exec-form hooks (from build_hooks_json)."""
+    import json
+    return json.loads(build_hooks_json(pythonw, hook_py))["hooks"]
+
+
+def _entry_is_sonari(entry: dict, hook_py: str) -> bool:
+    """True if a settings.json hook entry belongs to Sonari (marker: sonari-hook)."""
+    marker = os.path.basename(hook_py) or "sonari-hook"
+    for h in entry.get("hooks", []):
+        blob = h.get("command", "") + " " + " ".join(map(str, h.get("args") or []))
+        if marker in blob or "sonari-hook" in blob:
+            return True
+    return False
+
+
+def _load_settings(settings_path: str) -> dict:
+    """Read settings.json tolerantly. Missing/empty -> {}. Unparseable -> ValueError
+    (never clobber a file we cannot understand)."""
+    import json
+    if not os.path.exists(settings_path):
+        return {}
+    try:
+        with open(settings_path, "r", encoding="utf-8") as fh:
+            text = fh.read().strip()
+    except OSError as exc:
+        raise ValueError("cannot read {0}: {1}".format(settings_path, exc))
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(
+            "{0} is not valid JSON ({1}); refusing to overwrite. Fix or remove it, "
+            "then re-run 'sonari install'.".format(settings_path, exc))
+    return data if isinstance(data, dict) else {}
+
+
+def _write_settings(settings_path: str, data: dict) -> None:
+    import json
+    parent = os.path.dirname(settings_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(settings_path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+        fh.write("\n")
+
+
+def remove_hooks_from_settings(settings_path: str, hook_py: str, _data=None) -> None:
+    """Remove only Sonari's hook entries; prune emptied events / hooks. When *_data*
+    is given, prune it in place and DO NOT write (used by merge)."""
+    data = _data if _data is not None else _load_settings(settings_path)
+    hooks = data.get("hooks", {})
+    for event in list(hooks.keys()):
+        hooks[event] = [e for e in hooks[event] if not _entry_is_sonari(e, hook_py)]
+        if not hooks[event]:
+            del hooks[event]
+    if not hooks and "hooks" in data:
+        del data["hooks"]
+    if _data is None:
+        _write_settings(settings_path, data)
+
+
+def merge_hooks_into_settings(settings_path: str, pythonw: str, hook_py: str) -> None:
+    """Idempotently add Sonari's exec-form hooks to settings.json: drop any prior
+    Sonari entries (self-heal across path changes), then append the current ones.
+    Preserves all other keys and all non-Sonari hook entries."""
+    data = _load_settings(settings_path)
+    remove_hooks_from_settings(settings_path, hook_py, _data=data)  # in-place prune
+    hooks = data.setdefault("hooks", {})
+    for event, entries in _build_hooks_dict(pythonw, hook_py).items():
+        hooks.setdefault(event, []).extend(entries)
+    _write_settings(settings_path, data)
+
+
 # ---------------------------------------------------------------------------
 # WinSupervisorBackend — the SupervisorBackend ABC implementation
 # ---------------------------------------------------------------------------
