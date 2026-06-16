@@ -11,6 +11,7 @@ class SpeechItem:
     kind: str          # one of prose|choice|plan|permission|tool_announce
     text: str
     is_decision: bool  # True for choice|plan|permission
+    mute_exempt: bool = False  # spoken even when the session is muted (e.g. "muted")
 
 
 class SpeechQueue:
@@ -19,6 +20,10 @@ class SpeechQueue:
 
     def enqueue(self, item: SpeechItem) -> None:
         self._items.append(item)
+
+    def enqueue_front(self, item: SpeechItem) -> None:
+        """Put *item* at the head — used to resume the utterance paused mid-play."""
+        self._items.appendleft(item)
 
     def pop_next(self) -> "SpeechItem | None":
         # The speak loop pops outside the daemon lock while flush_session can

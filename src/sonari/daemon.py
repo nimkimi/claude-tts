@@ -47,6 +47,7 @@ class SpeechDaemon:
         self._pending_heard: dict = {}            # SpeechItem.id -> HistoryEntry
         self._nav_cursor: dict = {}               # session -> anchored message id (absent = latest)
         self._paused = threading.Event()          # play/pause: set == speech halted
+        self._paused_item = None                  # utterance interrupted by pause (replayed on resume)
         self._muted_sessions: set = set()         # sessions whose speech is muted
         self._current_item = None                 # item being spoken right now
         self._warned_immediate: set = set()
@@ -64,13 +65,14 @@ class SpeechDaemon:
         return a
 
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
-                 entry=None) -> None:
+                 entry=None, mute_exempt: bool = False) -> None:
         item = SpeechItem(
             id=self._alloc_id(),
             session=session,
             kind=kind,
             text=text,
             is_decision=is_decision,
+            mute_exempt=mute_exempt,
         )
         if entry is not None:
             self._pending_heard[item.id] = entry
@@ -332,6 +334,10 @@ class SpeechDaemon:
             self._assemblers.pop(session, None)
             self.history.reset(session)
             self._nav_cursor.pop(session, None)   # new prompt -> fresh navigation
+            # A new prompt is a user action -> auto-resume from pause (temp pause).
+            self._paused.clear()
+            self._paused_item = None
+            self._wake.set()
             self._captured_msg.discard(session)
             self._options.pop(session, None)
             return None
@@ -378,28 +384,33 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.PAUSE:
-            # Toggle play/pause of the whole speak loop.
+            # Temporary play/pause. Pause stops the current utterance and holds the
+            # loop; resume re-speaks the interrupted item so it picks back up. Also
+            # auto-cleared by a new prompt (see the FLUSH handler).
             if self._paused.is_set():
-                self._paused.clear()
-                self._wake.set()            # resume: wake the speak loop
+                self._resume()
             else:
                 self._paused.set()
-                self.speaker.cancel()       # stop the current utterance now
+                self._paused_item = self._current_item   # replay this on resume
+                self.speaker.cancel()
             return None
 
         if t == MsgType.MUTE:
-            # Toggle a sticky per-session mute. Earcons still fire (alerts).
+            # Toggle a sticky per-session mute. Earcons still fire (alerts), and the
+            # "muted"/"unmuted" confirmation is spoken (the mute-on case is exempt).
             fg = self.sessions.foreground()
             if fg is None:
                 return None
             if fg in self._muted_sessions:
                 self._muted_sessions.discard(fg)
+                self._enqueue(fg, "prose", "Session unmuted.", False)
             else:
                 self._muted_sessions.add(fg)
                 self._drop_pending(self.queue.flush_session(fg))
                 cur = self._current_item
                 if cur is not None and cur.session == fg:
                     self.speaker.cancel()
+                self._enqueue(fg, "prose", "Session muted.", False, mute_exempt=True)
             return None
 
         if t == MsgType.REPEAT:
@@ -592,6 +603,16 @@ class SpeechDaemon:
         for e in entries:
             self._enqueue(session, e.kind, e.text, False, entry=e)
 
+    def _resume(self) -> None:
+        """Clear pause and re-speak the interrupted utterance first, so play/pause
+        picks back up where it stopped."""
+        self._paused.clear()
+        item = self._paused_item
+        self._paused_item = None
+        if item is not None:
+            self.queue.enqueue_front(item)
+        self._wake.set()
+
     def _dispatch_hotkey(self, message: dict) -> None:
         """A hotkey fire is handled exactly like an inbound socket message —
         including holding the daemon lock, so an enqueue-based action (repeat /
@@ -626,7 +647,7 @@ class SpeechDaemon:
             return
         item = self.queue.pop_next()
         if item is not None:
-            if item.session in self._muted_sessions:
+            if item.session in self._muted_sessions and not item.mute_exempt:
                 # Muted session: drop the item without speaking it.
                 self._pending_heard.pop(item.id, None)
                 return

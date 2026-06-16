@@ -27,18 +27,60 @@ def test_mute_drops_speech_but_unmute_resumes():
     daemon, queue, speaker, *_ = make_daemon(foreground="fg")
     daemon.handle_message({"type": "mute", "session": "fg"})
     assert "fg" in daemon._muted_sessions
+    daemon._speak_loop_once()             # speak the "Session muted." confirmation
+    speaker.spoken.clear()
     daemon._enqueue("fg", "prose", "secret", False)
     daemon._speak_loop_once()
-    assert speaker.spoken == []           # muted: dropped, not spoken
+    assert speaker.spoken == []           # real content: dropped, not spoken
     daemon.handle_message({"type": "mute", "session": "fg"})
     assert "fg" not in daemon._muted_sessions
+    daemon._speak_loop_once()             # "Session unmuted."
+    speaker.spoken.clear()
     daemon._enqueue("fg", "prose", "hello", False)
     daemon._speak_loop_once()
     assert speaker.spoken == ["hello"]
 
 
-def test_muting_flushes_pending_queue():
+def test_muting_flushes_pending_user_content():
     daemon, queue, speaker, *_ = make_daemon(foreground="fg")
     daemon._enqueue("fg", "prose", "queued", False)
     daemon.handle_message({"type": "mute", "session": "fg"})
-    assert len(queue) == 0
+    texts = []
+    while True:
+        it = queue.pop_next()
+        if it is None:
+            break
+        texts.append(it.text)
+    assert "queued" not in texts and texts == ["Session muted."]
+
+
+def test_mute_speaks_muted_and_unmuted_confirmations():
+    daemon, queue, speaker, *_ = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "mute", "session": "fg"})
+    daemon._speak_loop_once()                 # "Session muted." is mute_exempt
+    assert "Session muted." in speaker.spoken
+    daemon._enqueue("fg", "prose", "secret", False)
+    daemon._speak_loop_once()
+    assert "secret" not in speaker.spoken     # real content still muted
+    daemon.handle_message({"type": "mute", "session": "fg"})
+    daemon._speak_loop_once()
+    assert "Session unmuted." in speaker.spoken
+
+
+def test_pause_replays_interrupted_item_on_resume():
+    daemon, queue, speaker, *_ = make_daemon(foreground="fg")
+    daemon._enqueue("fg", "prose", "interrupted sentence", False)
+    item = queue.pop_next()
+    daemon._current_item = item               # pretend it's mid-play
+    daemon.handle_message({"type": "pause", "session": "fg"})
+    assert daemon._paused.is_set() and daemon._paused_item is item
+    daemon.handle_message({"type": "pause", "session": "fg"})   # resume
+    assert not daemon._paused.is_set()
+    assert queue.pop_next() is item           # re-queued at the front to pick back up
+
+
+def test_new_prompt_clears_pause():
+    daemon, queue, speaker, *_ = make_daemon(foreground="fg")
+    daemon._paused.set(); daemon._paused_item = object()
+    daemon.handle_message({"type": "flush", "session": "fg"})
+    assert not daemon._paused.is_set() and daemon._paused_item is None
