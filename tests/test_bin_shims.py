@@ -28,6 +28,20 @@ def test_sonari_prefers_usr_bin_python3_first():
     assert pref < cmdv, "shim must prefer /usr/bin/python3 before PATH lookup"
 
 
+def test_sonari_hook_cmd_resolves_interpreter_and_logs_stderr():
+    """M10: the Windows hook launcher must not silently mute. It resolves a
+    windowless interpreter (pythonw, with a `pyw -3` fallback) and appends stderr
+    to ~/.sonari/hook.log instead of discarding it — while still exiting 0 so a
+    hook never interrupts Claude Code."""
+    txt = _read("sonari-hook.cmd")
+    low = txt.lower()
+    assert "pythonw" in low                       # preferred windowless interpreter
+    assert "pyw -3" in low                         # fallback when pythonw is absent
+    assert "hook.log" in low                       # stderr is logged...
+    assert "2>>" in low                            # ...via append-redirect, not discarded
+    assert "exit /b 0" in low                      # a hook must never fail loudly
+
+
 def test_sonari_daemon_picks_usr_bin_python3_even_when_stub_python3_on_path(tmp_path):
     # A fake `python3` earlier on PATH writes a marker; the shim must NOT pick it
     # because /usr/bin/python3 exists and is preferred. We verify by capturing
