@@ -709,6 +709,11 @@ class SpeechDaemon:
         with self._lock:
             item = self.queue.pop_next()
             self._current_item = item
+            # Capture the speaker's cancel baseline HERE, atomically with the claim.
+            # A cancel() arriving after we release the lock (but before/while speak()
+            # runs) bumps the epoch past this baseline, so the cancelled utterance is
+            # detected instead of playing in full (M2 — the pop->speak gap).
+            cancel_epoch = self.speaker.cancel_epoch()
             muted = (item is not None
                      and item.session in self._muted_sessions
                      and not item.mute_exempt)
@@ -728,17 +733,24 @@ class SpeechDaemon:
         if muted:
             return
         try:
-            completed = self.speaker.speak(item.text)
+            completed = self.speaker.speak(item.text, cancel_epoch=cancel_epoch)
         except Exception:  # noqa: BLE001 - one bad utterance must not abort the item
             completed = False
-        if not completed and self._paused.is_set():
-            # A pause interrupted this utterance: re-queue it at the front so
-            # resume picks back up here, and KEEP its _pending_heard entry (don't
-            # note_spoken) so the eventual replay can still record it as heard.
-            with self._lock:
+        requeued = False
+        with self._lock:
+            # Re-check pause INSIDE the lock (L2). A FLUSH (new prompt) also runs
+            # under this lock and clears pause + flushes the queue; checking pause
+            # outside the lock let a FLUSH land between the check and the
+            # enqueue_front, resurrecting a just-flushed item. Atomic check+enqueue
+            # closes that window.
+            if not completed and self._paused.is_set():
+                # A pause interrupted this utterance: re-queue it at the front so
+                # resume picks back up here, and KEEP its _pending_heard entry (don't
+                # note_spoken) so the eventual replay can still record it as heard.
                 self._current_item = None
                 self.queue.enqueue_front(item)
-        else:
+                requeued = True
+        if not requeued:
             self.note_spoken(item, completed)
 
     def _handle_conn(self, conn) -> None:

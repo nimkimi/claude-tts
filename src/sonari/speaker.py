@@ -27,20 +27,33 @@ class Speaker:
         self._earcon_procs: list = []
         self._wait_timeout = _wait_timeout
 
-    def speak(self, text: str) -> bool:
+    def cancel_epoch(self) -> int:
+        """The current cancel epoch. The daemon captures this at CLAIM time (under
+        its own lock) and passes it to speak(), so a cancel landing in the gap
+        between claim and speak() is detected (M2)."""
+        with self._current_lock:
+            return self._cancel_epoch
+
+    def speak(self, text: str, cancel_epoch=None) -> bool:
         """Speak text, blocking. Return True iff the utterance COMPLETED
         (say exited 0). A cancelled/terminated utterance returns False so the
-        caller can leave it marked unheard (sentence-granular replay)."""
+        caller can leave it marked unheard (sentence-granular replay).
+
+        *cancel_epoch* is the baseline to compare against. The daemon captures it
+        at the moment it claims the item (under its lock) and passes it here; a
+        cancel() arriving between the claim and this call bumps the live epoch past
+        the captured baseline, so we still detect it. When None, the baseline is the
+        epoch read here (the prior single-call behavior)."""
         if self._say_runner is None:
             return False
-        # Capture the cancel epoch BEFORE synthesis. say_runner (TTS synthesis)
+        # Establish the baseline epoch BEFORE synthesis. say_runner (TTS synthesis)
         # can take tens-hundreds of ms, during which there is no proc to cancel —
         # a cancel() arriving in that window used to be a silent no-op and the
-        # utterance played anyway. If the epoch advanced while we synthesized, a
-        # cancel landed: honor it by terminating immediately and reporting the
-        # utterance as NOT completed (so the caller leaves it unheard / replays).
+        # utterance played anyway. If the epoch advanced past the baseline while we
+        # synthesized, a cancel landed: honor it by terminating immediately and
+        # reporting the utterance as NOT completed (so the caller replays it).
         with self._current_lock:
-            epoch = self._cancel_epoch
+            epoch = self._cancel_epoch if cancel_epoch is None else cancel_epoch
         proc = self._say_runner(text, self._voice, self._rate)
         with self._current_lock:
             interrupted = self._cancel_epoch != epoch
