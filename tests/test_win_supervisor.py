@@ -163,11 +163,25 @@ def test_spawn_flags_value():
     assert _SPAWN_FLAGS == 0x08000008
 
 
+def test_post_install_notes_are_accurate(capsys):
+    # #19: hotkeys ship + start with the daemon, so don't say they "arrive in M3".
+    # #10: slash-command files use NTFS-illegal colons, so don't promise them on
+    # Windows — note the limitation honestly.
+    WinSupervisorBackend().post_install_notes()
+    out = capsys.readouterr().out
+    low = out.lower()
+    assert "sonari doctor" in out
+    assert "milestone 3" not in low and "arrive in" not in low   # #19
+    assert "hotkey" in low                                        # hotkeys are active now
+    assert "slash command" in low and ("not available" in low      # #10
+                                        or "aren't available" in low)
+
+
 def test_post_install_notes_runs(capsys):
     from sonari.platform.windows.supervisor import WinSupervisorBackend
     WinSupervisorBackend().post_install_notes()
     out = capsys.readouterr().out
-    assert "sonari doctor" in out and "M3" in out   # next steps + hotkeys deferred
+    assert "sonari doctor" in out   # next steps (accuracy covered by test_post_install_notes_are_accurate)
 
 
 def test_hooks_doctor_row_windows_absent(monkeypatch, tmp_path):

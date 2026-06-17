@@ -814,8 +814,14 @@ class WinSupervisorBackend(SupervisorBackend):
         """Print the Windows post-install next steps."""
         print("")
         print("Sonari is installed. Run 'sonari doctor' to confirm everything is green.")
-        print("  - Enable the 'sonari' plugin for its slash commands (optional).")
-        print("  - Global hotkeys arrive in Milestone 3 (M3); speech works without them.")
+        # #19: hotkeys now ship and start with the daemon (no longer "M3-pending").
+        print("  - Global hotkeys start automatically with the daemon; "
+              "run 'sonari keymap' to see the bindings.")
+        # #10: the plugin's slash-command files use names NTFS cannot represent,
+        # so they aren't checked out / available on Windows yet. Be honest rather
+        # than pointing users at commands that don't exist.
+        print("  - Note: the plugin's slash commands are not available on Windows "
+              "yet (their command files use names NTFS can't represent).")
 
     def hooks_doctor_row(self) -> tuple:
         """Windows: hooks live in the user-scope Claude settings.json. Goes RED if
