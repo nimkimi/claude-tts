@@ -146,6 +146,19 @@ clears its captured flag.
   intended resolution of "SET_FOREGROUND doesn't release the outgoing owner".
 - **L5 / L6 / L7:** dead-config and negative/doc findings; no code action.
 
+## Post-implementation review (adversarial, 7 agents over the diff)
+
+Two confirmed findings, both addressed:
+
+1. **`_nav` seized the voice unconditionally** — could strand a different session
+   still streaming, inconsistent with the conservative M4 rule. Fixed: nav now
+   claims only a free/stale/own voice (`owner == session or owner not in
+   _open_msg`).
+2. **Reload `join()` ran while holding the daemon `_lock`** the hotkey pump thread
+   needs to dispatch — a hotkey firing during a reload could stall the daemon and,
+   on join timeout, re-create the H2 dark-hotkey race. Fixed: RELOAD_KEYMAP runs
+   the reload on a short-lived thread off the lock, serialized by `_reload_lock`.
+
 ## Testing
 
 Unit tests per fix (TDD). Key new tests: two-session strand (H1), Windows
