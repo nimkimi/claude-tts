@@ -1,11 +1,14 @@
 ---
-description: Show the active Sonari global hotkey bindings
+description: List Sonari hotkey bindings (incl. unbound); '<action> clear' to unbind
+argument-hint: [<action> clear]
 ---
 
-Run the Sonari keymap command with the Bash tool:
+Run the Sonari keymap command with the Bash tool, forwarding any arguments:
 
 ```
-bash "${CLAUDE_PLUGIN_ROOT}/bin/sonari" keymap
+bash "${CLAUDE_PLUGIN_ROOT}/bin/sonari" keymap $ARGUMENTS
 ```
 
-Print the command's output to the user verbatim so they can see each action and its hotkey.
+Print the command's output to the user verbatim. With no arguments it lists every
+action and its hotkey (unbound actions show "(unbound)"). `<action> clear` (or
+`<action> none`) unbinds that action and applies it live.

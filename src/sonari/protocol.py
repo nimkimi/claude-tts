@@ -32,6 +32,7 @@ class MsgType:
     PING = "ping"
     REREAD_OPTIONS = "reread_options"
     CYCLE_VERBOSITY = "cycle_verbosity"
+    RELOAD_KEYMAP = "reload_keymap"   # re-read keymap.json + re-register hotkeys
 
 
 def encode(msg: dict) -> bytes:

@@ -114,6 +114,7 @@ def test_msgtype_defines_no_extra_string_constants():
         "PING": "ping",
         "REREAD_OPTIONS": "reread_options",
         "CYCLE_VERBOSITY": "cycle_verbosity",
+        "RELOAD_KEYMAP": "reload_keymap",
     }
     assert actual == expected
 

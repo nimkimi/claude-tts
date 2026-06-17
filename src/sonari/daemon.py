@@ -422,6 +422,12 @@ class SpeechDaemon:
                 self._enqueue(fg, "prose", "Session muted.", False, mute_exempt=True)
             return None
 
+        if t == MsgType.RELOAD_KEYMAP:
+            # keymap.json changed (e.g. an unbind): re-register hotkeys so it
+            # takes effect without a daemon restart.
+            self._reload_hotkeys()
+            return None
+
         if t == MsgType.REPEAT:
             fg = self.sessions.foreground()
             if fg is None:
@@ -580,6 +586,12 @@ class SpeechDaemon:
             get_platform().hotkey.stop()
         except Exception:  # noqa: BLE001 - shutdown must not raise
             pass
+
+    def _reload_hotkeys(self) -> None:
+        """Re-register global hotkeys from the current keymap.json. start() re-reads
+        resolve_keymap(load_keymap()), so a stop+start picks up any unbind/rebind."""
+        self._stop_hotkeys()
+        self._start_hotkeys()
 
     def _nav(self, session: str, to: str) -> None:
         """Move the per-session message cursor and play from there to the end.

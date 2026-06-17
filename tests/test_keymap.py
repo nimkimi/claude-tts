@@ -135,6 +135,36 @@ def test_resolve_unknown_action_raises():
         keymap.resolve_keymap({"frobnicate": {"key": "s", "mods": ["ctrl"]}})
 
 
+def test_resolve_skips_unbound_entries():
+    # An entry with no key is UNBOUND -> skipped (not an error), so an action with
+    # a default binding can be explicitly cleared in keymap.json.
+    resolved = keymap.resolve_keymap({"pause": {"key": None, "mods": ["alt"]},
+                                      "mute": {"key": "m", "mods": ["alt"]}})
+    actions = {e["action"] for e in resolved}
+    assert "pause" not in actions and "mute" in actions
+
+
+def test_unbind_action_default_writes_unbound_override(monkeypatch, tmp_path):
+    km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
+    keymap.unbind_action("nav_first")            # nav_first HAS a default binding
+    user = json.loads(km.read_text(encoding="utf-8"))
+    assert user["nav_first"]["key"] is None      # explicit unbound override
+    resolved = keymap.resolve_keymap(keymap.load_keymap())
+    assert "nav_first" not in {e["action"] for e in resolved}
+
+
+def test_unbind_action_non_default_just_drops(monkeypatch, tmp_path):
+    km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
+    km.write_text(json.dumps({"faster": {"key": "]", "mods": ["alt"]}}), encoding="utf-8")
+    keymap.unbind_action("faster")               # no default -> remove the binding
+    assert "faster" not in json.loads(km.read_text(encoding="utf-8"))
+
+
+def test_unbind_unknown_action_raises():
+    with pytest.raises(ValueError):
+        keymap.unbind_action("bogus")
+
+
 # --- load_keymap ------------------------------------------------------------
 
 def test_load_keymap_returns_defaults_when_missing(monkeypatch, tmp_path):

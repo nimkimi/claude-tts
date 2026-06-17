@@ -54,3 +54,12 @@ def test_one_bad_hotkey_does_not_raise(monkeypatch):
     monkeypatch.setattr(daemon, "handle_message",
                         lambda m: (_ for _ in ()).throw(RuntimeError("boom")))
     daemon._dispatch_hotkey({"type": "stop"})   # swallowed, no raise
+
+
+def test_reload_keymap_re_registers_hotkeys():
+    daemon = make_daemon(foreground="fg")[0]
+    calls = []
+    daemon._stop_hotkeys = lambda: calls.append("stop")
+    daemon._start_hotkeys = lambda: calls.append("start")
+    daemon.handle_message({"type": "reload_keymap"})
+    assert calls == ["stop", "start"]   # stop+start re-reads keymap.json + re-registers

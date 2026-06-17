@@ -107,15 +107,36 @@ def _combo_label(modifiers: int, key_code: int) -> str:
     return _platform().hotkey.display_combo(modifiers, key_code)
 
 
-def _cmd_keymap(_args) -> int:
+def _cmd_keymap(args) -> int:
+    action = getattr(args, "action", None)
+    value = getattr(args, "value", None)
+    # `keymap <action> clear|none` -> unbind that action.
+    if action:
+        if value not in ("clear", "none"):
+            print("sonari: usage: sonari keymap [<action> clear]", file=sys.stderr)
+            return 2
+        try:
+            keymap.unbind_action(action)
+        except ValueError as exc:
+            print(f"sonari: {exc}", file=sys.stderr)
+            return 1
+        try:                                  # apply live; harmless if daemon is down
+            _send({"v": PROTOCOL_VERSION, "type": MsgType.RELOAD_KEYMAP})
+        except Exception:  # noqa: BLE001 - the keymap.json write is what matters
+            pass
+        print(f"Unbound {action}.")
+        return 0
+    # No args: list EVERY action — bound ones with their combo, the rest "(unbound)".
     try:
         resolved = keymap.resolve_keymap(keymap.load_keymap())
     except ValueError as exc:
         print(f"sonari: invalid keymap: {exc}", file=sys.stderr)
         return 1
-    for entry in resolved:
-        combo = _combo_label(entry["modifiers"], entry["keyCode"])
-        print("{0:<16} {1}".format(entry["action"], combo))
+    combo_by_action = {
+        e["action"]: _combo_label(e["modifiers"], e["keyCode"]) for e in resolved
+    }
+    for name in keymap.ACTION_MESSAGES:
+        print("{0:<16} {1}".format(name, combo_by_action.get(name, "(unbound)")))
     return 0
 
 
@@ -435,9 +456,12 @@ def _register_local(sub) -> None:
         func=_cmd_uninstall)
     sub.add_parser("daemon", help="run the speech daemon in the foreground").set_defaults(
         func=_cmd_daemon)
-    sub.add_parser("keymap",
-                   help="print the active global hotkey bindings").set_defaults(
-        func=_cmd_keymap)
+    sp = sub.add_parser(
+        "keymap",
+        help="list hotkey bindings (incl. unbound); '<action> clear' to unbind")
+    sp.add_argument("action", nargs="?", help="action to unbind")
+    sp.add_argument("value", nargs="?", help="'clear' or 'none' to unbind the action")
+    sp.set_defaults(func=_cmd_keymap)
 
 
 def main(argv: Optional[list] = None) -> int:

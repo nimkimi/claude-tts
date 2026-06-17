@@ -75,8 +75,10 @@ def _copy_keymap(km: dict) -> dict:
 def resolve_keymap(keymap=None) -> list:
     """Resolve an action->binding map into the Swift-facing array.
 
-    Each output entry: {action, keyCode, modifiers, message}. Raises ValueError
-    on an unknown key name, unknown modifier name, or unknown action.
+    Each output entry: {action, keyCode, modifiers, message}. An entry whose key
+    is empty/None is treated as UNBOUND and skipped (no hotkey registered) — this
+    lets keymap.json explicitly clear an action that has a default binding. Raises
+    ValueError on an unknown key name, unknown modifier name, or unknown action.
     """
     if keymap is None:
         keymap = default_keymap()
@@ -86,6 +88,8 @@ def resolve_keymap(keymap=None) -> list:
         if action not in ACTION_MESSAGES:
             raise ValueError("unknown action: {0}".format(action))
         key = (binding.get("key") or "").lower()
+        if not key:
+            continue                    # explicitly unbound -> no hotkey
         if key not in key_codes:
             raise ValueError("unknown key: {0}".format(binding.get("key")))
         mask = 0
@@ -128,6 +132,42 @@ def load_keymap() -> dict:
                 "mods": list(binding.get("mods", [])),
             }
     return merged
+
+
+def _read_user_keymap() -> dict:
+    """The user's raw keymap.json overrides as a dict, or {} if missing/corrupt."""
+    try:
+        with open(KEYMAP_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (FileNotFoundError, ValueError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_user_keymap(user: dict) -> None:
+    """Atomically persist the user's keymap.json overrides."""
+    ensure_sonari_dir()
+    tmp = str(KEYMAP_PATH) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(user, fh, indent=2)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, str(KEYMAP_PATH))
+
+
+def unbind_action(action: str) -> None:
+    """Persist 'no hotkey' for *action* in the user's keymap.json. If the action
+    has a default binding, write an explicit unbound override ({"key": null}) so it
+    overrides that default; if it has no default, just drop any user binding (the
+    default is already unbound). Raises ValueError for an unknown action."""
+    if action not in ACTION_MESSAGES:
+        raise ValueError("unknown action: {0}".format(action))
+    user = _read_user_keymap()
+    if action in _DEFAULT_KEYS:
+        user[action] = {"key": None, "mods": []}
+    else:
+        user.pop(action, None)
+    _write_user_keymap(user)
 
 
 def write_default_keymap_if_absent() -> bool:

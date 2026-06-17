@@ -97,9 +97,29 @@ def test_keymap_subcommand_prints_the_default_bindings(capsys, tmp_path, monkeyp
         for action in ("nav_next", "nav_prev", "nav_first", "nav_last",
                        "pause", "mute"):
             assert action in out
-        # faster/slower ship UNBOUND, so they aren't in the default resolved keymap
-        assert "faster" not in out and "slower" not in out
+        # faster/slower are listed too, marked unbound (the keymap lists every action)
+        assert "faster" in out and "slower" in out
+        assert "(unbound)" in out
         assert "Ctrl" in out and "Cmd" in out
     finally:
         platform._CACHE = None
         cli._PLATFORM = None
+
+
+def test_keymap_clear_unbinds_and_requests_live_reload(monkeypatch, tmp_path):
+    import json
+    monkeypatch.setattr(cli.keymap, "KEYMAP_PATH", tmp_path / "keymap.json")
+    sent = []
+    with mock.patch("sonari.client.send", side_effect=lambda m, **k: sent.append(m)):
+        rc = cli.main(["keymap", "nav_first", "clear"])
+    assert rc == 0
+    user = json.loads((tmp_path / "keymap.json").read_text(encoding="utf-8"))
+    assert user["nav_first"]["key"] is None                 # unbound override written
+    assert any(m.get("type") == "reload_keymap" for m in sent)  # live reload requested
+
+
+def test_keymap_clear_rejects_unknown_action(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli.keymap, "KEYMAP_PATH", tmp_path / "keymap.json")
+    with mock.patch("sonari.client.send"):
+        rc = cli.main(["keymap", "bogus", "clear"])
+    assert rc == 1
