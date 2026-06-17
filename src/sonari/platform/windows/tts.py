@@ -99,7 +99,9 @@ class _TtsHandle:
         if self.returncode is None:
             self.returncode = 1
         try:
-            self._winsound.PlaySound(None, self._winsound.SND_PURGE)
+            # PlaySound(None, 0) is the documented way to stop playback on modern
+            # Windows; SND_PURGE is documented as not supported there. (#17)
+            self._winsound.PlaySound(None, 0)
         except Exception:
             pass
         try:

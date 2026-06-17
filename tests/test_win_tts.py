@@ -83,3 +83,17 @@ def test_list_voices_returns_display_name_strings():
     voices = WinTtsBackend().list_voices()
     assert isinstance(voices, list) and voices
     assert all(isinstance(v, str) for v in voices), voices
+
+
+def test_terminate_issues_a_real_stop_playsound_call():
+    # SND_PURGE is documented "not supported on modern Windows"; the stop must
+    # go through PlaySound(None, 0). The fake winsound has no SND_PURGE, so the
+    # old call raised AttributeError and was swallowed -> interrupt never stopped
+    # audio, and no test ever caught it. (#17)
+    import winsound
+    winsound._calls.clear()
+    h = WinTtsBackend().run("hello", None, 200)
+    played = winsound._calls[-1]
+    assert played[1] & winsound.SND_ASYNC, played   # async playback, not SND_SYNC
+    h.terminate()
+    assert (None, 0) in winsound._calls, winsound._calls  # a real stop was issued
