@@ -141,12 +141,17 @@ class SpeechDaemon:
     def _claim_for_decision(self, session: str) -> bool:
         """Decisions (question/plan/permission) are user-blocking and belong to the
         window the user is looking at. A decision for the FOREGROUND session claims
-        the voice even from a background owner, so the options are always read; a
-        decision for the current owner is still honored. Superset of _may_speak: it
-        never drops a decision _may_speak would have spoken (M4)."""
+        a voice that is free OR held by a session whose message has already ENDED
+        (a stale lock) — so the options are read even when a background owner still
+        holds a finished-message lock (M4). It deliberately does NOT steal the voice
+        from a session still STREAMING a reply (owner in _open_msg): interrupting an
+        in-progress response is exactly what H1 prevents, so such a decision stays
+        captured (its text is stored for reread / catch_up). A decision for the
+        current owner is always honored. Superset of _may_speak."""
         if self._voice_owner == session:
             return True
-        if self.sessions.is_foreground(session):
+        if (self.sessions.is_foreground(session)
+                and self._voice_owner not in self._open_msg):
             self._voice_owner = session
             self._captured_msg.discard(session)
             return True
