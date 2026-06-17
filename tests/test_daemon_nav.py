@@ -100,6 +100,24 @@ def test_nav_then_live_prose_continues_after_replay_no_interleave():
     assert texts.index("Live continues.") > texts.index("m2")   # after, not interleaved
 
 
+def test_nav_makes_foreground_session_the_voice_owner():
+    """L3: navigating is an active foreground action; it must claim the voice so
+    that prose streaming in after the replay is spoken, not captured, even if a
+    background session currently owns the voice."""
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    daemon._voice_owner = "bg"                 # a background session holds the voice
+    daemon._captured_msg.add("fg")             # and fg's message was being captured
+    _seed(daemon)
+    _nav(daemon, "prev")
+    assert daemon._voice_owner == "fg"         # nav reclaimed the voice for fg
+    assert "fg" not in daemon._captured_msg
+    # live prose for fg now enqueues (spoken), not captured
+    _drain(queue)
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "Live after nav. ", "index": 9, "final": False})
+    assert [s.text for s in _drain(queue)] == ["Live after nav."]
+
+
 def test_nav_with_empty_history_announces():
     daemon, queue, *_ = make_daemon(foreground="fg")
     _nav(daemon, "prev")

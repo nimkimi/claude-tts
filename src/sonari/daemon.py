@@ -138,6 +138,20 @@ class SpeechDaemon:
             return True
         return False
 
+    def _claim_for_decision(self, session: str) -> bool:
+        """Decisions (question/plan/permission) are user-blocking and belong to the
+        window the user is looking at. A decision for the FOREGROUND session claims
+        the voice even from a background owner, so the options are always read; a
+        decision for the current owner is still honored. Superset of _may_speak: it
+        never drops a decision _may_speak would have spoken (M4)."""
+        if self._voice_owner == session:
+            return True
+        if self.sessions.is_foreground(session):
+            self._voice_owner = session
+            self._captured_msg.discard(session)
+            return True
+        return False
+
     @staticmethod
     def _choice_text(msg) -> str:
         parts = []
@@ -304,7 +318,7 @@ class SpeechDaemon:
             self._options[session] = text
             entry = self.history.record(session, "choice", text)
             self.history.end_message(session)
-            if self._may_speak(session):
+            if self._claim_for_decision(session):
                 self._enqueue(session, "choice", text, True, entry=entry)
             return None
 
@@ -316,7 +330,7 @@ class SpeechDaemon:
             self._options[session] = text
             entry = self.history.record(session, "plan", text)
             self.history.end_message(session)
-            if self._may_speak(session):
+            if self._claim_for_decision(session):
                 self._enqueue(session, "plan", text, True, entry=entry)
             return None
 
@@ -328,7 +342,7 @@ class SpeechDaemon:
             self._options[session] = text
             entry = self.history.record(session, "permission", text)
             self.history.end_message(session)
-            if self._may_speak(session):
+            if self._claim_for_decision(session):
                 self._enqueue(session, "permission", text, True, entry=entry)
             return None
 
@@ -631,6 +645,11 @@ class SpeechDaemon:
         if not ids:
             self._enqueue(session, "prose", "Nothing to navigate yet.", False)
             return
+        # Navigating is an active foreground action: claim the voice for this
+        # session so prose streaming in after the replay is spoken, not captured
+        # by a background owner (L3).
+        self._voice_owner = session
+        self._captured_msg.discard(session)
         n = len(ids)
         # Anchor on a STABLE message id, not a position: new paragraphs streaming
         # in append ids without shifting where the cursor points. Unset/stale ->
