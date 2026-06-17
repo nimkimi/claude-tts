@@ -490,7 +490,15 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.JUMP_DECISION:
-            self.queue.jump_to_decision()
+            # Mark the cancelled current item heard and drop the heard-markers of
+            # the skipped prose, so a later CATCH_UP doesn't replay them out of
+            # order (mirrors SKIP) (M6).
+            cur = self._current_item
+            if cur is not None:
+                entry = self._pending_heard.get(cur.id)
+                if entry is not None:
+                    entry.heard = True
+            self._drop_pending(self.queue.jump_to_decision())
             self.speaker.cancel()
             return None
 

@@ -34,9 +34,13 @@ class SpeechQueue:
         except IndexError:
             return None
 
-    def jump_to_decision(self) -> None:
+    def jump_to_decision(self) -> "list[SpeechItem]":
+        """Discard leading non-decision items so the next decision is at the front.
+        Returns the discarded items so the caller can drop their heard-markers."""
+        dropped = []
         while self._items and not self._items[0].is_decision:
-            self._items.popleft()
+            dropped.append(self._items.popleft())
+        return dropped
 
     def clear(self) -> "list[SpeechItem]":
         dropped = list(self._items)
