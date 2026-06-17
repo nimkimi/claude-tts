@@ -33,5 +33,19 @@ def test_play_missing_returns_none_without_spawning(tmp_path):
     assert result is None and popen.call_count == 0
 
 
+def test_play_spawn_failure_is_logged_not_swallowed(tmp_path, capsys):
+    # A real WAV exists, so play() reaches the spawn; force the spawn to blow up.
+    p = _wav(tmp_path)
+    with mock.patch("subprocess.Popen", side_effect=OSError("spawn boom")):
+        result = WinEarconBackend().play(str(p))
+    # Contract preserved: a spawn failure still returns None (caller handles it).
+    assert result is None
+    # ...but it must be DIAGNOSABLE: a traceback is emitted to stderr (which the
+    # daemon routes to LOG_PATH), not silently swallowed.
+    err = capsys.readouterr().err
+    assert "Traceback" in err
+    assert "spawn boom" in err
+
+
 def test_default_earcons_six():
     assert len(WinEarconBackend().default_earcons()) == 6

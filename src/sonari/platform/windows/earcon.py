@@ -72,7 +72,12 @@ class WinEarconBackend(EarconBackend):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - a failed earcon spawn must never crash
+            # the caller, but for an eyes-free user a SILENT missing earcon is
+            # also untraceable. Log the traceback (daemon routes stderr -> the
+            # log) so the failure is diagnosable, then preserve the None contract.
+            import traceback
+            traceback.print_exc(file=sys.stderr)
             return None
 
     def default_earcons(self) -> dict:
