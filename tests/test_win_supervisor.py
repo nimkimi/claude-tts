@@ -138,7 +138,33 @@ def test_hooks_doctor_row_windows_absent(monkeypatch, tmp_path):
     monkeypatch.setattr(sup, "claude_settings_path",
                         lambda: str(tmp_path / "settings.json"))
     name, ok, _ = sup.WinSupervisorBackend().hooks_doctor_row()
-    assert name == "hooks installed" and ok is False   # no settings yet
+    assert name == "hooks installed" and ok is False   # no settings, no plugin
+
+
+def test_hooks_doctor_row_ok_when_plugin_enabled(monkeypatch, tmp_path):
+    # Hooks supplied by the enabled plugin (no hand-wired settings.json block) must
+    # pass — not report FAIL as if uninstalled.
+    import json
+    from sonari.platform.windows import supervisor as sup
+    sp = tmp_path / "settings.json"
+    sp.write_text(json.dumps({"enabledPlugins": {"sonari@sonari": True}}), encoding="utf-8")
+    monkeypatch.setattr(sup, "claude_settings_path", lambda: str(sp))
+    name, ok, detail = sup.WinSupervisorBackend().hooks_doctor_row()
+    assert name == "hooks installed" and ok is True
+    assert "plugin" in detail
+
+
+def test_settings_has_sonari_plugin(tmp_path):
+    import json
+    from sonari.platform.windows import supervisor as sup
+    sp = tmp_path / "settings.json"
+    sp.write_text(json.dumps({"enabledPlugins": {"x@mkt": True, "sonari@sonari": True}}),
+                  encoding="utf-8")
+    assert sup.settings_has_sonari_plugin(str(sp))
+    sp.write_text(json.dumps({"enabledPlugins": {"sonari@sonari": False}}), encoding="utf-8")
+    assert not sup.settings_has_sonari_plugin(str(sp))   # disabled doesn't count
+    sp.write_text(json.dumps({"enabledPlugins": {}}), encoding="utf-8")
+    assert not sup.settings_has_sonari_plugin(str(sp))
 
 
 def test_install_registers_task_merges_hooks_and_places_launcher(tmp_path, monkeypatch):

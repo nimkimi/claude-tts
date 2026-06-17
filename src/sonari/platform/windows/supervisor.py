@@ -443,6 +443,24 @@ def settings_has_sonari_hooks(settings_path: str) -> bool:
     return False
 
 
+def settings_has_sonari_plugin(settings_path: str) -> bool:
+    """True if the Sonari plugin is enabled in settings.json. When it is, the
+    plugin's hooks/hooks.json supplies the hooks, so a hand-wired settings.json
+    block is not required (and would double-fire)."""
+    import json
+    try:
+        with open(settings_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return False
+    plugins = (data or {}).get("enabledPlugins", {}) if isinstance(data, dict) else {}
+    for name, enabled in plugins.items():
+        # keys look like "sonari@sonari"; match the plugin-name part.
+        if enabled and str(name).split("@", 1)[0] == "sonari":
+            return True
+    return False
+
+
 def _build_hooks_dict(pythonw: str, hook_py: str) -> dict:
     """Return {event: [entry, ...]} for Sonari's exec-form hooks (from build_hooks_json)."""
     import json
@@ -720,9 +738,13 @@ class WinSupervisorBackend(SupervisorBackend):
         print("  - Global hotkeys arrive in Milestone 3 (M3); speech works without them.")
 
     def hooks_doctor_row(self) -> tuple:
-        """Windows: hooks live in the user-scope Claude settings.json."""
+        """Windows: Sonari hooks come from EITHER a hand-wired settings.json block
+        or the enabled 'sonari' plugin (its hooks/hooks.json). Either is fine."""
         path = claude_settings_path()
-        ok = settings_has_sonari_hooks(path)
-        return ("hooks installed", ok,
-                path if ok else
-                "no Sonari hooks in {0} (run 'sonari install')".format(path))
+        if settings_has_sonari_hooks(path):
+            return ("hooks installed", True, "{0} (settings.json)".format(path))
+        if settings_has_sonari_plugin(path):
+            return ("hooks installed", True, "via the sonari plugin")
+        return ("hooks installed", False,
+                "no Sonari hooks in {0} and the sonari plugin is not enabled "
+                "(run 'sonari install', or enable the sonari plugin)".format(path))
