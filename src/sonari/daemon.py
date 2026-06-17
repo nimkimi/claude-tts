@@ -727,9 +727,16 @@ class SpeechDaemon:
         self._wake.set()
 
     def _dispatch_hotkey(self, message: dict) -> None:
-        """A hotkey fire is handled exactly like an inbound socket message —
-        including holding the daemon lock, so an enqueue-based action (repeat /
-        skip_back / catch_up) can't race the speak/socket threads and get lost."""
+        """A hotkey fire is handled exactly like an inbound socket message.
+
+        MUST hold self._lock around handle_message, identical to the socket path
+        (_handle_conn): the hotkey thread mutates shared state (queue, history,
+        config) concurrently with the speak loop, so without the lock it races
+        -> 'list changed size during iteration' / corruption. handle_message and
+        its callees never acquire self._lock (note_spoken/speak run on the speak
+        thread), so this is deadlock-free. An enqueue-based action (repeat /
+        skip_back / catch_up) is likewise safe from losing its item to that race.
+        """
         try:
             with self._lock:
                 self.handle_message(message)
@@ -966,15 +973,20 @@ _FAULT_FILE = None
 
 
 def _arm_faulthandler() -> None:
-    """Dump every thread's Python stack to ~/.sonari/faulthandler.log on a NATIVE
+    """Dump every thread's Python stack to SONARI_DIR/faulthandler.log on a NATIVE
     crash (access violation / segfault in WinRT, ctypes, or winsound) — the only
     way to see otherwise-silent C-level daemon deaths. Never raises."""
     global _FAULT_FILE
     try:
         import faulthandler
-        path = os.path.join(os.path.expanduser("~"), ".sonari", "faulthandler.log")
+        # Import SONARI_DIR LIVE (not at module top) so the conftest monkeypatch /
+        # any SONARI_DIR redirection takes effect; a top-level import would freeze
+        # the value before tests patch it and leak into the real ~/.sonari.
+        from sonari.paths import SONARI_DIR
+        path = str(SONARI_DIR / "faulthandler.log")
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        _FAULT_FILE = open(path, "a", encoding="utf-8")
+        # mode 'w': only the latest run's crash matters; never grow unbounded.
+        _FAULT_FILE = open(path, "w", encoding="utf-8")
         _FAULT_FILE.write("=== faulthandler armed: pid {0} ===\n".format(os.getpid()))
         _FAULT_FILE.flush()
         faulthandler.enable(file=_FAULT_FILE, all_threads=True)

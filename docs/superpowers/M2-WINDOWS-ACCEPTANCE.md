@@ -3,6 +3,8 @@
 > **Purpose:** This file is the gate M2 cannot close on macOS. Every item marked ⚠ is mock-blind — it cannot be verified by the macOS test suite. A human on a real Windows 10/11 machine must work through each item and tick it off before M2 is declared production-ready on Windows.
 >
 > **Scope:** Windows 10 21H2+ and Windows 11. Python 3.9+. Tested architectures: win-amd64. win-arm64 has an open risk — see Risks section.
+>
+> **Related:** The consolidated on-hardware residual checklist (winrt-absent, interrupt-silence, %TEMP% non-accumulation, hook-staleness, double-fire, autostart-after-logon, NTFS checkout) lives in **GitHub issue #28**. This file covers the TTS / earcon / crash-survival specifics.
 
 ---
 
@@ -22,12 +24,12 @@
 ```powershell
 pip install winrt-runtime ^
             winrt-Windows.Media.SpeechSynthesis ^
-            winrt-Windows.Media.Playback ^
-            winrt-Windows.Media.Core ^
             winrt-Windows.Storage.Streams
 ```
 
 Expected: all packages install without error. Confirm no `win-arm64` availability warning is printed (see Risk h).
+
+> Only these three projections are required. Playback is stdlib `winsound` (COM-free) — the `winrt-Windows.Media.Playback` / `winrt-Windows.Media.Core` (MediaPlayer/MediaSource) packages are **no longer needed** and were dropped from this list; see Risk (a).
 
 ### 1b. Register the Task Scheduler task (non-admin)
 
@@ -63,7 +65,7 @@ Confirm:
 
 ## 2. ⚠ Speech
 
-> **Mock-blind risk.** The macOS suite proves the `_TtsHandle` contract holds against a fake `MediaPlayer`. It does NOT prove that `MediaPlayer.play()` actually routes audio to the speakers from a `DETACHED_PROCESS | CREATE_NO_WINDOW` Task Scheduler process. See Risk (a).
+> **Mock-blind risk.** The macOS suite proves the `_TtsHandle` contract holds against a fake `winsound`. It does NOT prove that `winsound.PlaySound(path, SND_FILENAME | SND_ASYNC)` actually routes audio to the speakers from a `DETACHED_PROCESS | CREATE_NO_WINDOW` Task Scheduler process, nor that the daemon survives a long run. See Risk (a).
 
 ### 2a. Start a `claude` session and send a short prompt
 
@@ -92,19 +94,40 @@ Expected: `v.id` contains `Speech_OneCore` (e.g. `HKEY_LOCAL_MACHINE\SOFTWARE\Mi
 
 If only Desktop voices are listed (id contains `Speech\Voices\Tokens`), install a OneCore language pack: **Settings → Time & language → Speech → Add voices** and select an English (United States) Neural voice (e.g. "Microsoft Aria Online (Natural)").
 
+### 2c. Crash-survival soak (the headline reason for the winsound switch)
+
+> **Mock-blind risk.** This is the single most important on-hardware check and it has **zero automated coverage.** The previous MediaPlayer-based playback crashed the daemon with a native access violation after ~80 utterances (the daemon-death bug); the `winsound` switch (COM-free, in-process) is what fixes it. A passing mock suite cannot prove the fix — only a real long run can.
+
+Speak **≥ 300 consecutive utterances** through the daemon and confirm the daemon process survives the whole run with no native access violation:
+
+```python
+from sonari.platform.windows.tts import WinTtsBackend
+
+b = WinTtsBackend()   # reuses one SpeechSynthesizer across the run
+for i in range(300):
+    h = b.run(f"Utterance number {i}.", None, 200)
+    h.wait(timeout=10.0)   # play to completion before the next
+print("survived 300 utterances")
+```
+
+Expected:
+- All 300 utterances synthesize and play; the script prints "survived 300 utterances".
+- The process does **not** die with a native access violation (`0xC0000005`) or any crash dialog.
+- Confirm the daemon itself survives the same soak in-session: `tasklist | findstr python` shows the same daemon PID before and after a long, chatty `claude` session.
+
 ---
 
 ## 3. ⚠ Interrupt
 
-> **Mock-blind risk.** `_TtsHandle.terminate()` calls `MediaPlayer.pause()` + `MediaPlayer.close()` on the fake. On real WinRT, `close()` may raise a COM exception if the player is already in a terminal state — the `try/except Exception: pass` guard silences this, but the audio must actually stop.
+> **Mock-blind risk.** `_TtsHandle.terminate()` stops playback with `winsound.PlaySound(None, 0)` — the documented stop call on modern Windows (`SND_PURGE` is documented as unsupported there, see #17). The mock records the call but cannot prove the audio actually goes silent. The `try/except Exception: pass` guard silences any error, so a no-op stop would pass silently in the suite — the audio must really stop on hardware.
 
 ### 3a. Trigger skip mid-utterance
 
 While a long Claude response is being spoken, issue a skip/stop command (exact key or command depends on hotkey configuration — M3 implements real hotkeys; for now trigger via the daemon socket directly or a short `sonari stop` CLI call if wired).
 
 Expected:
-- Audio cuts off within ~100 ms of the interrupt command.
-- The next utterance (if any) starts without delay.
+- Audio cuts off within ~100 ms of the interrupt command — `terminate()` calls `winsound.PlaySound(None, 0)`, which purges the in-flight async clip.
+- The next utterance (if any) starts without delay (a fresh `PlaySound` on a clean channel).
 - The daemon remains running (confirm via `tasklist | findstr python` — the daemon process is still present).
 
 ### 3b. Confirm returncode after terminate
@@ -124,7 +147,7 @@ Expected: assertion passes and audio stops.
 
 ## 4. ⚠ Earcons
 
-> **Mock-blind risk.** `winsound.PlaySound(..., SND_ASYNC)` posts audio to the Win32 multimedia scheduler. The mock records the call but cannot verify that audio reaches the speakers. Rapid successive earcons may truncate each other (see Risk g).
+> **Mock-blind risk.** Each earcon plays in a **separate, windowless helper process** (`subprocess.Popen([sys.executable, "-c", "...winsound.PlaySound(...)"]`, spawned `CREATE_NO_WINDOW | DETACHED_PROCESS`). That helper has its own audio session, so the earcon **mixes** with the daemon's speech (shared-mode audio) instead of cutting it. The mock records the spawn but cannot verify that audio reaches the speakers, that the helper window never flashes, or that the mix is actually simultaneous. (The old single-channel `winsound` truncation model — earcon mid-utterance cuts speech — is obsolete; see Risk g.)
 
 ### 4a. Confirm each earcon is distinct and audible
 
@@ -132,31 +155,41 @@ Trigger each of the 6 earcon types in sequence (permission, choice, plan, error,
 
 ```python
 from sonari.platform.windows.earcon import WinEarconBackend
-from sonari.platform.windows.earcons import default_earcons
 import time
 
 b = WinEarconBackend()
-for name, path in default_earcons().items():
+for name, path in b.default_earcons().items():
     print(f"Playing: {name}")
-    h = b.play(path)
-    assert h.poll() == 0
-    time.sleep(0.4)  # wait for async playback to complete before next
+    h = b.play(path)          # returns a Popen handle (or None if path missing)
+    assert h is not None
+    h.wait(timeout=4.0)       # let the helper process finish before the next
+    assert h.poll() == 0      # helper exited cleanly (0)
+    time.sleep(0.1)
 ```
 
-Expected: 6 distinct short tones play in sequence, each audibly different.
+Expected: 6 distinct short tones play in sequence, each audibly different. No console window flashes for any earcon (the helper is windowless).
 
-### 4b. Confirm rapid succession does not crash
+### 4b. Confirm an earcon mid-utterance MIXES with speech (does not cut it)
+
+This is the behavior the separate-process design exists to deliver. Start a long utterance, then fire an earcon while it is still speaking:
 
 ```python
+from sonari.platform.windows.tts import WinTtsBackend
 from sonari.platform.windows.earcon import WinEarconBackend
-from sonari.platform.windows.earcons import default_earcons
-earcons = list(default_earcons().values())
-b = WinEarconBackend()
-for p in earcons[:3]:
-    b.play(p)  # no sleep — rapid fire
+import time
+
+speech = WinTtsBackend().run(
+    "This is a deliberately long sentence so there is plenty of time "
+    "to fire an earcon while it is still being spoken aloud.", None, 200)
+time.sleep(0.5)               # speech is now playing
+ear = WinEarconBackend()
+ear.play(next(iter(ear.default_earcons().values())))   # fire mid-utterance
 ```
 
-Expected: no crash or exception. Audio may be truncated (SND_ASYNC behavior — see Risk g), but the process must not raise.
+Expected:
+- **Speech CONTINUES** — the earcon does **not** truncate or silence it.
+- **Both are audible** simultaneously (the earcon mixes over the speech in shared-mode).
+- The daemon process does not raise or die.
 
 ---
 
@@ -283,20 +316,15 @@ At the end of a `claude` session, confirm the Stop hook fires and the daemon rec
 
 The following risks cannot be verified from macOS and must be probed on the Windows box. Each is a potential show-stopper.
 
-### Risk (a): SAPI / MediaPlayer audio from a DETACHED_PROCESS | CREATE_NO_WINDOW Task-Scheduler process
+### Risk (a): `winsound` audio routing + daemon survival from a DETACHED_PROCESS | CREATE_NO_WINDOW process
 
-**This is the #1 risk.** Neural `SpeechSynthesizer` / `MediaPlayer` uses COM and requires an STA (Single-Threaded Apartment) with a message pump. A `DETACHED_PROCESS` started by Task Scheduler may have no audio device access or may hang on `play()` without `CoInitializeEx(COINIT_APARTMENTTHREADED)`.
+**This is the #1 risk**, and it has two parts:
 
-**Diagnostic:** If no audio plays from the Task Scheduler–launched daemon, add this to the daemon startup (before any TTS calls):
+**(a.1) Audio routing.** Playback is now stdlib `winsound.PlaySound` (COM-free, in-process) — there is no MediaPlayer, no STA, and no `CoInitializeEx` requirement. The residual concern is simpler: does `winsound.PlaySound` actually route audio to the speakers from a daemon launched by Task Scheduler with `DETACHED_PROCESS | CREATE_NO_WINDOW`? A detached process may not inherit an audio endpoint. The **same routing concern applies to the earcon helper**, which is itself spawned `CREATE_NO_WINDOW | DETACHED_PROCESS` (see section 4).
 
-```python
-import ctypes
-ctypes.windll.ole32.CoInitializeEx(None, 0)  # 0 = COINIT_APARTMENTTHREADED
-```
+**Diagnostic:** If no audio plays from the Task Scheduler–launched daemon but the direct script in 2c/4a *does* play, the problem is the launch context, not the code. Confirm the task runs with `<LogonType>InteractiveToken</LogonType>` (section 1d) so it shares the interactive desktop session's audio endpoint. If audio still does not route, run the daemon as a normal session process (Startup-folder launcher or `HKCU\...\Run`) instead of a Task Scheduler task.
 
-If audio then works, this call must be added permanently to `src/sonari/daemon.py` for the Windows path.
-
-**Fallback:** If `CoInitializeEx` is insufficient, run the daemon as a standard session process (not a Task Scheduler task) and use a persistent background thread with `CoInitializeEx`.
+**(a.2) Daemon survival over a long run (the crash fix).** The MediaPlayer playback path was **removed** because it crashed the process with a native access violation after ~80 utterances (the daemon-death bug). The whole point of the `winsound` switch is survival. This is verified by the **2c crash-survival soak** (≥ 300 consecutive utterances, daemon survives, no `0xC0000005`). Treat a crash anywhere in that soak as a show-stopping regression.
 
 ### Risk (b): `IAsyncOperation.get()` blocking behavior in a daemon thread
 
@@ -305,7 +333,7 @@ If audio then works, this call must be added permanently to `src/sonari/daemon.p
 **Test:** Run the TTS backend directly in a script:
 ```python
 from sonari.platform.windows.tts import WinTtsBackend
-h = WinTtsBackend().run("test blocking")
+h = WinTtsBackend().run("test blocking", None, 200)
 rc = h.wait(timeout=5.0)
 print("returncode:", rc)  # must be 0
 ```
@@ -336,14 +364,14 @@ On a fresh Windows 11 install, `python` on PATH may point to `%LOCALAPPDATA%\Mic
 
 The sign-off table entry for this risk can be ticked as "N/A — resolved in code".
 
-### Risk (g): `winsound` rapid-earcon truncation
+### Risk (g): earcon ↔ speech / earcon ↔ earcon mixing (the obsolete truncation model)
 
-Each new `PlaySound(..., SND_ASYNC)` call silently cancels the previous async sound. If two earcons are triggered in rapid succession (< ~200 ms apart), the first is cut off. There is no OS-level completion callback exposed by `winsound`.
+**Largely resolved by the separate-process design — verify the mix, don't fear the truncation.** The old single-channel concern (a new `PlaySound(..., SND_ASYNC)` silently cancels the previous async sound, so an earcon mid-utterance cuts speech and rapid earcons cut each other) **no longer applies**: each earcon plays in its own windowless helper process (section 4), so it has a separate audio session and mixes shared-mode rather than purging the daemon's speech channel.
 
-**Mitigation options (pick one if this is observed):**
-1. Add a minimum gap guard (e.g. 150 ms) in the daemon scheduler before issuing a new earcon.
-2. Use `SND_NOSTOP` flag — `PlaySound` returns `False` (does not play) if a sound is already active. This avoids truncation but may drop earcons.
-3. Switch to a higher-level API (`pywaveout` or `win32api.PlaySound`) that exposes a completion callback.
+**What to verify on hardware:**
+1. An earcon fired mid-utterance leaves speech audible and continuous (section **4b**) — this is the headline behavior of the redesign.
+2. Several earcons fired in rapid succession all play (or overlap) without truncating speech; none crash the daemon (a failed helper spawn is caught and logged, never raised — see `WinEarconBackend.play`).
+3. The helper processes are windowless (no console flash) and short-lived — confirm they exit and do not accumulate (`tasklist | findstr python` does not grow unboundedly during a chatty session).
 
 ### Risk (h): PyWinRT projection availability for win-arm64
 
@@ -376,10 +404,11 @@ If no arm64 wheel is found, document this as a known gap. Fallback: use the Wind
 | 1d. schtasks /query /xml | | | | |
 | 2a. Speech audible (OneCore) | | | | |
 | 2b. Voice is OneCore/neural | | | | |
-| 3a. Skip mid-utterance | | | | |
+| 2c. Crash-survival soak (≥300 utterances, daemon survives, no access violation) | | | | |
+| 3a. Skip mid-utterance (PlaySound(None,0) stops) | | | | |
 | 3b. returncode after terminate | | | | |
-| 4a. All 6 earcons distinct | | | | |
-| 4b. Rapid succession no crash | | | | |
+| 4a. All 6 earcons distinct (windowless) | | | | |
+| 4b. Earcon mid-utterance MIXES (speech continues, both audible) | | | | |
 | 5a. Single-instance cross-process | | | | |
 | 5b. Lock releases on exit | | | | |
 | 6a. Autostart on logon | | | | |
@@ -389,13 +418,13 @@ If no arm64 wheel is found, document this as a known gap. Fallback: use the Wind
 | 7b. hooks.json exec-form | | | | |
 | 7c. MessageDisplay hook fires | | | | |
 | 7d. Stop hook fires | | | | |
-| Risk (a): COM/STA audio | | | | |
+| Risk (a): winsound routing + daemon survival (DETACHED_PROCESS) | | | | |
 | Risk (b): IAsyncOperation.get() | | | | |
 | Risk (c): msvcrt cross-process | | | | |
 | Risk (d): UTF-16 + non-admin | | | | |
 | Risk (e): Store stub avoidance | | | | |
 | Risk (f): as_file temp lifetime | N/A | — | N/A | Resolved in implementation; pathlib sibling lookup used instead |
-| Risk (g): rapid earcon truncation | | | | |
+| Risk (g): earcon/speech mixing (no truncation) | | | | |
 | Risk (h): arm64 PyWinRT | | | | |
 | Residual: NVDA pass | | | | |
 | Residual: uninstall path | | | | |

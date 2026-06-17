@@ -93,6 +93,28 @@ def test_launch_spec_sets_pythonpath_to_src(monkeypatch):
     assert env.get("PYTHONPATH", "").split(os.pathsep)[0] == src
 
 
+def test_launch_spec_routes_stderr_to_log_file_not_devnull(tmp_path, monkeypatch):
+    """The lazily-spawned daemon's stderr must land in the daemon log under
+    SONARI_DIR (paths.LOG_PATH) rather than subprocess.DEVNULL, so the speak-loop
+    catch-all traceback survives on Windows. Mirrors the macOS plist
+    StandardErrorPath. Regression for #20. stdin/stdout stay DEVNULL."""
+    import subprocess
+    from sonari import paths
+
+    log = tmp_path / "speechd.log"
+    monkeypatch.setattr(paths, "SONARI_DIR", tmp_path)
+    monkeypatch.setattr(paths, "LOG_PATH", log)
+
+    sup = WinSupervisorBackend()
+    monkeypatch.setattr(sup, "resolve_python", lambda: r"C:\Python311\pythonw.exe")
+    argv, kwargs = sup.launch_spec()
+    assert kwargs["stderr"] is not subprocess.DEVNULL
+    assert str(kwargs["stderr"].name) == str(log)
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["stdout"] is subprocess.DEVNULL
+    kwargs["stderr"].close()
+
+
 def test_is_installed_calls_schtasks_query(monkeypatch):
     sup = WinSupervisorBackend()
     calls = []
@@ -114,6 +136,21 @@ def test_doctor_rows_include_task_and_neural_voice(monkeypatch):
     assert "daemon running" in names
 
 
+def test_doctor_row_flags_missing_winrt(monkeypatch):
+    # PyWinRT absent => total no-speech; doctor must go RED, not stay green. (#7)
+    sup = WinSupervisorBackend()
+    monkeypatch.setattr(sup, "_schtasks", lambda args: 0)
+    monkeypatch.setattr(sup, "resolve_python", lambda: r"C:\Py\pythonw.exe")
+    monkeypatch.setattr(sup, "_list_neural_voices", lambda: ["X"])
+    monkeypatch.setattr("sonari.paths.socket_connectable", lambda: True)
+    import sonari.platform.windows.tts as tts
+    monkeypatch.setattr(tts, "_winrt_available", lambda: False, raising=False)
+    rows = {r[0]: r for r in sup.doctor_rows()}
+    assert "TTS runtime" in rows
+    assert rows["TTS runtime"][1] is False
+    assert "winrt" in rows["TTS runtime"][2].lower()
+
+
 def test_resolve_python_skips_store_stub(monkeypatch, tmp_path):
     # Verify _is_store_stub fast-path (WindowsApps in path)
     from sonari.platform.windows.supervisor import _is_store_stub
@@ -126,11 +163,27 @@ def test_spawn_flags_value():
     assert _SPAWN_FLAGS == 0x08000008
 
 
+def test_post_install_notes_are_accurate(capsys):
+    # #19: hotkeys ship + start with the daemon, so don't say they "arrive in M3".
+    # The plugin's command files were renamed to NTFS-safe names (status.md, ...),
+    # so the /sonari:* slash commands DO work on Windows now — the old #10 "not
+    # available on NTFS" note is obsolete after the cross-platform-commands fix, and
+    # promising a command that doesn't exist would be the inaccuracy to avoid.
+    WinSupervisorBackend().post_install_notes()
+    out = capsys.readouterr().out
+    low = out.lower()
+    assert "sonari doctor" in out
+    assert "milestone 3" not in low and "arrive in" not in low   # #19
+    assert "hotkey" in low                                        # hotkeys are active now
+    assert "slash command" in low                                # available via the plugin
+    assert "not available" not in low and "aren't available" not in low
+
+
 def test_post_install_notes_runs(capsys):
     from sonari.platform.windows.supervisor import WinSupervisorBackend
     WinSupervisorBackend().post_install_notes()
     out = capsys.readouterr().out
-    assert "sonari doctor" in out and "M3" in out   # next steps + hotkeys deferred
+    assert "sonari doctor" in out   # next steps (accuracy covered by test_post_install_notes_are_accurate)
 
 
 def test_hooks_doctor_row_windows_absent(monkeypatch, tmp_path):

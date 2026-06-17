@@ -18,9 +18,9 @@ Requirements (Windows only):
     pip install winrt-runtime winrt-Windows.Media.SpeechSynthesis \
                 winrt-Windows.Storage.Streams
 
-NOTE: winsound is a single output channel shared with earcons — an earcon that
-fires mid-utterance cuts the current speech. Acceptable tradeoff vs a daemon that
-crashes every ~80 utterances; refine later (e.g. an earcon audio path off winsound).
+NOTE: winsound is a single output channel for speech. Earcons are played in a
+separate windowless helper process (see earcon.py) so their audio session mixes
+with speech (shared-mode) rather than cutting it.
 """
 from __future__ import annotations
 
@@ -36,6 +36,28 @@ from sonari.platform.base import TtsBackend
 
 _BASELINE_WPM: float = 200.0  # Sonari's default wpm maps to SpeakingRate 1.0
 
+_WINRT_INSTALL_HINT = (
+    "PyWinRT is not installed, so Sonari cannot synthesize speech. Install it: "
+    "pip install winrt-runtime winrt-Windows.Media.SpeechSynthesis "
+    "winrt-Windows.Storage.Streams"
+)
+
+
+def _winrt_available() -> bool:
+    """True if the OneCore TTS WinRT projection can be imported. Used by run()
+    (actionable error) and by `sonari doctor` (so an undeclared/missing PyWinRT
+    surfaces as RED, not silent no-speech behind a green doctor). (#7)"""
+    try:
+        import winrt.windows.media.speechsynthesis  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _require_winrt() -> None:
+    if not _winrt_available():
+        raise RuntimeError(_WINRT_INSTALL_HINT)
+
 
 def wpm_to_speaking_rate(wpm: float) -> float:
     """Map Sonari [100-400] wpm to a SpeakingRate multiplier [0.5-6.0].
@@ -44,6 +66,29 @@ def wpm_to_speaking_rate(wpm: float) -> float:
     [0.5, 6.0] raise on real WinRT, so we always clamp.
     """
     return max(0.5, min(6.0, wpm / _BASELINE_WPM))
+
+
+_TMP_PREFIX = "sonari-tts-"
+
+
+def _sweep_stale_wavs(max_age_s: float = 300.0) -> None:
+    """Best-effort cleanup of temp WAVs leaked by a prior crashed/killed daemon.
+    Only removes files older than *max_age_s*, so a clip that another instance
+    may still be playing is never deleted, and only our own sonari-tts-* prefix
+    is touched. Never raises. (#26)"""
+    import glob
+    import time
+    try:
+        now = time.time()
+        pattern = os.path.join(tempfile.gettempdir(), _TMP_PREFIX + "*.wav")
+        for p in glob.glob(pattern):
+            try:
+                if now - os.path.getmtime(p) > max_age_s:
+                    os.unlink(p)
+            except OSError:
+                pass
+    except Exception:
+        pass
 
 
 def _wav_duration(data: bytes) -> float:
@@ -99,7 +144,9 @@ class _TtsHandle:
         if self.returncode is None:
             self.returncode = 1
         try:
-            self._winsound.PlaySound(None, self._winsound.SND_PURGE)
+            # PlaySound(None, 0) is the documented way to stop playback on modern
+            # Windows; SND_PURGE is documented as not supported there. (#17)
+            self._winsound.PlaySound(None, 0)
         except Exception:
             pass
         try:
@@ -121,6 +168,7 @@ class WinTtsBackend(TtsBackend):
 
     def __init__(self) -> None:
         self._synth = None         # reused SpeechSynthesizer (lazy)
+        _sweep_stale_wavs()        # clear temp WAVs leaked by a prior crash (#26)
 
     def _get_synth(self):
         if self._synth is None:
@@ -134,10 +182,16 @@ class WinTtsBackend(TtsBackend):
             self._synth = s
         return self._synth
 
-    def list_voices(self) -> list:
-        """Return all installed VoiceInformation objects (may be empty)."""
+    def _all_voice_infos(self) -> list:
+        """Internal: all installed VoiceInformation OBJECTS (may be empty)."""
         from winrt.windows.media.speechsynthesis import SpeechSynthesizer
         return list(SpeechSynthesizer.all_voices)
+
+    def list_voices(self) -> list:
+        """ABC contract: list of installed voice display NAMES (str), matching
+        the macOS backend and the base ABC. Internal callers that need the WinRT
+        objects use _all_voice_infos()/_best_voice_info() instead. (#16)"""
+        return [v.display_name for v in self._all_voice_infos()]
 
     def _best_voice_info(self, lang_prefix: str = "en-US"):
         """Select a VoiceInformation in priority order:
@@ -148,7 +202,7 @@ class WinTtsBackend(TtsBackend):
         its display NAME (str).
         """
         from winrt.windows.media.speechsynthesis import SpeechSynthesizer
-        voices = self.list_voices()
+        voices = self._all_voice_infos()
         if not voices:
             raise RuntimeError(
                 "No TTS voices installed. Add a Speech language pack in "
@@ -179,7 +233,7 @@ class WinTtsBackend(TtsBackend):
         (case-insensitive); fall back to best_voice() if unknown/None.
         """
         if name:
-            for v in self.list_voices():
+            for v in self._all_voice_infos():
                 if (v.display_name or "").lower() == str(name).lower():
                     return v
         return self._best_voice_info()
@@ -224,8 +278,9 @@ class WinTtsBackend(TtsBackend):
         Returns a _TtsHandle the caller can .wait()/.terminate()/.poll()."""
         import winsound
 
+        _require_winrt()   # actionable error instead of a raw ImportError (#7)
         data = self._synthesize_wav(text, voice, rate)
-        fd, path = tempfile.mkstemp(suffix=".wav", prefix="sonari-tts-")
+        fd, path = tempfile.mkstemp(suffix=".wav", prefix=_TMP_PREFIX)
         try:
             os.write(fd, data)
         finally:
@@ -234,7 +289,8 @@ class WinTtsBackend(TtsBackend):
         # SND_ASYNC: returns immediately; a new PlaySound (next utterance or an
         # earcon) replaces it. SND_FILENAME plays from the temp path. If PlaySound
         # raises before the _TtsHandle takes ownership of the file, unlink it here
-        # so a failed utterance doesn't leak a temp WAV.
+        # so a failed utterance doesn't leak a temp WAV (the #26 init-sweep would
+        # otherwise only reclaim it on the next start).
         try:
             winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
         except Exception:

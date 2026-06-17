@@ -6,7 +6,6 @@ works on real Windows.
 """
 from __future__ import annotations
 
-import os
 import subprocess
 
 import pytest
@@ -68,25 +67,6 @@ def test_run_falls_back_when_voice_name_unknown():
     assert h.wait(timeout=2.0) == 0   # did not crash on an unresolved name
 
 
-def test_run_unlinks_temp_wav_when_playsound_raises(monkeypatch, tmp_path):
-    # Regression #7: if PlaySound raises before the _TtsHandle owns the file, run()
-    # must unlink the temp WAV (else it leaks one file per failed utterance) and
-    # propagate the error.
-    import sonari.platform.windows.tts as tts
-    import winsound
-    leak = tmp_path / "sonari-tts-leak.wav"
-    fd = os.open(str(leak), os.O_RDWR | os.O_CREAT)
-    monkeypatch.setattr(tts.tempfile, "mkstemp", lambda *a, **k: (fd, str(leak)))
-
-    def boom(*a, **k):
-        raise RuntimeError("PlaySound failed")
-
-    monkeypatch.setattr(winsound, "PlaySound", boom)
-    with pytest.raises(RuntimeError):
-        WinTtsBackend().run("hello", None, 200)
-    assert not leak.exists()    # cleaned up, not leaked
-
-
 def test_run_raises_actionable_error_when_no_voices(monkeypatch):
     # On a box with no OneCore voices, run() must surface the actionable
     # "install a voice" RuntimeError — NOT the raw FileNotFoundError that real
@@ -95,3 +75,66 @@ def test_run_raises_actionable_error_when_no_voices(monkeypatch):
     monkeypatch.setattr(ss.SpeechSynthesizer, "all_voices", [])
     with pytest.raises(RuntimeError, match="No TTS voices installed"):
         WinTtsBackend().run("hello", None, 200)
+
+
+def test_list_voices_returns_display_name_strings():
+    # ABC + macOS return list[str]; Windows must match, not VoiceInformation
+    # objects (the same object-vs-name slip the PR fixed for best_voice()). (#16)
+    voices = WinTtsBackend().list_voices()
+    assert isinstance(voices, list) and voices
+    assert all(isinstance(v, str) for v in voices), voices
+
+
+def test_terminate_issues_a_real_stop_playsound_call():
+    # SND_PURGE is documented "not supported on modern Windows"; the stop must
+    # go through PlaySound(None, 0). The fake winsound has no SND_PURGE, so the
+    # old call raised AttributeError and was swallowed -> interrupt never stopped
+    # audio, and no test ever caught it. (#17)
+    import winsound
+    winsound._calls.clear()
+    h = WinTtsBackend().run("hello", None, 200)
+    played = winsound._calls[-1]
+    assert played[1] & winsound.SND_ASYNC, played   # async playback, not SND_SYNC
+    h.terminate()
+    assert (None, 0) in winsound._calls, winsound._calls  # a real stop was issued
+
+
+def test_init_sweeps_stale_temp_wavs(tmp_path, monkeypatch):
+    # A crashed/killed daemon can leak sonari-tts-*.wav in %TEMP%. Backend init
+    # sweeps OLD ones (never a possibly-in-flight recent file, never foreign
+    # files). (#26)
+    import os, tempfile, time
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    stale = tmp_path / "sonari-tts-OLD.wav"
+    fresh = tmp_path / "sonari-tts-NEW.wav"
+    foreign = tmp_path / "someone-elses.wav"
+    for f in (stale, fresh, foreign):
+        f.write_bytes(b"x")
+    old = time.time() - 10_000
+    os.utime(str(stale), (old, old))
+    WinTtsBackend()  # __init__ sweeps
+    assert not stale.exists()   # old sonari temp removed
+    assert fresh.exists()       # recent one kept (may be in-flight)
+    assert foreign.exists()     # non-sonari file untouched
+
+
+def test_run_raises_actionable_error_when_winrt_missing(monkeypatch):
+    # A Windows box without PyWinRT installed must get an actionable error at the
+    # synth path, not silent no-speech (doctor also goes red — see supervisor). (#7)
+    import sonari.platform.windows.tts as tts
+    monkeypatch.setattr(tts, "_winrt_available", lambda: False)
+    with pytest.raises(RuntimeError, match="(?i)pywinrt|winrt"):
+        WinTtsBackend().run("hello", None, 200)
+
+
+def test_pyproject_declares_windows_winrt_extra():
+    # winrt is a hard Windows dependency; it must be declared so `pip install`
+    # users on Windows actually get speech (not green-doctor + silence). (#7)
+    import os
+    import tomllib
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "pyproject.toml"), "rb") as fh:
+        data = tomllib.load(fh)
+    extras = data["project"]["optional-dependencies"]
+    assert "windows" in extras, extras
+    assert any("winrt" in d.lower() for d in extras["windows"]), extras["windows"]

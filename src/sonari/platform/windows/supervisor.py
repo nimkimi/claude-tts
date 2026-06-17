@@ -122,13 +122,6 @@ def task_uninstall() -> int:
     )
 
 
-def task_is_installed() -> bool:
-    """Return True if the task exists (schtasks /query exit 0 = found)."""
-    return subprocess.call(
-        ["schtasks", "/query", "/tn", TASK_NAME],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    ) == 0
-
 # KEY GOTCHA: RestartOnFailure is NOT expressible via schtasks CLI flags — XML only.
 # The Task Scheduler's RestartOnFailure only restarts the *supervisor* process if
 # it crashes (unlikely). The supervisor_loop is the real daemon restarter.
@@ -409,11 +402,6 @@ def build_hooks_json(pythonw: str, hook_py: str) -> str:
     )
 
 
-# .gitattributes entries — prevents CRLF injection on Windows checkout.
-# Created at repo root in Task 8; surfaced here for the install-time writer.
-GITATTRIBUTES_LINE = "hooks/*.py text eol=lf\nsrc/sonari/**/*.py text eol=lf\n"
-
-
 # ---------------------------------------------------------------------------
 # ~/.claude/settings.json hook delivery (Windows uses exec-form hooks here,
 # since the plugin's shell-form manifest cannot spawn the Python hook on win32)
@@ -425,7 +413,8 @@ def claude_settings_path() -> str:
 
 
 def settings_has_sonari_hooks(settings_path: str) -> bool:
-    """True if settings.json contains at least one Sonari hook entry.
+    """True if settings.json contains at least one Sonari hook entry (identified by
+    the structured SONARI_HOOK_MARKER sentinel, #23).
 
     Defensive at every level: a hand-edited settings.json can have any shape
     (hooks a list, an entry a string, args not a list). 'sonari doctor' must never
@@ -436,9 +425,7 @@ def settings_has_sonari_hooks(settings_path: str) -> bool:
             data = json.load(fh)
     except Exception:
         return False
-    if not isinstance(data, dict):
-        return False
-    hooks = data.get("hooks", {})
+    hooks = (data or {}).get("hooks", {}) if isinstance(data, dict) else {}
     if not isinstance(hooks, dict):
         return False
     try:
@@ -451,15 +438,8 @@ def settings_has_sonari_hooks(settings_path: str) -> bool:
                 inner = entry.get("hooks", [])
                 if not isinstance(inner, list):
                     continue
-                for h in inner:
-                    if not isinstance(h, dict):
-                        continue
-                    args = h.get("args") or []
-                    if not isinstance(args, list):
-                        args = []
-                    blob = str(h.get("command", "")) + " " + " ".join(map(str, args))
-                    if "sonari-hook" in blob:
-                        return True
+                if any(_hook_is_sonari(h) for h in inner):
+                    return True
     except Exception:  # noqa: BLE001 - doctor must never raise on malformed input
         return False
     return False
@@ -468,7 +448,8 @@ def settings_has_sonari_hooks(settings_path: str) -> bool:
 def settings_has_sonari_plugin(settings_path: str) -> bool:
     """True if the Sonari plugin is enabled in settings.json. When it is, the
     plugin's hooks/hooks.json supplies the hooks, so a hand-wired settings.json
-    block is not required (and would double-fire)."""
+    block is not required (and would double-fire). Tolerant of any malformed shape
+    (doctor must never crash) — M9."""
     import json
     try:
         with open(settings_path, "r", encoding="utf-8") as fh:
@@ -490,20 +471,67 @@ def settings_has_sonari_plugin(settings_path: str) -> bool:
     return False
 
 
-def _build_hooks_dict(pythonw: str, hook_py: str) -> dict:
-    """Return {event: [entry, ...]} for Sonari's exec-form hooks (from build_hooks_json)."""
+# Structured, collision-proof sentinel stamped on every hook Sonari writes.
+# Identifying our own entries by this key (not by a "sonari-hook" substring scan
+# over command+args) means a user's look-alike hook is never false-clobbered, and
+# presence-check and removal can never diverge.
+SONARI_HOOK_MARKER = "_sonari"
+
+
+def _sonari_hook_paths(settings_path: str) -> list:
+    """The baked script path (args[0]) of every Sonari hook in settings.json.
+    Never raises (doctor must not crash); tolerant of any malformed shape."""
     import json
-    return json.loads(build_hooks_json(pythonw, hook_py))["hooks"]
+    try:
+        with open(settings_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return []
+    out = []
+    hooks = (data or {}).get("hooks", {}) if isinstance(data, dict) else {}
+    if not isinstance(hooks, dict):
+        return out
+    try:
+        for entries in hooks.values():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                inner = entry.get("hooks", [])
+                if not isinstance(inner, list):
+                    continue
+                for h in inner:
+                    if _hook_is_sonari(h):
+                        args = h.get("args") or []
+                        if isinstance(args, list) and args:
+                            out.append(str(args[0]))
+    except Exception:  # noqa: BLE001 - doctor must never raise on malformed input
+        return out
+    return out
 
 
-def _entry_is_sonari(entry: dict, hook_py: str) -> bool:
-    """True if a settings.json hook entry belongs to Sonari (marker: sonari-hook)."""
-    marker = os.path.basename(hook_py) or "sonari-hook"
-    for h in entry.get("hooks", []):
-        blob = h.get("command", "") + " " + " ".join(map(str, h.get("args") or []))
-        if marker in blob or "sonari-hook" in blob:
-            return True
-    return False
+def _build_hooks_dict(pythonw: str, hook_py: str) -> dict:
+    """Return {event: [entry, ...]} for Sonari's exec-form hooks (from
+    build_hooks_json), each hook stamped with the SONARI_HOOK_MARKER sentinel."""
+    import json
+    hooks = json.loads(build_hooks_json(pythonw, hook_py))["hooks"]
+    for entries in hooks.values():
+        for entry in entries:
+            for h in entry.get("hooks", []):
+                h[SONARI_HOOK_MARKER] = True
+    return hooks
+
+
+def _hook_is_sonari(h: dict) -> bool:
+    """True if a single hook dict is one Sonari wrote (structured sentinel)."""
+    return isinstance(h, dict) and h.get(SONARI_HOOK_MARKER) is True
+
+
+def _entry_is_sonari(entry: dict, hook_py: str = "") -> bool:
+    """True if a settings.json hook entry belongs to Sonari. Keyed on the
+    structured sentinel, not a free-text marker (hook_py kept for call-compat)."""
+    return any(_hook_is_sonari(h) for h in entry.get("hooks", []))
 
 
 def _load_settings(settings_path: str) -> dict:
@@ -529,13 +557,30 @@ def _load_settings(settings_path: str) -> dict:
 
 
 def _write_settings(settings_path: str, data: dict) -> None:
+    """Atomically replace settings.json. This is the user's SHARED Claude config,
+    so a truncating in-place write that fails mid-serialization would corrupt the
+    whole file. Write a temp file in the same dir, fsync, then os.replace (atomic
+    on POSIX + Windows). Mirrors the temp+replace pattern in keymap.py."""
     import json
+    import tempfile
     parent = os.path.dirname(settings_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(settings_path, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2)
-        fh.write("\n")
+    fd, tmp = tempfile.mkstemp(
+        dir=parent or ".", prefix=".sonari-settings-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, settings_path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def remove_hooks_from_settings(settings_path: str, hook_py: str, _data=None) -> None:
@@ -553,11 +598,31 @@ def remove_hooks_from_settings(settings_path: str, hook_py: str, _data=None) -> 
         _write_settings(settings_path, data)
 
 
+def _validate_hooks_shape(data: dict, settings_path: str) -> None:
+    """Raise a friendly ValueError if settings.json has a 'hooks' value we cannot
+    safely merge into (must be absent or a dict of event -> list). Without this a
+    malformed shape raises a cryptic AttributeError mid-merge."""
+    hooks = data.get("hooks")
+    if hooks is None:
+        return
+    if not isinstance(hooks, dict):
+        raise ValueError(
+            "{0} has a 'hooks' value that is not an object; refusing to modify it. "
+            "Fix or remove it, then re-run 'sonari install'.".format(settings_path))
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            raise ValueError(
+                "{0} hooks['{1}'] is not a list; refusing to modify it. Fix or "
+                "remove it, then re-run 'sonari install'.".format(
+                    settings_path, event))
+
+
 def merge_hooks_into_settings(settings_path: str, pythonw: str, hook_py: str) -> None:
     """Idempotently add Sonari's exec-form hooks to settings.json: drop any prior
     Sonari entries (self-heal across path changes), then append the current ones.
     Preserves all other keys and all non-Sonari hook entries."""
     data = _load_settings(settings_path)
+    _validate_hooks_shape(data, settings_path)
     remove_hooks_from_settings(settings_path, hook_py, _data=data)  # in-place prune
     hooks = data.setdefault("hooks", {})
     for event, entries in _build_hooks_dict(pythonw, hook_py).items():
@@ -664,11 +729,16 @@ class WinSupervisorBackend(SupervisorBackend):
         src = os.path.join(paths.repo_root(), "src")
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = src + (os.pathsep + existing if existing else "")
+        # Route the daemon's stderr to the daemon log (parity with the macOS plist
+        # StandardErrorPath) so the speak-loop catch-all traceback survives (#20);
+        # DEVNULL made it unrecoverable. Open lazily inside launch_spec.
+        paths.ensure_sonari_dir()
+        err = open(paths.LOG_PATH, "a")
         kwargs = dict(
             creationflags=_SPAWN_FLAGS,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=err,
             env=env,
         )
         return argv, kwargs
@@ -707,6 +777,19 @@ class WinSupervisorBackend(SupervisorBackend):
         except Exception as exc:
             rows.append(("neural voice", False, "error: {0}".format(exc)))
 
+        # PyWinRT (the OneCore TTS engine). Absent -> total no-speech, so a
+        # doctor green everywhere else would be dangerously misleading. (#7)
+        try:
+            from sonari.platform.windows.tts import _winrt_available
+            ok = _winrt_available()
+            rows.append(("TTS runtime", ok,
+                         "PyWinRT ready" if ok else
+                         "PyWinRT (winrt) not installed -> no speech. pip install "
+                         "winrt-runtime winrt-Windows.Media.SpeechSynthesis "
+                         "winrt-Windows.Storage.Streams"))
+        except Exception as exc:  # noqa: BLE001 - doctor must always render
+            rows.append(("TTS runtime", False, "error: {0}".format(exc)))
+
         # Daemon running
         running = self.is_running()
         rows.append(("daemon running", running,
@@ -716,7 +799,14 @@ class WinSupervisorBackend(SupervisorBackend):
         return rows
 
     def install(self, python: str, app_dir: str) -> None:
-        # 1. Task Scheduler autostart (pythonw runs the supervisor loop).
+        # 1. Exec-form hooks FIRST. This is the step that can fail on a malformed
+        #    user settings.json (it raises ValueError); doing it before the Task
+        #    Scheduler registration means a failure leaves no orphaned autostart
+        #    task behind (partial-install avoidance).
+        settings = claude_settings_path()
+        merge_hooks_into_settings(settings, python, _hook_py())
+        print("Wrote Sonari hooks to: {0}".format(settings))
+        # 2. Task Scheduler autostart (pythonw runs the supervisor loop).
         supervisor_py = os.path.join(app_dir, "sonari", "platform",
                                      "windows", "supervisor_loop.py")
         rc = task_install(python, supervisor_py)
@@ -725,10 +815,6 @@ class WinSupervisorBackend(SupervisorBackend):
         else:
             print("warning: schtasks /create returned {0}; autostart may not be "
                   "registered.".format(rc))
-        # 2. Exec-form hooks merged into the user's Claude settings.json.
-        settings = claude_settings_path()
-        merge_hooks_into_settings(settings, python, _hook_py())
-        print("Wrote Sonari hooks to: {0}".format(settings))
         # 3. sonari.cmd launcher on ~/.local/bin.
         launcher = self._place_launcher(python, app_dir)
         print("Placed launcher: {0}".format(launcher))
@@ -763,14 +849,28 @@ class WinSupervisorBackend(SupervisorBackend):
         """Print the Windows post-install next steps."""
         print("")
         print("Sonari is installed. Run 'sonari doctor' to confirm everything is green.")
-        print("  - Enable the 'sonari' plugin for its slash commands (optional).")
-        print("  - Global hotkeys arrive in Milestone 3 (M3); speech works without them.")
+        # #19: hotkeys now ship and start with the daemon (no longer "M3-pending").
+        print("  - Global hotkeys start automatically with the daemon; "
+              "run 'sonari keymap' to see the bindings.")
+        # The plugin's command files were renamed to NTFS-safe names (status.md,
+        # voice.md, ...), so the /sonari:* slash commands now work on Windows too.
+        print("  - Enable the 'sonari' plugin for its /sonari:* slash commands "
+              "(optional; speech and hotkeys work without it).")
 
     def hooks_doctor_row(self) -> tuple:
         """Windows: Sonari hooks come from EITHER a hand-wired settings.json block
-        or the enabled 'sonari' plugin (its hooks/hooks.json). Either is fine."""
+        (written by 'sonari install') OR the enabled 'sonari' plugin (its
+        hooks/hooks.json). For the settings.json path, go RED if a hook is present
+        but its baked script path no longer exists — the stale-after-plugin-update
+        case that otherwise stops speech silently while doctor stayed green (#8)."""
         path = claude_settings_path()
         if settings_has_sonari_hooks(path):
+            missing = [p for p in _sonari_hook_paths(path)
+                       if p and not os.path.exists(p)]
+            if missing:
+                return ("hooks installed", False,
+                        "hook script missing: {0} (stale after a plugin update; "
+                        "re-run 'sonari install')".format(missing[0]))
             return ("hooks installed", True, "{0} (settings.json)".format(path))
         if settings_has_sonari_plugin(path):
             return ("hooks installed", True, "via the sonari plugin")

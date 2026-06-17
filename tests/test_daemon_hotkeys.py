@@ -60,6 +60,26 @@ def test_stop_stops_the_hotkey_listener(monkeypatch):
     assert pb.hotkey.stopped is True
 
 
+def test_dispatch_hotkey_holds_the_lock_like_the_socket_path(monkeypatch):
+    """A hotkey fire mutates shared daemon state (queue/history/config) via
+    handle_message; it MUST hold self._lock the way the socket path (_handle_conn)
+    does, or it races the speak loop -> 'list changed size' crash / corruption.
+    Regression for the unlocked-dispatch concurrency bug (#5)."""
+    pb = _FakePlatform()
+    monkeypatch.setattr("sonari.platform.get_platform", lambda: pb)
+    daemon = make_daemon()[0]
+    locked_during_call = []
+    real = daemon.handle_message
+
+    def spy(msg):
+        locked_during_call.append(daemon._lock.locked())
+        return real(msg)
+
+    monkeypatch.setattr(daemon, "handle_message", spy)
+    daemon._dispatch_hotkey({"type": "skip"})
+    assert locked_during_call == [True]
+
+
 def test_one_bad_hotkey_does_not_raise(monkeypatch):
     pb = _FakePlatform()
     monkeypatch.setattr("sonari.platform.get_platform", lambda: pb)

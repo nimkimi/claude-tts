@@ -7,6 +7,7 @@ on-hardware-only (M3-WINDOWS-ACCEPTANCE.md)."""
 from __future__ import annotations
 
 import json
+import os
 import threading
 from typing import Optional
 
@@ -118,6 +119,7 @@ class WinHotkeyBackend(HotkeyBackend):
             import ctypes
             self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
             id_to_msg = self._register_all(resolved)
+            self._write_state()   # persist daemon-side diagnostics for doctor (#9)
             try:
                 while not self._stop.is_set():
                     got = self._get_message()
@@ -129,6 +131,7 @@ class WinHotkeyBackend(HotkeyBackend):
             finally:
                 for hid in id_to_msg:
                     self._unregister(hid)
+                self._clear_state()   # gone -> doctor reports "daemon not running"
 
         self._thread = threading.Thread(target=_run, name="sonari-hotkeys", daemon=True)
         self._thread.start()
@@ -146,20 +149,59 @@ class WinHotkeyBackend(HotkeyBackend):
             t.join(timeout=2.0)
         self._thread = None
 
+    # --- daemon-side state (so `sonari doctor`, a separate process that never
+    #     start()ed, reports the REAL collisions/elevation, not a fresh backend's
+    #     empty/foreign state). (#9) ---
+    def _state_path(self) -> str:
+        from sonari import paths
+        return os.path.join(str(paths.SONARI_DIR), "hotkeys.state.json")
+
+    def _write_state(self) -> None:
+        try:
+            from sonari import paths
+            paths.ensure_sonari_dir()
+            with open(self._state_path(), "w", encoding="utf-8") as fh:
+                json.dump({"collisions": self.collisions,
+                           "elevated": self._process_is_elevated()}, fh)
+        except Exception:  # noqa: BLE001 - diagnostics must never break start()
+            pass
+
+    def _clear_state(self) -> None:
+        try:
+            os.unlink(self._state_path())
+        except OSError:
+            pass
+
+    def _read_state(self):
+        try:
+            with open(self._state_path(), "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except Exception:  # noqa: BLE001 - absent/unreadable -> unknown
+            return None
+
     # --- diagnostics ---
     def doctor_rows(self) -> list:
+        state = self._read_state()
+        if state is None:
+            # No daemon-side state: the chords live in the daemon process, which
+            # isn't running (or hasn't started hotkeys). Don't assert a green
+            # "no collisions" we cannot actually observe from here. (#9)
+            return [("hotkey chords", True,
+                     "daemon not running; start it, then re-run doctor to check "
+                     "chord collisions")]
         rows = []
-        if self._process_is_elevated():
+        if state.get("elevated"):
             rows.append(("hotkey integrity", False,
                          "daemon is elevated; hotkeys won't reach a non-elevated "
                          "Claude window. Don't run as Administrator (UIPI)."))
-        if self.collisions:
-            owned = ", ".join(c["action"] for c in self.collisions)
+        collisions = state.get("collisions") or []
+        if collisions:
+            owned = ", ".join(c.get("action", "?") for c in collisions)
             rows.append(("hotkey chords", False,
                          "chord already owned by another app for: {0} "
                          "(rebind in ~/.sonari/keymap.json)".format(owned)))
         else:
-            rows.append(("hotkey chords", True, "no collisions"))
+            rows.append(("hotkey chords", True, "no collisions (daemon-reported)"))
         return rows
 
     def display_combo(self, modifiers: int, key_code: int) -> str:
