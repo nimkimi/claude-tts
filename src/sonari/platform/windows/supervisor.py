@@ -433,30 +433,70 @@ def settings_has_sonari_hooks(settings_path: str) -> bool:
     except Exception:
         return False
     hooks = (data or {}).get("hooks", {}) if isinstance(data, dict) else {}
+    if not isinstance(hooks, dict):
+        return False
     for entries in hooks.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if any(_hook_is_sonari(h) for h in entry.get("hooks", [])):
+                return True
+    return False
+
+
+# Structured, collision-proof sentinel stamped on every hook Sonari writes.
+# Identifying our own entries by this key (not by a "sonari-hook" substring scan
+# over command+args) means a user's look-alike hook is never false-clobbered, and
+# presence-check and removal can never diverge.
+SONARI_HOOK_MARKER = "_sonari"
+
+
+def _sonari_hook_paths(settings_path: str) -> list:
+    """The baked script path (args[0]) of every Sonari hook in settings.json.
+    Never raises (doctor must not crash); tolerant of any malformed shape."""
+    import json
+    try:
+        with open(settings_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return []
+    out = []
+    hooks = (data or {}).get("hooks", {}) if isinstance(data, dict) else {}
+    if not isinstance(hooks, dict):
+        return out
+    for entries in hooks.values():
+        if not isinstance(entries, list):
+            continue
         for entry in entries:
             for h in entry.get("hooks", []):
-                args = h.get("args") or []
-                blob = h.get("command", "") + " " + " ".join(map(str, args))
-                if "sonari-hook" in blob:
-                    return True
-    return False
+                if _hook_is_sonari(h):
+                    args = h.get("args") or []
+                    if args:
+                        out.append(str(args[0]))
+    return out
 
 
 def _build_hooks_dict(pythonw: str, hook_py: str) -> dict:
-    """Return {event: [entry, ...]} for Sonari's exec-form hooks (from build_hooks_json)."""
+    """Return {event: [entry, ...]} for Sonari's exec-form hooks (from
+    build_hooks_json), each hook stamped with the SONARI_HOOK_MARKER sentinel."""
     import json
-    return json.loads(build_hooks_json(pythonw, hook_py))["hooks"]
+    hooks = json.loads(build_hooks_json(pythonw, hook_py))["hooks"]
+    for entries in hooks.values():
+        for entry in entries:
+            for h in entry.get("hooks", []):
+                h[SONARI_HOOK_MARKER] = True
+    return hooks
 
 
-def _entry_is_sonari(entry: dict, hook_py: str) -> bool:
-    """True if a settings.json hook entry belongs to Sonari (marker: sonari-hook)."""
-    marker = os.path.basename(hook_py) or "sonari-hook"
-    for h in entry.get("hooks", []):
-        blob = h.get("command", "") + " " + " ".join(map(str, h.get("args") or []))
-        if marker in blob or "sonari-hook" in blob:
-            return True
-    return False
+def _hook_is_sonari(h: dict) -> bool:
+    """True if a single hook dict is one Sonari wrote (structured sentinel)."""
+    return isinstance(h, dict) and h.get(SONARI_HOOK_MARKER) is True
+
+
+def _entry_is_sonari(entry: dict, hook_py: str = "") -> bool:
+    """True if a settings.json hook entry belongs to Sonari. Keyed on the
+    structured sentinel, not a free-text marker (hook_py kept for call-compat)."""
+    return any(_hook_is_sonari(h) for h in entry.get("hooks", []))
 
 
 def _load_settings(settings_path: str) -> dict:
@@ -482,13 +522,30 @@ def _load_settings(settings_path: str) -> dict:
 
 
 def _write_settings(settings_path: str, data: dict) -> None:
+    """Atomically replace settings.json. This is the user's SHARED Claude config,
+    so a truncating in-place write that fails mid-serialization would corrupt the
+    whole file. Write a temp file in the same dir, fsync, then os.replace (atomic
+    on POSIX + Windows). Mirrors the temp+replace pattern in keymap.py."""
     import json
+    import tempfile
     parent = os.path.dirname(settings_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(settings_path, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2)
-        fh.write("\n")
+    fd, tmp = tempfile.mkstemp(
+        dir=parent or ".", prefix=".sonari-settings-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, settings_path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def remove_hooks_from_settings(settings_path: str, hook_py: str, _data=None) -> None:
@@ -506,11 +563,31 @@ def remove_hooks_from_settings(settings_path: str, hook_py: str, _data=None) -> 
         _write_settings(settings_path, data)
 
 
+def _validate_hooks_shape(data: dict, settings_path: str) -> None:
+    """Raise a friendly ValueError if settings.json has a 'hooks' value we cannot
+    safely merge into (must be absent or a dict of event -> list). Without this a
+    malformed shape raises a cryptic AttributeError mid-merge."""
+    hooks = data.get("hooks")
+    if hooks is None:
+        return
+    if not isinstance(hooks, dict):
+        raise ValueError(
+            "{0} has a 'hooks' value that is not an object; refusing to modify it. "
+            "Fix or remove it, then re-run 'sonari install'.".format(settings_path))
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            raise ValueError(
+                "{0} hooks['{1}'] is not a list; refusing to modify it. Fix or "
+                "remove it, then re-run 'sonari install'.".format(
+                    settings_path, event))
+
+
 def merge_hooks_into_settings(settings_path: str, pythonw: str, hook_py: str) -> None:
     """Idempotently add Sonari's exec-form hooks to settings.json: drop any prior
     Sonari entries (self-heal across path changes), then append the current ones.
     Preserves all other keys and all non-Sonari hook entries."""
     data = _load_settings(settings_path)
+    _validate_hooks_shape(data, settings_path)
     remove_hooks_from_settings(settings_path, hook_py, _data=data)  # in-place prune
     hooks = data.setdefault("hooks", {})
     for event, entries in _build_hooks_dict(pythonw, hook_py).items():
@@ -669,7 +746,14 @@ class WinSupervisorBackend(SupervisorBackend):
         return rows
 
     def install(self, python: str, app_dir: str) -> None:
-        # 1. Task Scheduler autostart (pythonw runs the supervisor loop).
+        # 1. Exec-form hooks FIRST. This is the step that can fail on a malformed
+        #    user settings.json (it raises ValueError); doing it before the Task
+        #    Scheduler registration means a failure leaves no orphaned autostart
+        #    task behind (partial-install avoidance).
+        settings = claude_settings_path()
+        merge_hooks_into_settings(settings, python, _hook_py())
+        print("Wrote Sonari hooks to: {0}".format(settings))
+        # 2. Task Scheduler autostart (pythonw runs the supervisor loop).
         supervisor_py = os.path.join(app_dir, "sonari", "platform",
                                      "windows", "supervisor_loop.py")
         rc = task_install(python, supervisor_py)
@@ -678,10 +762,6 @@ class WinSupervisorBackend(SupervisorBackend):
         else:
             print("warning: schtasks /create returned {0}; autostart may not be "
                   "registered.".format(rc))
-        # 2. Exec-form hooks merged into the user's Claude settings.json.
-        settings = claude_settings_path()
-        merge_hooks_into_settings(settings, python, _hook_py())
-        print("Wrote Sonari hooks to: {0}".format(settings))
         # 3. sonari.cmd launcher on ~/.local/bin.
         launcher = self._place_launcher(python, app_dir)
         print("Placed launcher: {0}".format(launcher))
@@ -720,9 +800,18 @@ class WinSupervisorBackend(SupervisorBackend):
         print("  - Global hotkeys arrive in Milestone 3 (M3); speech works without them.")
 
     def hooks_doctor_row(self) -> tuple:
-        """Windows: hooks live in the user-scope Claude settings.json."""
+        """Windows: hooks live in the user-scope Claude settings.json. Goes RED if
+        a Sonari hook is present but its baked script path no longer exists — the
+        stale-after-plugin-update case that otherwise stops speech silently while
+        doctor stayed green (#8)."""
         path = claude_settings_path()
-        ok = settings_has_sonari_hooks(path)
-        return ("hooks installed", ok,
-                path if ok else
-                "no Sonari hooks in {0} (run 'sonari install')".format(path))
+        if not settings_has_sonari_hooks(path):
+            return ("hooks installed", False,
+                    "no Sonari hooks in {0} (run 'sonari install')".format(path))
+        missing = [p for p in _sonari_hook_paths(path)
+                   if p and not os.path.exists(p)]
+        if missing:
+            return ("hooks installed", False,
+                    "hook script missing: {0} (stale after a plugin update; "
+                    "re-run 'sonari install')".format(missing[0]))
+        return ("hooks installed", True, path)
