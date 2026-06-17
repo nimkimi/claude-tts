@@ -11,6 +11,7 @@ from sonari.platform.windows.supervisor import (
     merge_hooks_into_settings,
     remove_hooks_from_settings,
     settings_has_sonari_hooks,
+    settings_has_sonari_plugin,
 )
 
 PW = r"C:\Py\pythonw.exe"
@@ -73,3 +74,33 @@ def test_invalid_json_aborts_without_clobber(tmp_path):
     with pytest.raises(ValueError):
         merge_hooks_into_settings(str(sp), PW, HOOK)
     assert sp.read_text(encoding="utf-8") == "{ not json"   # untouched
+
+
+# --- M9: the doctor probes must NEVER raise on a hand-malformed settings.json ---
+
+@pytest.mark.parametrize("blob", [
+    '{"hooks": ["not", "a", "dict"]}',            # hooks is a list
+    '{"hooks": {"Stop": "not-a-list"}}',          # entries not a list
+    '{"hooks": {"Stop": ["not-a-dict"]}}',        # entry not a dict
+    '{"hooks": {"Stop": [{"hooks": ["x"]}]}}',    # inner hook not a dict
+    '{"hooks": {"Stop": [{"hooks": [{"args": "x"}]}]}}',  # args not a list
+    '[1, 2, 3]',                                  # top level not an object
+    '"just a string"',
+    '42',
+])
+def test_settings_has_sonari_hooks_tolerates_malformed_shapes(tmp_path, blob):
+    sp = tmp_path / "settings.json"
+    sp.write_text(blob, encoding="utf-8")
+    assert settings_has_sonari_hooks(str(sp)) is False   # no exception, just False
+
+
+@pytest.mark.parametrize("blob", [
+    '{"enabledPlugins": ["sonari@sonari"]}',      # list, not a dict
+    '{"enabledPlugins": "sonari"}',
+    '[1, 2, 3]',
+    '"x"',
+])
+def test_settings_has_sonari_plugin_tolerates_malformed_shapes(tmp_path, blob):
+    sp = tmp_path / "settings.json"
+    sp.write_text(blob, encoding="utf-8")
+    assert settings_has_sonari_plugin(str(sp)) is False

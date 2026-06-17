@@ -868,8 +868,18 @@ class SpeechDaemon:
             except OSError:
                 pass
             return False
-        th = threading.Thread(target=self._handle_conn_guarded, args=(conn,), daemon=True)
-        th.start()
+        try:
+            th = threading.Thread(target=self._handle_conn_guarded, args=(conn,), daemon=True)
+            th.start()
+        except Exception:  # noqa: BLE001 - thread creation can fail (resource limits)
+            # The handler that would release the permit never ran: release it here
+            # and drop the connection, else this slot leaks forever (M8).
+            self._conn_sem.release()
+            try:
+                conn.close()
+            except OSError:
+                pass
+            return False
         return True
 
     def _accept_loop(self) -> None:

@@ -425,21 +425,43 @@ def claude_settings_path() -> str:
 
 
 def settings_has_sonari_hooks(settings_path: str) -> bool:
-    """True if settings.json contains at least one Sonari hook entry."""
+    """True if settings.json contains at least one Sonari hook entry.
+
+    Defensive at every level: a hand-edited settings.json can have any shape
+    (hooks a list, an entry a string, args not a list). 'sonari doctor' must never
+    crash on it — any unexpected shape simply yields False (M9)."""
     import json
     try:
         with open(settings_path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
     except Exception:
         return False
-    hooks = (data or {}).get("hooks", {}) if isinstance(data, dict) else {}
-    for entries in hooks.values():
-        for entry in entries:
-            for h in entry.get("hooks", []):
-                args = h.get("args") or []
-                blob = h.get("command", "") + " " + " ".join(map(str, args))
-                if "sonari-hook" in blob:
-                    return True
+    if not isinstance(data, dict):
+        return False
+    hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return False
+    try:
+        for entries in hooks.values():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                inner = entry.get("hooks", [])
+                if not isinstance(inner, list):
+                    continue
+                for h in inner:
+                    if not isinstance(h, dict):
+                        continue
+                    args = h.get("args") or []
+                    if not isinstance(args, list):
+                        args = []
+                    blob = str(h.get("command", "")) + " " + " ".join(map(str, args))
+                    if "sonari-hook" in blob:
+                        return True
+    except Exception:  # noqa: BLE001 - doctor must never raise on malformed input
+        return False
     return False
 
 
@@ -453,11 +475,18 @@ def settings_has_sonari_plugin(settings_path: str) -> bool:
             data = json.load(fh)
     except Exception:
         return False
-    plugins = (data or {}).get("enabledPlugins", {}) if isinstance(data, dict) else {}
-    for name, enabled in plugins.items():
-        # keys look like "sonari@sonari"; match the plugin-name part.
-        if enabled and str(name).split("@", 1)[0] == "sonari":
-            return True
+    if not isinstance(data, dict):
+        return False
+    plugins = data.get("enabledPlugins", {})
+    if not isinstance(plugins, dict):
+        return False
+    try:
+        for name, enabled in plugins.items():
+            # keys look like "sonari@sonari"; match the plugin-name part.
+            if enabled and str(name).split("@", 1)[0] == "sonari":
+                return True
+    except Exception:  # noqa: BLE001 - doctor must never raise on malformed input
+        return False
     return False
 
 
