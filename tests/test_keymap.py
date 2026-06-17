@@ -138,8 +138,10 @@ def test_resolve_unknown_action_raises():
 def test_resolve_skips_unbound_entries():
     # An entry with no key is UNBOUND -> skipped (not an error), so an action with
     # a default binding can be explicitly cleared in keymap.json.
-    resolved = keymap.resolve_keymap({"pause": {"key": None, "mods": ["alt"]},
-                                      "mute": {"key": "m", "mods": ["alt"]}})
+    # 'ctrl' is valid on both macOS and Windows keytables (the modifier is
+    # incidental here — the point is that the keyless 'pause' entry is skipped).
+    resolved = keymap.resolve_keymap({"pause": {"key": None, "mods": ["ctrl"]},
+                                      "mute": {"key": "m", "mods": ["ctrl"]}})
     actions = {e["action"] for e in resolved}
     assert "pause" not in actions and "mute" in actions
 
@@ -187,11 +189,11 @@ def test_load_keymap_drops_unknown_actions(monkeypatch, tmp_path):
     # A stale keymap.json binding a since-removed action must be ignored, not break
     # the whole keymap (resolve_keymap would otherwise raise on the unknown action).
     km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
-    km.write_text(json.dumps({"stop": {"key": "s", "mods": ["alt"]},
-                              "pause": {"key": "p", "mods": ["alt"]}}), encoding="utf-8")
+    km.write_text(json.dumps({"stop": {"key": "s", "mods": ["ctrl"]},
+                              "pause": {"key": "p", "mods": ["ctrl"]}}), encoding="utf-8")
     loaded = keymap.load_keymap()
     assert "stop" not in loaded
-    assert loaded["pause"] == {"key": "p", "mods": ["alt"]}
+    assert loaded["pause"] == {"key": "p", "mods": ["ctrl"]}
     keymap.resolve_keymap(loaded)   # must not raise
 
 

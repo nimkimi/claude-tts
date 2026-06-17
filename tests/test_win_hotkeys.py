@@ -1,8 +1,20 @@
+import sys
 import threading
 import time
 
+import pytest
+
 from sonari.platform.windows.hotkeys import WinHotkeyBackend
 from sonari.platform.base import HotkeyBackend
+
+# These two tests start the REAL Win32 message-pump thread, whose _run() calls
+# ctypes.windll.kernel32.GetCurrentThreadId() — absent off Windows. The fakes
+# cover registration but not the pump's thread-id syscall, so they can only run
+# on win32 (mirrors the sys.platform guard in test_win_supervisor.py).
+windows_only = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="starts a real Win32 message-pump thread (ctypes.windll)",
+)
 
 
 def _backend_with_fake_user32(monkeypatch, *, fail_ids=()):
@@ -130,6 +142,7 @@ def _start_with_fakes(monkeypatch, registered, unregistered, quit_evt):
     return hk
 
 
+@windows_only
 def test_stop_joins_thread_and_unregisters_before_returning(monkeypatch):
     """H2: stop() must JOIN the pump thread so its finally clause unregisters every
     chord BEFORE stop() returns — otherwise a reload's immediate start() collides
@@ -150,6 +163,7 @@ def test_stop_joins_thread_and_unregisters_before_returning(monkeypatch):
     assert hk._thread is None
 
 
+@windows_only
 def test_reload_cycle_re_registers_cleanly_without_collision(monkeypatch):
     """A full stop()+start() reload re-registers the chord with no leftover from the
     prior registration (the join guarantees the old chord was released first)."""
