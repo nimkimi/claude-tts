@@ -116,3 +116,25 @@ def test_init_sweeps_stale_temp_wavs(tmp_path, monkeypatch):
     assert not stale.exists()   # old sonari temp removed
     assert fresh.exists()       # recent one kept (may be in-flight)
     assert foreign.exists()     # non-sonari file untouched
+
+
+def test_run_raises_actionable_error_when_winrt_missing(monkeypatch):
+    # A Windows box without PyWinRT installed must get an actionable error at the
+    # synth path, not silent no-speech (doctor also goes red — see supervisor). (#7)
+    import sonari.platform.windows.tts as tts
+    monkeypatch.setattr(tts, "_winrt_available", lambda: False)
+    with pytest.raises(RuntimeError, match="(?i)pywinrt|winrt"):
+        WinTtsBackend().run("hello", None, 200)
+
+
+def test_pyproject_declares_windows_winrt_extra():
+    # winrt is a hard Windows dependency; it must be declared so `pip install`
+    # users on Windows actually get speech (not green-doctor + silence). (#7)
+    import os
+    import tomllib
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "pyproject.toml"), "rb") as fh:
+        data = tomllib.load(fh)
+    extras = data["project"]["optional-dependencies"]
+    assert "windows" in extras, extras
+    assert any("winrt" in d.lower() for d in extras["windows"]), extras["windows"]

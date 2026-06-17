@@ -36,6 +36,28 @@ from sonari.platform.base import TtsBackend
 
 _BASELINE_WPM: float = 200.0  # Sonari's default wpm maps to SpeakingRate 1.0
 
+_WINRT_INSTALL_HINT = (
+    "PyWinRT is not installed, so Sonari cannot synthesize speech. Install it: "
+    "pip install winrt-runtime winrt-Windows.Media.SpeechSynthesis "
+    "winrt-Windows.Storage.Streams"
+)
+
+
+def _winrt_available() -> bool:
+    """True if the OneCore TTS WinRT projection can be imported. Used by run()
+    (actionable error) and by `sonari doctor` (so an undeclared/missing PyWinRT
+    surfaces as RED, not silent no-speech behind a green doctor). (#7)"""
+    try:
+        import winrt.windows.media.speechsynthesis  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _require_winrt() -> None:
+    if not _winrt_available():
+        raise RuntimeError(_WINRT_INSTALL_HINT)
+
 
 def wpm_to_speaking_rate(wpm: float) -> float:
     """Map Sonari [100-400] wpm to a SpeakingRate multiplier [0.5-6.0].
@@ -256,6 +278,7 @@ class WinTtsBackend(TtsBackend):
         Returns a _TtsHandle the caller can .wait()/.terminate()/.poll()."""
         import winsound
 
+        _require_winrt()   # actionable error instead of a raw ImportError (#7)
         data = self._synthesize_wav(text, voice, rate)
         fd, path = tempfile.mkstemp(suffix=".wav", prefix=_TMP_PREFIX)
         try:

@@ -742,6 +742,19 @@ class WinSupervisorBackend(SupervisorBackend):
         except Exception as exc:
             rows.append(("neural voice", False, "error: {0}".format(exc)))
 
+        # PyWinRT (the OneCore TTS engine). Absent -> total no-speech, so a
+        # doctor green everywhere else would be dangerously misleading. (#7)
+        try:
+            from sonari.platform.windows.tts import _winrt_available
+            ok = _winrt_available()
+            rows.append(("TTS runtime", ok,
+                         "PyWinRT ready" if ok else
+                         "PyWinRT (winrt) not installed -> no speech. pip install "
+                         "winrt-runtime winrt-Windows.Media.SpeechSynthesis "
+                         "winrt-Windows.Storage.Streams"))
+        except Exception as exc:  # noqa: BLE001 - doctor must always render
+            rows.append(("TTS runtime", False, "error: {0}".format(exc)))
+
         # Daemon running
         running = self.is_running()
         rows.append(("daemon running", running,

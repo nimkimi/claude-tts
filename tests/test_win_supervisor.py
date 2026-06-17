@@ -136,6 +136,21 @@ def test_doctor_rows_include_task_and_neural_voice(monkeypatch):
     assert "daemon running" in names
 
 
+def test_doctor_row_flags_missing_winrt(monkeypatch):
+    # PyWinRT absent => total no-speech; doctor must go RED, not stay green. (#7)
+    sup = WinSupervisorBackend()
+    monkeypatch.setattr(sup, "_schtasks", lambda args: 0)
+    monkeypatch.setattr(sup, "resolve_python", lambda: r"C:\Py\pythonw.exe")
+    monkeypatch.setattr(sup, "_list_neural_voices", lambda: ["X"])
+    monkeypatch.setattr("sonari.paths.socket_connectable", lambda: True)
+    import sonari.platform.windows.tts as tts
+    monkeypatch.setattr(tts, "_winrt_available", lambda: False, raising=False)
+    rows = {r[0]: r for r in sup.doctor_rows()}
+    assert "TTS runtime" in rows
+    assert rows["TTS runtime"][1] is False
+    assert "winrt" in rows["TTS runtime"][2].lower()
+
+
 def test_resolve_python_skips_store_stub(monkeypatch, tmp_path):
     # Verify _is_store_stub fast-path (WindowsApps in path)
     from sonari.platform.windows.supervisor import _is_store_stub
