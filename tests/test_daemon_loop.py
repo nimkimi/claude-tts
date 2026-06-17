@@ -207,7 +207,9 @@ def test_handle_conn_rejects_wrong_token():
             # socket has already been reset (no PING reply is ever delivered).
             try:
                 data = client.recv(4096)
-            except ConnectionResetError:
+            except (ConnectionResetError, ConnectionAbortedError):
+                # Windows may abort (WinError 10053) rather than reset when the
+                # daemon drops the unauthenticated peer; both mean "rejected".
                 data = b""
             client.close()
             assert data == b""
