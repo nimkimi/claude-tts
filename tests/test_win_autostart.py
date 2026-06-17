@@ -32,3 +32,23 @@ def test_launch_spec_sets_pythonpath_so_the_spawned_daemon_can_import():
     root = pp.split(os.pathsep)[0]
     # the first PYTHONPATH entry must be the dir that contains the 'sonari' package
     assert os.path.isdir(os.path.join(root, "sonari")), pp
+
+
+def test_launch_spec_routes_stderr_to_log_file_not_devnull(tmp_path, monkeypatch):
+    """The spawned daemon's stderr must land in the daemon log under SONARI_DIR so
+    the speak-loop catch-all traceback survives on Windows (it was DEVNULL'd -> the
+    resilience traceback was unrecoverable). Mirrors the macOS plist StandardErrorPath.
+    Regression for #20."""
+    from sonari import paths
+
+    log = tmp_path / "speechd.log"
+    monkeypatch.setattr(paths, "SONARI_DIR", tmp_path)
+    monkeypatch.setattr(paths, "LOG_PATH", log)
+
+    argv, kwargs = sl.launch_spec("pythonw.exe")
+    assert kwargs["stderr"] is not subprocess.DEVNULL
+    assert str(kwargs["stderr"].name) == str(log)
+    # stdin/stdout stay DEVNULL
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["stdout"] is subprocess.DEVNULL
+    kwargs["stderr"].close()

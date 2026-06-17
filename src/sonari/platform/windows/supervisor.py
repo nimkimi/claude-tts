@@ -694,11 +694,16 @@ class WinSupervisorBackend(SupervisorBackend):
         src = os.path.join(paths.repo_root(), "src")
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = src + (os.pathsep + existing if existing else "")
+        # Route the daemon's stderr to the daemon log (parity with the macOS plist
+        # StandardErrorPath) so the speak-loop catch-all traceback survives (#20);
+        # DEVNULL made it unrecoverable. Open lazily inside launch_spec.
+        paths.ensure_sonari_dir()
+        err = open(paths.LOG_PATH, "a")
         kwargs = dict(
             creationflags=_SPAWN_FLAGS,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=err,
             env=env,
         )
         return argv, kwargs

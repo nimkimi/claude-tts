@@ -93,6 +93,28 @@ def test_launch_spec_sets_pythonpath_to_src(monkeypatch):
     assert env.get("PYTHONPATH", "").split(os.pathsep)[0] == src
 
 
+def test_launch_spec_routes_stderr_to_log_file_not_devnull(tmp_path, monkeypatch):
+    """The lazily-spawned daemon's stderr must land in the daemon log under
+    SONARI_DIR (paths.LOG_PATH) rather than subprocess.DEVNULL, so the speak-loop
+    catch-all traceback survives on Windows. Mirrors the macOS plist
+    StandardErrorPath. Regression for #20. stdin/stdout stay DEVNULL."""
+    import subprocess
+    from sonari import paths
+
+    log = tmp_path / "speechd.log"
+    monkeypatch.setattr(paths, "SONARI_DIR", tmp_path)
+    monkeypatch.setattr(paths, "LOG_PATH", log)
+
+    sup = WinSupervisorBackend()
+    monkeypatch.setattr(sup, "resolve_python", lambda: r"C:\Python311\pythonw.exe")
+    argv, kwargs = sup.launch_spec()
+    assert kwargs["stderr"] is not subprocess.DEVNULL
+    assert str(kwargs["stderr"].name) == str(log)
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["stdout"] is subprocess.DEVNULL
+    kwargs["stderr"].close()
+
+
 def test_is_installed_calls_schtasks_query(monkeypatch):
     sup = WinSupervisorBackend()
     calls = []
