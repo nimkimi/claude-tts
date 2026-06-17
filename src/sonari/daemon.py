@@ -633,10 +633,19 @@ class SpeechDaemon:
             pass
 
     def _reload_hotkeys(self) -> None:
-        """Re-register global hotkeys from the current keymap.json. start() re-reads
-        resolve_keymap(load_keymap()), so a stop+start picks up any unbind/rebind."""
-        self._stop_hotkeys()
-        self._start_hotkeys()
+        """Apply a keymap.json change to the live hotkeys. Honors the no_hotkeys
+        kill switch, then delegates to the platform backend's reload() seam:
+        Windows does a (now thread-joined) stop+start; macOS rewrites the resolved
+        keymap and reloads the separate hotkeyd process."""
+        flag = os.path.join(os.path.expanduser("~"), ".sonari", "no_hotkeys")
+        if os.environ.get("SONARI_DISABLE_HOTKEYS") or os.path.exists(flag):
+            self._stop_hotkeys()
+            return
+        from sonari.platform import get_platform
+        try:
+            get_platform().hotkey.reload(self._dispatch_hotkey)
+        except Exception:  # noqa: BLE001 - hotkeys are non-essential; speech must run
+            pass
 
     def _nav(self, session: str, to: str) -> None:
         """Move the per-session message cursor and play from there to the end.

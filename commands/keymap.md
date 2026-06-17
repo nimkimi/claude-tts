@@ -11,4 +11,6 @@ bash "${CLAUDE_PLUGIN_ROOT}/bin/sonari" keymap $ARGUMENTS
 
 Print the command's output to the user verbatim. With no arguments it lists every
 action and its hotkey (unbound actions show "(unbound)"). `<action> clear` (or
-`<action> none`) unbinds that action and applies it live.
+`<action> none`) unbinds that action and applies it live (the daemon re-registers
+its global hotkeys; on macOS the separate hotkeyd is reloaded to re-read the
+keymap).

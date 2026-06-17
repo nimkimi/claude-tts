@@ -134,8 +134,17 @@ class WinHotkeyBackend(HotkeyBackend):
         self._thread.start()
 
     def stop(self) -> None:
+        # JOIN the pump thread before returning. The thread's finally clause
+        # unregisters every chord; without the join, a reload's immediate start()
+        # re-registers the SAME chords while the old thread still owns them
+        # (RegisterHotKey -> 1409), they get dropped, then the old thread's finally
+        # unregisters them — leaving ALL hotkeys dark until a daemon restart (H2).
         self._stop.set()
         self._post_quit()
+        t = self._thread
+        if t is not None and t.is_alive():
+            t.join(timeout=2.0)
+        self._thread = None
 
     # --- diagnostics ---
     def doctor_rows(self) -> list:

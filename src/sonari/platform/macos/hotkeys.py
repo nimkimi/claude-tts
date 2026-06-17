@@ -113,6 +113,23 @@ class MacHotkeyBackend(HotkeyBackend):
         from sonari.platform.macos import keytables
         return list(keytables.DEFAULT_MODS)
 
+    def reload(self, dispatch=None) -> None:
+        """Apply a keymap change live on macOS. The hotkeyd is a SEPARATE process
+        (start/stop are no-ops here), so 'live' means: rewrite the resolved keymap
+        the Swift hotkeyd reads, then reload its LaunchAgent so it re-reads the file
+        (RunAtLoad relaunches it). No-op when the hotkeyd isn't installed. Never
+        raises — a failed reload must not break the daemon (M7)."""
+        from sonari import keymap
+        from sonari.platform.macos.supervisor import MacSupervisorBackend
+        try:
+            keymap.write_resolved()
+        except Exception:  # noqa: BLE001 - keep going; reload is best-effort
+            pass
+        if os.path.exists(LAUNCH_AGENT_PATH):
+            sup = MacSupervisorBackend()
+            sup.launchctl(["unload", LAUNCH_AGENT_PATH])
+            sup.launchctl(["load", LAUNCH_AGENT_PATH])
+
     def build(self):
         """Compile sonari-hotkeyd if swiftc is present and the source changed.
         Returns (ok: bool, detail: str). (Verbatim move of cli._build_hotkeyd.)"""

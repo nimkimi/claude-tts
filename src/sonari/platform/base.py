@@ -75,6 +75,16 @@ class HotkeyBackend(abc.ABC):
         """Stop listening. Default: no-op."""
         return None
 
+    def reload(self, dispatch) -> None:
+        """Re-apply the current keymap to the live listener after keymap.json
+        changed. Default: a full stop()+start() cycle (correct for an in-process
+        listener like Windows, whose stop() releases its chords before start()
+        re-registers them). Platforms whose hotkeys run in a SEPARATE process
+        (macOS) override this to rewrite the resolved keymap and reload that
+        process instead — stop()/start() are no-ops there."""
+        self.stop()
+        self.start(dispatch)
+
     def doctor_rows(self) -> "list":
         """Platform hotkey diagnostics (collisions, integrity). Default: none."""
         return []

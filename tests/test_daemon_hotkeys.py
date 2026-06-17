@@ -7,12 +7,16 @@ class _FakeHotkey:
     def __init__(self):
         self.started = None
         self.stopped = False
+        self.reloaded = None
 
     def start(self, dispatch):
         self.started = dispatch
 
     def stop(self):
         self.stopped = True
+
+    def reload(self, dispatch):
+        self.reloaded = dispatch
 
 
 class _FakePlatform:
@@ -56,10 +60,25 @@ def test_one_bad_hotkey_does_not_raise(monkeypatch):
     daemon._dispatch_hotkey({"type": "stop"})   # swallowed, no raise
 
 
-def test_reload_keymap_re_registers_hotkeys():
+def test_reload_keymap_delegates_to_backend_reload(monkeypatch):
+    # RELOAD_KEYMAP delegates to the platform backend's reload() seam (Windows:
+    # thread-joined stop+start; macOS: rewrite resolved + reload hotkeyd). The
+    # daemon passes its dispatch callback through.
+    pb = _FakePlatform()
+    monkeypatch.setattr("sonari.platform.get_platform", lambda: pb)
+    monkeypatch.setattr("os.path.exists", lambda p: False)   # no kill-switch flag
+    monkeypatch.delenv("SONARI_DISABLE_HOTKEYS", raising=False)
     daemon = make_daemon(foreground="fg")[0]
-    calls = []
-    daemon._stop_hotkeys = lambda: calls.append("stop")
-    daemon._start_hotkeys = lambda: calls.append("start")
     daemon.handle_message({"type": "reload_keymap"})
-    assert calls == ["stop", "start"]   # stop+start re-reads keymap.json + re-registers
+    assert callable(pb.hotkey.reloaded)   # backend.reload(dispatch) was invoked
+
+
+def test_reload_keymap_honors_kill_switch(monkeypatch):
+    # With the kill switch set, reload must NOT re-register hotkeys; it just stops.
+    pb = _FakePlatform()
+    monkeypatch.setattr("sonari.platform.get_platform", lambda: pb)
+    monkeypatch.setenv("SONARI_DISABLE_HOTKEYS", "1")
+    daemon = make_daemon(foreground="fg")[0]
+    daemon.handle_message({"type": "reload_keymap"})
+    assert pb.hotkey.reloaded is None
+    assert pb.hotkey.stopped is True

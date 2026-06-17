@@ -31,6 +31,43 @@ def test_hotkey_install_defaults_agent_path_and_loads(tmp_path, monkeypatch):
     assert ["load", str(agent)] in calls
 
 
+def test_reload_rewrites_resolved_and_reloads_hotkeyd_agent(tmp_path, monkeypatch):
+    """M7: on macOS, applying a keymap change live means rewriting the resolved
+    keymap the Swift hotkeyd reads, then reloading its LaunchAgent (unload+load) so
+    it re-reads the file. start()/stop() are no-ops on macOS, so without this the
+    change never reached the hotkeyd."""
+    import sonari.platform.macos.hotkeys as mh
+    import sonari.keymap as km
+    agent = tmp_path / "com.sonari.hotkeyd.plist"
+    agent.write_text("<plist/>")
+    monkeypatch.setattr(mh, "LAUNCH_AGENT_PATH", str(agent))
+    wrote = []
+    monkeypatch.setattr(km, "write_resolved", lambda: wrote.append(True))
+    calls = []
+    monkeypatch.setattr(
+        "sonari.platform.macos.supervisor.MacSupervisorBackend.launchctl",
+        lambda self, a: calls.append(a) or 0)
+
+    mh.MacHotkeyBackend().reload(dispatch=None)
+
+    assert wrote == [True]                       # resolved keymap rewritten
+    assert ["unload", str(agent)] in calls
+    assert ["load", str(agent)] in calls         # hotkeyd reloaded to re-read it
+
+
+def test_reload_is_noop_when_hotkeyd_not_installed(tmp_path, monkeypatch):
+    import sonari.platform.macos.hotkeys as mh
+    import sonari.keymap as km
+    monkeypatch.setattr(mh, "LAUNCH_AGENT_PATH", str(tmp_path / "absent.plist"))
+    monkeypatch.setattr(km, "write_resolved", lambda: None)
+    calls = []
+    monkeypatch.setattr(
+        "sonari.platform.macos.supervisor.MacSupervisorBackend.launchctl",
+        lambda self, a: calls.append(a) or 0)
+    mh.MacHotkeyBackend().reload(dispatch=None)
+    assert calls == []                           # nothing to reload
+
+
 def test_hotkey_uninstall_removes_agent_and_binary(tmp_path, monkeypatch):
     import sonari.platform.macos.hotkeys as mh
     agent = tmp_path / "com.sonari.hotkeyd.plist"; agent.write_text("<plist/>")

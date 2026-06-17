@@ -1,3 +1,6 @@
+import threading
+import time
+
 from sonari.platform.windows.hotkeys import WinHotkeyBackend
 from sonari.platform.base import HotkeyBackend
 
@@ -91,3 +94,63 @@ def test_display_combo_arrow_labels():
     assert hk.display_combo(0x0001, 0x25) == "Alt+Left"
     assert hk.display_combo(0x0001, 0x26) == "Alt+Up"
     assert hk.display_combo(0x0001, 0x28) == "Alt+Down"
+
+
+def _start_with_fakes(monkeypatch, registered, unregistered, quit_evt):
+    """Start a backend whose ctypes are faked: registration records ids, the pump
+    blocks in _get_message until quit_evt is set (modeling GetMessage/WM_QUIT)."""
+    import sonari.keymap as km
+    hk = WinHotkeyBackend()
+    monkeypatch.setattr(km, "load_keymap", lambda: {})
+    monkeypatch.setattr(km, "resolve_keymap", lambda m: [
+        {"action": "pause", "keyCode": 0x50, "modifiers": 0x0002,
+         "message": '{"type": "pause"}'}])
+    monkeypatch.setattr(hk, "_register", lambda hid, mods, vk: (registered.append(hid) or 1))
+    monkeypatch.setattr(hk, "_unregister", lambda hid: (unregistered.append(hid) or 1))
+    monkeypatch.setattr(hk, "_get_message", lambda: (quit_evt.wait(), None)[1])
+    monkeypatch.setattr(hk, "_post_quit", quit_evt.set)
+    return hk
+
+
+def test_stop_joins_thread_and_unregisters_before_returning(monkeypatch):
+    """H2: stop() must JOIN the pump thread so its finally clause unregisters every
+    chord BEFORE stop() returns — otherwise a reload's immediate start() collides
+    with the still-registered chords (1409) and all hotkeys go dark."""
+    registered, unregistered = [], []
+    quit_evt = threading.Event()
+    hk = _start_with_fakes(monkeypatch, registered, unregistered, quit_evt)
+
+    hk.start(lambda msg: None)
+    deadline = time.time() + 2.0
+    while time.time() < deadline and not registered:
+        time.sleep(0.005)
+    assert registered == [1]            # the pump registered the chord
+
+    hk.stop()
+    # The instant stop() returns, the old thread has already unregistered (joined).
+    assert unregistered == [1]
+    assert hk._thread is None
+
+
+def test_reload_cycle_re_registers_cleanly_without_collision(monkeypatch):
+    """A full stop()+start() reload re-registers the chord with no leftover from the
+    prior registration (the join guarantees the old chord was released first)."""
+    registered, unregistered = [], []
+    quit_evt = threading.Event()
+    hk = _start_with_fakes(monkeypatch, registered, unregistered, quit_evt)
+
+    hk.start(lambda msg: None)
+    deadline = time.time() + 2.0
+    while time.time() < deadline and not registered:
+        time.sleep(0.005)
+    # base reload() == stop()+start(); model the second start's quit gate.
+    hk.stop()
+    assert unregistered == [1]
+    registered.clear()
+    quit_evt.clear()
+    hk.start(lambda msg: None)
+    deadline = time.time() + 2.0
+    while time.time() < deadline and not registered:
+        time.sleep(0.005)
+    assert registered == [1]            # re-registered cleanly after the join
+    hk.stop()
