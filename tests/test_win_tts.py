@@ -75,3 +75,11 @@ def test_run_raises_actionable_error_when_no_voices(monkeypatch):
     monkeypatch.setattr(ss.SpeechSynthesizer, "all_voices", [])
     with pytest.raises(RuntimeError, match="No TTS voices installed"):
         WinTtsBackend().run("hello", None, 200)
+
+
+def test_list_voices_returns_display_name_strings():
+    # ABC + macOS return list[str]; Windows must match, not VoiceInformation
+    # objects (the same object-vs-name slip the PR fixed for best_voice()). (#16)
+    voices = WinTtsBackend().list_voices()
+    assert isinstance(voices, list) and voices
+    assert all(isinstance(v, str) for v in voices), voices

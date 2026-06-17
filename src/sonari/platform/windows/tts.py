@@ -134,10 +134,16 @@ class WinTtsBackend(TtsBackend):
             self._synth = s
         return self._synth
 
-    def list_voices(self) -> list:
-        """Return all installed VoiceInformation objects (may be empty)."""
+    def _all_voice_infos(self) -> list:
+        """Internal: all installed VoiceInformation OBJECTS (may be empty)."""
         from winrt.windows.media.speechsynthesis import SpeechSynthesizer
         return list(SpeechSynthesizer.all_voices)
+
+    def list_voices(self) -> list:
+        """ABC contract: list of installed voice display NAMES (str), matching
+        the macOS backend and the base ABC. Internal callers that need the WinRT
+        objects use _all_voice_infos()/_best_voice_info() instead. (#16)"""
+        return [v.display_name for v in self._all_voice_infos()]
 
     def _best_voice_info(self, lang_prefix: str = "en-US"):
         """Select a VoiceInformation in priority order:
@@ -148,7 +154,7 @@ class WinTtsBackend(TtsBackend):
         its display NAME (str).
         """
         from winrt.windows.media.speechsynthesis import SpeechSynthesizer
-        voices = self.list_voices()
+        voices = self._all_voice_infos()
         if not voices:
             raise RuntimeError(
                 "No TTS voices installed. Add a Speech language pack in "
@@ -179,7 +185,7 @@ class WinTtsBackend(TtsBackend):
         (case-insensitive); fall back to best_voice() if unknown/None.
         """
         if name:
-            for v in self.list_voices():
+            for v in self._all_voice_infos():
                 if (v.display_name or "").lower() == str(name).lower():
                     return v
         return self._best_voice_info()
