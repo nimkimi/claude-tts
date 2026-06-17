@@ -82,7 +82,7 @@ def test_build_hotkeyd_recompiles_when_source_changes(tmp_path, monkeypatch):
     assert ok is True and call.call_count == 1
 
 
-def test_keymap_subcommand_prints_all_nine_actions(capsys, tmp_path, monkeypatch):
+def test_keymap_subcommand_prints_the_default_bindings(capsys, tmp_path, monkeypatch):
     # Force the REAL platform to macOS so BOTH resolve_keymap (keytables) and
     # display_combo (labels) agree -> deterministic Ctrl+Cmd output on any host.
     import sonari.platform as platform
@@ -94,9 +94,11 @@ def test_keymap_subcommand_prints_all_nine_actions(capsys, tmp_path, monkeypatch
         rc = cli.main(["keymap"])
         assert rc == 0
         out = capsys.readouterr().out
-        for action in ("stop", "repeat", "skip", "jump_decision", "catch_up",
-                       "faster", "slower", "cycle_verbosity", "reread_options"):
+        for action in ("nav_next", "nav_prev", "nav_first", "nav_last",
+                       "pause", "mute"):
             assert action in out
+        # faster/slower ship UNBOUND, so they aren't in the default resolved keymap
+        assert "faster" not in out and "slower" not in out
         assert "Ctrl" in out and "Cmd" in out
     finally:
         platform._CACHE = None

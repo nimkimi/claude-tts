@@ -19,9 +19,12 @@ def test_sonari_daemon_prefers_usr_bin_python3_first():
 
 
 def test_sonari_prefers_usr_bin_python3_first():
+    # On macOS/Linux (the non-Windows branch) /usr/bin/python3 must be preferred
+    # before its PATH fallback. Windows uses `python` instead (OS guard below).
     txt = _read("sonari")
+    assert 'OS' in txt and 'Windows_NT' in txt   # OS-aware: Windows -> python
     pref = txt.index("[ -x /usr/bin/python3 ]")
-    cmdv = txt.index("command -v python3")
+    cmdv = txt.index("command -v python3", pref)  # the PATH fallback AFTER it
     assert pref < cmdv, "shim must prefer /usr/bin/python3 before PATH lookup"
 
 

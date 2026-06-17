@@ -61,36 +61,35 @@ def test_action_messages_faster_has_delta_25():
 
 def test_default_keymap_macos_uses_ctrl_cmd(mac):
     d = keymap.default_keymap()
-    assert set(d.keys()) == set(keymap.ACTION_MESSAGES.keys())  # every action bound
-    assert d["stop"]["key"] == "s" and d["stop"]["mods"] == ["ctrl", "cmd"]
-    assert d["skip"]["key"] == "." and d["faster"]["key"] == "]"
-    # the chord applies to the nav/pause/mute bindings too
+    # only nav/pause/mute are bound by default; every binding carries the chord
+    assert set(d.keys()) == {"nav_prev", "nav_next", "nav_first", "nav_last",
+                             "pause", "mute"}
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
     assert d["pause"]["key"] == "p" and d["mute"]["key"] == "m"
 
 
 def test_default_keymap_windows_uses_ctrl_shift_alt(win):
     d = keymap.default_keymap()
-    assert d["stop"]["mods"] == ["ctrl", "shift", "alt"]
-    assert d["reread_options"]["key"] == "o"
+    assert d["nav_next"]["mods"] == ["ctrl", "shift", "alt"]
+    assert d["mute"]["key"] == "m"
 
 
 # --- resolve_keymap ---------------------------------------------------------
 
 def test_resolve_macos_carbon_codes(mac):
-    resolved = keymap.resolve_keymap({"stop": {"key": "s", "mods": ["ctrl", "cmd"]}})
+    resolved = keymap.resolve_keymap({"pause": {"key": "p", "mods": ["ctrl", "cmd"]}})
     assert resolved == [{
-        "action": "stop", "keyCode": 1, "modifiers": 4352,  # 4096 | 256
-        "message": '{"type": "stop"}'}]
+        "action": "pause", "keyCode": 35, "modifiers": 4352,  # 4096 | 256
+        "message": '{"type": "pause"}'}]
 
 
 def test_resolve_windows_vk_codes(win):
     resolved = keymap.resolve_keymap(
-        {"stop": {"key": "s", "mods": ["ctrl", "shift", "alt"]}})
+        {"pause": {"key": "p", "mods": ["ctrl", "shift", "alt"]}})
     row = resolved[0]
-    assert row["keyCode"] == 0x53                            # VK 'S'
+    assert row["keyCode"] == 0x50                            # VK 'P'
     assert row["modifiers"] == (0x0002 | 0x0004 | 0x0001)    # ctrl|shift|alt
-    assert row["action"] == "stop"
+    assert row["action"] == "pause"
 
 
 def test_resolve_faster_message_is_json_with_delta(mac):
@@ -100,12 +99,15 @@ def test_resolve_faster_message_is_json_with_delta(mac):
     assert json.loads(entry["message"]) == {"type": "set_rate", "delta": 25}
 
 
-def test_resolve_default_keymap_covers_all_actions():
-    # The default keymap must bind EVERY action Sonari defines — otherwise a
-    # feature (nav/pause/mute) ships unreachable on a fresh install. Assert
-    # against ACTION_MESSAGES, not _DEFAULT_KEYS (which would be self-referential).
-    resolved = keymap.resolve_keymap(keymap.default_keymap())
-    assert {e["action"] for e in resolved} == set(keymap.ACTION_MESSAGES.keys())
+def test_default_keymap_binds_only_nav_pause_mute():
+    # The default keymap binds only nav/pause/mute. faster/slower are valid actions
+    # but ship UNBOUND (blank by default); every default binding is a real action.
+    km = keymap.default_keymap()
+    assert set(km.keys()) == {"nav_prev", "nav_next", "nav_first", "nav_last",
+                              "pause", "mute"}
+    assert set(km.keys()) <= set(keymap.ACTION_MESSAGES.keys())
+    assert "faster" in keymap.ACTION_MESSAGES and "faster" not in km
+    assert "slower" in keymap.ACTION_MESSAGES and "slower" not in km
 
 
 def test_default_keymap_binds_nav_pause_mute():
@@ -120,12 +122,12 @@ def test_default_keymap_binds_nav_pause_mute():
 
 def test_resolve_unknown_key_raises():
     with pytest.raises(ValueError):
-        keymap.resolve_keymap({"stop": {"key": "zzz", "mods": ["ctrl"]}})
+        keymap.resolve_keymap({"pause": {"key": "zzz", "mods": ["ctrl"]}})
 
 
 def test_resolve_unknown_mod_raises():
     with pytest.raises(ValueError):
-        keymap.resolve_keymap({"stop": {"key": "s", "mods": ["hyper"]}})
+        keymap.resolve_keymap({"pause": {"key": "p", "mods": ["hyper"]}})
 
 
 def test_resolve_unknown_action_raises():
@@ -139,16 +141,28 @@ def test_load_keymap_returns_defaults_when_missing(monkeypatch, tmp_path):
     _patch_keymap_paths(monkeypatch, tmp_path)
     loaded = keymap.load_keymap()
     assert loaded == keymap.default_keymap()
-    loaded["stop"]["key"] = "x"  # independent copy
-    assert keymap.default_keymap()["stop"]["key"] == "s"
+    loaded["nav_prev"]["key"] = "x"  # independent copy
+    assert keymap.default_keymap()["nav_prev"]["key"] == "left"
 
 
 def test_load_keymap_merges_user_override(monkeypatch, tmp_path):
     km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
-    km.write_text(json.dumps({"stop": {"key": "x", "mods": ["cmd"]}}), encoding="utf-8")
+    km.write_text(json.dumps({"pause": {"key": "x", "mods": ["cmd"]}}), encoding="utf-8")
     loaded = keymap.load_keymap()
-    assert loaded["stop"] == {"key": "x", "mods": ["cmd"]}
-    assert loaded["repeat"] == keymap.default_keymap()["repeat"]
+    assert loaded["pause"] == {"key": "x", "mods": ["cmd"]}
+    assert loaded["nav_next"] == keymap.default_keymap()["nav_next"]
+
+
+def test_load_keymap_drops_unknown_actions(monkeypatch, tmp_path):
+    # A stale keymap.json binding a since-removed action must be ignored, not break
+    # the whole keymap (resolve_keymap would otherwise raise on the unknown action).
+    km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
+    km.write_text(json.dumps({"stop": {"key": "s", "mods": ["alt"]},
+                              "pause": {"key": "p", "mods": ["alt"]}}), encoding="utf-8")
+    loaded = keymap.load_keymap()
+    assert "stop" not in loaded
+    assert loaded["pause"] == {"key": "p", "mods": ["alt"]}
+    keymap.resolve_keymap(loaded)   # must not raise
 
 
 def test_load_keymap_tolerates_corrupt_file(monkeypatch, tmp_path):

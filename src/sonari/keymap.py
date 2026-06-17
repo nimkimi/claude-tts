@@ -20,11 +20,10 @@ from sonari.paths import (
 # pulls them from the active backend via get_platform() at call time (lazy — no
 # import-time OS dispatch). The ONLY sys.platform branch stays in platform/__init__.
 
-# action -> the speechd protocol message it sends.
+# action -> the speechd protocol message it sends. The hotkey-bindable action set
+# is deliberately small: navigation, play/pause, mute, and speech-rate. (stop /
+# repeat / skip stay reachable via the CLI; they are just not hotkey actions.)
 ACTION_MESSAGES = {
-    "stop": {"type": "stop"},
-    "repeat": {"type": "repeat"},
-    "skip": {"type": "skip"},
     # Message-cursor navigation over the current turn (next/prev/first/last item).
     "nav_next": {"type": "nav", "to": "next"},
     "nav_prev": {"type": "nav", "to": "prev"},
@@ -32,23 +31,16 @@ ACTION_MESSAGES = {
     "nav_last": {"type": "nav", "to": "last"},
     "pause": {"type": "pause"},     # play/pause toggle
     "mute": {"type": "mute"},       # sticky per-session mute toggle
-    "jump_decision": {"type": "jump_decision"},
-    "catch_up": {"type": "catch_up"},
     "faster": {"type": "set_rate", "delta": 25},
     "slower": {"type": "set_rate", "delta": -25},
-    "cycle_verbosity": {"type": "cycle_verbosity"},
-    "reread_options": {"type": "reread_options"},
 }
 
-# Shared action -> key. The chord modifiers are platform-defaulted (macOS:
+# Shared action -> default key. The chord modifiers are platform-defaulted (macOS:
 # Ctrl+Cmd; Windows: Ctrl+Shift+Alt) via the active backend's default_mods().
+# Only navigation + play/pause + mute are bound out of the box; faster/slower are
+# valid actions but ship UNBOUND (blank by default) so the default keymap stays
+# minimal — users add a key for them in keymap.json if they want one.
 _DEFAULT_KEYS = {
-    "stop": "s", "repeat": "r", "skip": ".", "jump_decision": "d",
-    "catch_up": "l", "faster": "]", "slower": "[",
-    "cycle_verbosity": "v", "reread_options": "o",
-    # Paragraph-item navigation + play/pause + sticky mute. Arrow keys for nav
-    # (prev/next/first/last), p/m for pause/mute. All under the platform chord;
-    # keys are distinct so there is no collision within the default chord.
     "nav_prev": "left", "nav_next": "right", "nav_first": "up", "nav_last": "down",
     "pause": "p", "mute": "m",
 }
@@ -115,7 +107,9 @@ def load_keymap() -> dict:
     """Merge the user's KEYMAP_PATH over a copy of DEFAULT_KEYMAP.
 
     Missing or corrupt files yield a fresh DEFAULT_KEYMAP copy. A user entry
-    fully replaces the default binding for that action.
+    fully replaces the default binding for that action. Entries for actions Sonari
+    no longer defines are ignored, so a stale keymap.json (e.g. one binding an
+    action that was since removed) does not break the whole keymap.
     """
     merged = _copy_keymap(default_keymap())
     try:
@@ -126,6 +120,8 @@ def load_keymap() -> dict:
     if not isinstance(user, dict):
         return merged
     for action, binding in user.items():
+        if action not in ACTION_MESSAGES:
+            continue                       # drop bindings for removed/unknown actions
         if isinstance(binding, dict):
             merged[action] = {
                 "key": binding.get("key"),
