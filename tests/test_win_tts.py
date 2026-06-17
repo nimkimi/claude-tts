@@ -97,3 +97,22 @@ def test_terminate_issues_a_real_stop_playsound_call():
     assert played[1] & winsound.SND_ASYNC, played   # async playback, not SND_SYNC
     h.terminate()
     assert (None, 0) in winsound._calls, winsound._calls  # a real stop was issued
+
+
+def test_init_sweeps_stale_temp_wavs(tmp_path, monkeypatch):
+    # A crashed/killed daemon can leak sonari-tts-*.wav in %TEMP%. Backend init
+    # sweeps OLD ones (never a possibly-in-flight recent file, never foreign
+    # files). (#26)
+    import os, tempfile, time
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    stale = tmp_path / "sonari-tts-OLD.wav"
+    fresh = tmp_path / "sonari-tts-NEW.wav"
+    foreign = tmp_path / "someone-elses.wav"
+    for f in (stale, fresh, foreign):
+        f.write_bytes(b"x")
+    old = time.time() - 10_000
+    os.utime(str(stale), (old, old))
+    WinTtsBackend()  # __init__ sweeps
+    assert not stale.exists()   # old sonari temp removed
+    assert fresh.exists()       # recent one kept (may be in-flight)
+    assert foreign.exists()     # non-sonari file untouched

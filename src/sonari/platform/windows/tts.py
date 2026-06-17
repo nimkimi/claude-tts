@@ -46,6 +46,29 @@ def wpm_to_speaking_rate(wpm: float) -> float:
     return max(0.5, min(6.0, wpm / _BASELINE_WPM))
 
 
+_TMP_PREFIX = "sonari-tts-"
+
+
+def _sweep_stale_wavs(max_age_s: float = 300.0) -> None:
+    """Best-effort cleanup of temp WAVs leaked by a prior crashed/killed daemon.
+    Only removes files older than *max_age_s*, so a clip that another instance
+    may still be playing is never deleted, and only our own sonari-tts-* prefix
+    is touched. Never raises. (#26)"""
+    import glob
+    import time
+    try:
+        now = time.time()
+        pattern = os.path.join(tempfile.gettempdir(), _TMP_PREFIX + "*.wav")
+        for p in glob.glob(pattern):
+            try:
+                if now - os.path.getmtime(p) > max_age_s:
+                    os.unlink(p)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def _wav_duration(data: bytes) -> float:
     """Seconds of audio in a WAV byte string (for the completion timer)."""
     try:
@@ -123,6 +146,7 @@ class WinTtsBackend(TtsBackend):
 
     def __init__(self) -> None:
         self._synth = None         # reused SpeechSynthesizer (lazy)
+        _sweep_stale_wavs()        # clear temp WAVs leaked by a prior crash (#26)
 
     def _get_synth(self):
         if self._synth is None:
@@ -233,7 +257,7 @@ class WinTtsBackend(TtsBackend):
         import winsound
 
         data = self._synthesize_wav(text, voice, rate)
-        fd, path = tempfile.mkstemp(suffix=".wav", prefix="sonari-tts-")
+        fd, path = tempfile.mkstemp(suffix=".wav", prefix=_TMP_PREFIX)
         try:
             os.write(fd, data)
         finally:
