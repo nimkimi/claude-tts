@@ -8,7 +8,7 @@ name (no need to quote multi-word names; omit it entirely to list the installed
 voices):
 
 ```
-PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src" python -m sonari.cli voice $ARGUMENTS
+bash "${CLAUDE_PLUGIN_ROOT}/bin/sonari" voice $ARGUMENTS
 ```
 
 Print the command's output to the user verbatim. If it listed voices, tell the

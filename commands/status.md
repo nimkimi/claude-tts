@@ -5,7 +5,7 @@ description: Show Sonari speech daemon status (verbosity, rate, voice, queue)
 Run the Sonari status command with the Bash tool:
 
 ```
-PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src" python -m sonari.cli status
+bash "${CLAUDE_PLUGIN_ROOT}/bin/sonari" status
 ```
 
 Print the command's output to the user verbatim so they can see the current
