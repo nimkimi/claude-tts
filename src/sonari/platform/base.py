@@ -1,6 +1,7 @@
 """Platform backend interfaces. The portable core depends ONLY on these
 abstractions; concrete macOS/Windows implementations live in sibling packages
-and are wired in by get_platform() (the only sys.platform branch)."""
+and are wired in by get_platform() (the only sys.platform branch for backend
+SELECTION; transport.py branches separately for its stdlib lock primitive)."""
 from __future__ import annotations
 
 import abc
