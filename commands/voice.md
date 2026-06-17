@@ -1,12 +1,15 @@
 ---
-description: Set the Sonari say voice
-argument-hint: <voice name>
+description: Set the Sonari say voice (omit the name to list installed voices)
+argument-hint: [voice name]
 ---
 
-Run the Sonari voice command with the Bash tool, forwarding the requested voice:
+Run the Sonari voice command with the Bash tool, forwarding any requested voice
+name (no need to quote multi-word names; omit it entirely to list the installed
+voices):
 
 ```
 PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src" python -m sonari.cli voice $ARGUMENTS
 ```
 
-Print the command's output to the user verbatim. If the command errors, report it briefly.
+Print the command's output to the user verbatim. If it listed voices, tell the
+user to re-run /sonari:voice with one of the names. If it errors, report it briefly.

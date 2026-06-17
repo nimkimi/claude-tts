@@ -67,7 +67,24 @@ def _cmd_rate(args) -> int:
 
 
 def _cmd_voice(args) -> int:
-    _send({"v": PROTOCOL_VERSION, "type": MsgType.SET_VOICE, "voice": args.name})
+    # No name -> list the installed voices so the user can pick one (changes
+    # nothing). A name -> set it; the name may be several words ("Microsoft David"),
+    # so join them rather than requiring the user to quote.
+    name = " ".join(args.name).strip() if args.name else ""
+    if not name:
+        try:
+            voices = _platform().tts.list_voices()
+        except Exception as exc:  # noqa: BLE001 - listing must not crash the CLI
+            print(f"sonari: could not list voices: {exc}", file=sys.stderr)
+            return 1
+        if not voices:
+            print("No voices installed.")
+            return 0
+        print("Installed voices (set with: sonari voice <name>):")
+        for v in voices:
+            print("  " + (getattr(v, "display_name", None) or str(v)))
+        return 0
+    _send({"v": PROTOCOL_VERSION, "type": MsgType.SET_VOICE, "voice": name})
     return 0
 
 
@@ -118,8 +135,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("wpm", type=int)
     sp.set_defaults(func=_cmd_rate)
 
-    sp = sub.add_parser("voice", help="set the say voice")
-    sp.add_argument("name")
+    sp = sub.add_parser("voice", help="set the say voice (omit name to list voices)")
+    sp.add_argument("name", nargs="*", help="voice name; omit to list installed voices")
     sp.set_defaults(func=_cmd_voice)
 
     sub.add_parser("repeat", help="repeat the last spoken item").set_defaults(
