@@ -12,7 +12,9 @@ Body copied verbatim from docs/superpowers/m2-windows-api-reference.md
 """
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 import time
 
 # These constants are defined in subprocess only on win32.
@@ -20,6 +22,27 @@ import time
 _CREATE_NO_WINDOW = 0x08000000
 _DETACHED_PROCESS = 0x00000008
 _SPAWN_FLAGS      = _CREATE_NO_WINDOW | _DETACHED_PROCESS  # 0x08000008
+
+
+def _package_root() -> str:
+    """Directory that contains the 'sonari' package, derived from THIS file's
+    location: <root>/sonari/platform/windows/supervisor_loop.py -> <root>.
+    Works for both the dev (src/) and installed (app_dir/) layouts because it is
+    relative to __file__, not to a cwd or a configured path."""
+    return os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
+
+
+def _ensure_importable() -> str:
+    """Put the package root on sys.path so `import sonari` resolves even when this
+    file is launched by BARE SCRIPT PATH. Task Scheduler does exactly that
+    (Action: pythonw.exe "<path>/supervisor_loop.py"), which makes sys.path[0]
+    this file's own dir, not the package root -> the daemon never autostarts.
+    Returns the root. Idempotent and safe on every OS."""
+    root = _package_root()
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    return root
 
 # Never combine start_new_session=True with DETACHED_PROCESS:
 # Python 3.9+ raises ValueError on Windows if both are set.
@@ -32,11 +55,20 @@ def launch_spec(pythonw: str) -> tuple:
     WinSupervisorBackend.launch_spec() for the lazy-start path.
     """
     argv = [pythonw, "-m", "sonari.daemon"]
+    # The spawned daemon is a fresh process; without PYTHONPATH it cannot import
+    # 'sonari' -> it exits instantly -> a relaunch storm. Put the package root
+    # (derived from this file's location) first on PYTHONPATH so the daemon
+    # resolves self-containedly. Parity with WinSupervisorBackend.launch_spec.
+    env = dict(os.environ)
+    root = _package_root()
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = root + (os.pathsep + existing if existing else "")
     kwargs = dict(
         creationflags=_SPAWN_FLAGS,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=env,
         # start_new_session intentionally absent — incompatible with DETACHED_PROCESS
     )
     return argv, kwargs
@@ -67,6 +99,7 @@ def run_supervisor_loop(pythonw: str) -> None:
 # Entry point when Task Scheduler launches this file directly:
 # schtasks Action: pythonw.exe "<path>/supervisor_loop.py"
 if __name__ == "__main__":
+    _ensure_importable()  # MUST run before importing sonari (script-path launch)
     from sonari.platform.windows.supervisor import WinSupervisorBackend
     pw = WinSupervisorBackend().resolve_python()
     if pw:
