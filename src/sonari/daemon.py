@@ -509,9 +509,18 @@ class SpeechDaemon:
             pass
 
     def _dispatch_hotkey(self, message: dict) -> None:
-        """A hotkey fire is handled exactly like an inbound socket message."""
+        """A hotkey fire is handled exactly like an inbound socket message.
+
+        MUST hold self._lock around handle_message, identical to the socket path
+        (_handle_conn): the hotkey thread mutates shared state (queue, history,
+        config) concurrently with the speak loop, so without the lock it races
+        -> 'list changed size during iteration' / corruption. handle_message and
+        its callees never acquire self._lock (note_spoken/speak run on the speak
+        thread), so this is deadlock-free.
+        """
         try:
-            self.handle_message(message)
+            with self._lock:
+                self.handle_message(message)
         except Exception:  # noqa: BLE001 - one bad hotkey must not kill the pump
             pass
 
