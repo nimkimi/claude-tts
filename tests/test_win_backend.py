@@ -11,10 +11,12 @@ def test_make_windows_backend_full_bundle():
         assert isinstance(part, cls)
 
 
-def test_hotkey_stub_reports_deferred():
+def test_hotkey_backend_is_real_not_stub():
     from sonari.platform.windows.hotkeys import WinHotkeyBackend
-    ok, detail = WinHotkeyBackend().install("log", "agent", lambda a: 0)
-    assert ok is False and "M3" in detail
+    hk = WinHotkeyBackend()
+    # M3: real in-process backend — keytables + display labels, no "M3 deferred".
+    assert hk.default_mods() == ["ctrl", "shift", "alt"]
+    assert hk.display_combo(0x0002, 0x53) == "Ctrl+S"
 
 
 def test_display_combo_labels_ctrl_alt_o():
