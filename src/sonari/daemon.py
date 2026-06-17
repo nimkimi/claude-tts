@@ -669,15 +669,20 @@ _FAULT_FILE = None
 
 
 def _arm_faulthandler() -> None:
-    """Dump every thread's Python stack to ~/.sonari/faulthandler.log on a NATIVE
+    """Dump every thread's Python stack to SONARI_DIR/faulthandler.log on a NATIVE
     crash (access violation / segfault in WinRT, ctypes, or winsound) — the only
     way to see otherwise-silent C-level daemon deaths. Never raises."""
     global _FAULT_FILE
     try:
         import faulthandler
-        path = os.path.join(os.path.expanduser("~"), ".sonari", "faulthandler.log")
+        # Import SONARI_DIR LIVE (not at module top) so the conftest monkeypatch /
+        # any SONARI_DIR redirection takes effect; a top-level import would freeze
+        # the value before tests patch it and leak into the real ~/.sonari.
+        from sonari.paths import SONARI_DIR
+        path = str(SONARI_DIR / "faulthandler.log")
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        _FAULT_FILE = open(path, "a", encoding="utf-8")
+        # mode 'w': only the latest run's crash matters; never grow unbounded.
+        _FAULT_FILE = open(path, "w", encoding="utf-8")
         _FAULT_FILE.write("=== faulthandler armed: pid {0} ===\n".format(os.getpid()))
         _FAULT_FILE.flush()
         faulthandler.enable(file=_FAULT_FILE, all_threads=True)
