@@ -56,26 +56,44 @@ def test_dispatch_on_hotkey_id_calls_back():
     assert got == [{"type": "skip"}]
 
 
+def test_doctor_rows_unknown_when_daemon_not_running():
+    # cli.doctor() builds a FRESH backend that never start()ed; it must NOT assert
+    # a green "no collisions" it cannot see — the chords are registered in the
+    # daemon process. With no daemon-side state file, report unknown. (#9)
+    rows = WinHotkeyBackend().doctor_rows()
+    chord = [r for r in rows if r[0] == "hotkey chords"][0]
+    assert "no collisions" not in chord[2].lower()
+    assert "daemon" in chord[2].lower()
+
+
 def test_doctor_rows_report_collisions(monkeypatch):
-    hk, _ = _backend_with_fake_user32(monkeypatch, fail_ids={1})
-    hk._register_all([{"action": "stop", "keyCode": 0x53, "modifiers": 0x2,
-                       "message": '{"type": "stop"}'}])
-    rows = hk.doctor_rows()
+    # The daemon-side backend registers + persists its diagnostics; doctor (a
+    # different, never-started backend) reads that state. (#9)
+    daemon_side, _ = _backend_with_fake_user32(monkeypatch, fail_ids={1})
+    daemon_side._register_all([{"action": "stop", "keyCode": 0x53, "modifiers": 0x2,
+                                "message": '{"type": "stop"}'}])
+    daemon_side._write_state()
+    rows = WinHotkeyBackend().doctor_rows()
     chord = [r for r in rows if r[0] == "hotkey chords"][0]
     assert chord[1] is False and "stop" in chord[2]
 
 
 def test_doctor_rows_clean_when_no_collisions(monkeypatch):
-    hk = WinHotkeyBackend()
-    monkeypatch.setattr(hk, "_process_is_elevated", lambda: False)
-    rows = hk.doctor_rows()
-    assert rows == [("hotkey chords", True, "no collisions")]
+    daemon_side, _ = _backend_with_fake_user32(monkeypatch)
+    daemon_side._register_all([{"action": "stop", "keyCode": 0x53, "modifiers": 0x2,
+                                "message": '{"type": "stop"}'}])
+    daemon_side._write_state()
+    rows = WinHotkeyBackend().doctor_rows()
+    chord = [r for r in rows if r[0] == "hotkey chords"][0]
+    assert chord == ("hotkey chords", True, "no collisions (daemon-reported)")
 
 
 def test_uipi_row_when_elevated(monkeypatch):
-    hk = WinHotkeyBackend()
-    monkeypatch.setattr(hk, "_process_is_elevated", lambda: True)
-    rows = hk.doctor_rows()
+    daemon_side, _ = _backend_with_fake_user32(monkeypatch)
+    monkeypatch.setattr(daemon_side, "_process_is_elevated", lambda: True)
+    daemon_side._register_all([])
+    daemon_side._write_state()
+    rows = WinHotkeyBackend().doctor_rows()
     assert any("Administrator" in r[2] for r in rows)
 
 
