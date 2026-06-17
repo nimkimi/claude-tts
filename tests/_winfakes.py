@@ -1,11 +1,15 @@
 """Fake Windows modules so platform/windows/* imports + unit-tests on macOS/Linux.
 install() is idempotent and uses setdefault — a no-op on real Windows."""
-import sys, types, threading
+import sys, types
 
 
 def install():
     if sys.platform == "win32":
         return
+    # Force the REAL subprocess into sys.modules before we inject a fake msvcrt
+    # below: on some paths subprocess imports msvcrt, and a fake-first import
+    # order could shadow it. Importing it here makes order irrelevant. (#37)
+    import subprocess  # noqa: F401
     # --- winsound ---
     if "winsound" not in sys.modules:
         ws = types.ModuleType("winsound")
@@ -51,7 +55,6 @@ def _install_winrt():
     mk = lambda n: sys.modules.setdefault(n, types.ModuleType(n))
     mk("winrt"); sysmod = mk("winrt.system")
     mk("winrt.windows"); mk("winrt.windows.media")
-    play = mk("winrt.windows.media.playback")
     synth = mk("winrt.windows.media.speechsynthesis")
 
     class Object: pass
@@ -108,16 +111,3 @@ def _install_winrt():
         def read_bytes(self, buf):
             buf[:] = self._data[:len(buf)]
     streams.DataReader = DataReader
-
-    class MediaPlayerAudioCategory: SPEECH = 3
-    class MediaPlayer:
-        def __init__(self): self._cb = None; self.audio_category = None
-        def set_stream_source(self, s): pass
-        def add_media_ended(self, cb): self._cb = cb; return 0
-        def play(self):
-            t = threading.Timer(0.01, lambda: self._cb and self._cb(self, None))
-            t.daemon = True; t.start()
-        def pause(self): pass
-        def close(self): pass
-    play.MediaPlayer = MediaPlayer
-    play.MediaPlayerAudioCategory = MediaPlayerAudioCategory

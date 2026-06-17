@@ -6,5 +6,3 @@ def test_winfakes_make_winrt_and_winsound_importable():
     from winrt.windows.media.speechsynthesis import SpeechSynthesizer
     s = SpeechSynthesizer()
     assert list(SpeechSynthesizer.all_voices)
-    from winrt.windows.media.playback import MediaPlayer
-    assert hasattr(MediaPlayer(), "add_media_ended")

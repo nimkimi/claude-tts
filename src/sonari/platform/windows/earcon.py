@@ -17,31 +17,6 @@ except ModuleNotFoundError:  # non-Windows; reached at import-time when winsound
     _winsound = None  # type: ignore[assignment]
 
 
-class _DoneHandle:
-    """Returned on a successful play() call.
-
-    winsound.PlaySound(..., SND_ASYNC) hands the audio buffer to the Win32
-    multimedia scheduler and returns immediately — there is no OS-level
-    process or thread handle exposed to Python.  poll() therefore returns 0
-    (POSIX convention: exited normally) immediately, which satisfies the
-    EarconBackend contract (caller may call .poll() to check completion).
-
-    CAVEAT — single-channel truncation:
-    If you supply a stereo (2-channel) WAV, Windows mixes it down silently;
-    you will NOT get a RuntimeError.  However, non-standard PCM variants
-    (float32, 24-bit int, ADPCM) cause PlaySound to return False or raise
-    RuntimeError on some Windows builds.  Always generate 16-bit integer
-    PCM at 44100 Hz (what generate_earcon() produces).
-
-    CAVEAT — concurrent calls:
-    Each new SND_ASYNC call stops the previous one.  Do NOT delete the .wav
-    file immediately after play(); the Win32 scheduler still holds a handle
-    to it for the duration of playback.
-    """
-    def poll(self) -> int:
-        return 0  # immediately "done" from Python's perspective
-
-
 class WinEarconBackend(EarconBackend):
     """Earcon backend for Windows using winsound.PlaySound."""
 

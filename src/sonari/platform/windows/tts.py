@@ -18,9 +18,9 @@ Requirements (Windows only):
     pip install winrt-runtime winrt-Windows.Media.SpeechSynthesis \
                 winrt-Windows.Storage.Streams
 
-NOTE: winsound is a single output channel shared with earcons — an earcon that
-fires mid-utterance cuts the current speech. Acceptable tradeoff vs a daemon that
-crashes every ~80 utterances; refine later (e.g. an earcon audio path off winsound).
+NOTE: winsound is a single output channel for speech. Earcons are played in a
+separate windowless helper process (see earcon.py) so their audio session mixes
+with speech (shared-mode) rather than cutting it.
 """
 from __future__ import annotations
 

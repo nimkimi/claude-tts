@@ -122,13 +122,6 @@ def task_uninstall() -> int:
     )
 
 
-def task_is_installed() -> bool:
-    """Return True if the task exists (schtasks /query exit 0 = found)."""
-    return subprocess.call(
-        ["schtasks", "/query", "/tn", TASK_NAME],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    ) == 0
-
 # KEY GOTCHA: RestartOnFailure is NOT expressible via schtasks CLI flags — XML only.
 # The Task Scheduler's RestartOnFailure only restarts the *supervisor* process if
 # it crashes (unlikely). The supervisor_loop is the real daemon restarter.
@@ -407,11 +400,6 @@ def build_hooks_json(pythonw: str, hook_py: str) -> str:
         pythonw=pythonw.replace("\\", "\\\\"),
         hook_py=hook_py.replace("\\", "\\\\"),
     )
-
-
-# .gitattributes entries — prevents CRLF injection on Windows checkout.
-# Created at repo root in Task 8; surfaced here for the install-time writer.
-GITATTRIBUTES_LINE = "hooks/*.py text eol=lf\nsrc/sonari/**/*.py text eol=lf\n"
 
 
 # ---------------------------------------------------------------------------
