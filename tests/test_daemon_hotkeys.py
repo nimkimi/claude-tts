@@ -1,6 +1,15 @@
 """The daemon owns the in-process hotkey thread: run() starts it, stop() stops it,
 and a fire is routed through the same handle_message() as a socket command."""
+import time
+
 from tests.daemon_helpers import make_daemon
+
+
+def _wait_until(pred, timeout=2.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline and not pred():
+        time.sleep(0.005)
+    return pred()
 
 
 class _FakeHotkey:
@@ -70,6 +79,8 @@ def test_reload_keymap_delegates_to_backend_reload(monkeypatch):
     monkeypatch.delenv("SONARI_DISABLE_HOTKEYS", raising=False)
     daemon = make_daemon(foreground="fg")[0]
     daemon.handle_message({"type": "reload_keymap"})
+    # The reload runs on a short-lived thread (off the daemon lock), so wait for it.
+    assert _wait_until(lambda: pb.hotkey.reloaded is not None)
     assert callable(pb.hotkey.reloaded)   # backend.reload(dispatch) was invoked
 
 
@@ -80,5 +91,6 @@ def test_reload_keymap_honors_kill_switch(monkeypatch):
     monkeypatch.setenv("SONARI_DISABLE_HOTKEYS", "1")
     daemon = make_daemon(foreground="fg")[0]
     daemon.handle_message({"type": "reload_keymap"})
+    assert _wait_until(lambda: pb.hotkey.stopped)
     assert pb.hotkey.reloaded is None
     assert pb.hotkey.stopped is True

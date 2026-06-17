@@ -63,6 +63,7 @@ class SpeechDaemon:
         self._warned_immediate: set = set()
         self._guided_sessions: set = set()
         self._conn_sem = threading.BoundedSemaphore(_MAX_CONN_THREADS)
+        self._reload_lock = threading.Lock()      # serializes off-lock hotkey reloads
 
     def _alloc_id(self) -> int:
         self._next_id += 1
@@ -465,9 +466,16 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.RELOAD_KEYMAP:
-            # keymap.json changed (e.g. an unbind): re-register hotkeys so it
-            # takes effect without a daemon restart.
-            self._reload_hotkeys()
+            # keymap.json changed (e.g. an unbind): re-register hotkeys so it takes
+            # effect without a daemon restart. Run it OFF the daemon lock: this
+            # handler is invoked while holding self._lock, but _reload_hotkeys joins
+            # the Windows hotkey pump thread, which itself needs self._lock to
+            # dispatch a fire. Joining under the lock could stall the daemon up to
+            # the join timeout and, on timeout, leave an orphaned thread that
+            # re-creates the H2 dark-hotkey race. A short-lived thread does the
+            # reload lock-free (and _reload_lock serializes concurrent reloads).
+            threading.Thread(target=self._reload_hotkeys,
+                             name="sonari-keymap-reload", daemon=True).start()
             return None
 
         if t == MsgType.REPEAT:
@@ -638,19 +646,22 @@ class SpeechDaemon:
             pass
 
     def _reload_hotkeys(self) -> None:
-        """Apply a keymap.json change to the live hotkeys. Honors the no_hotkeys
-        kill switch, then delegates to the platform backend's reload() seam:
-        Windows does a (now thread-joined) stop+start; macOS rewrites the resolved
+        """Apply a keymap.json change to the live hotkeys. Runs OFF the daemon lock
+        (see the RELOAD_KEYMAP handler) and is serialized by _reload_lock so two
+        rapid reloads can't interleave their stop/start cycles. Honors the
+        no_hotkeys kill switch, then delegates to the platform backend's reload()
+        seam: Windows does a (thread-joined) stop+start; macOS rewrites the resolved
         keymap and reloads the separate hotkeyd process."""
-        flag = os.path.join(os.path.expanduser("~"), ".sonari", "no_hotkeys")
-        if os.environ.get("SONARI_DISABLE_HOTKEYS") or os.path.exists(flag):
-            self._stop_hotkeys()
-            return
-        from sonari.platform import get_platform
-        try:
-            get_platform().hotkey.reload(self._dispatch_hotkey)
-        except Exception:  # noqa: BLE001 - hotkeys are non-essential; speech must run
-            pass
+        with self._reload_lock:
+            flag = os.path.join(os.path.expanduser("~"), ".sonari", "no_hotkeys")
+            if os.environ.get("SONARI_DISABLE_HOTKEYS") or os.path.exists(flag):
+                self._stop_hotkeys()
+                return
+            from sonari.platform import get_platform
+            try:
+                get_platform().hotkey.reload(self._dispatch_hotkey)
+            except Exception:  # noqa: BLE001 - hotkeys are non-essential; speech must run
+                pass
 
     def _nav(self, session: str, to: str) -> None:
         """Move the per-session message cursor and play from there to the end.
@@ -668,10 +679,14 @@ class SpeechDaemon:
             self._enqueue(session, "prose", "Nothing to navigate yet.", False)
             return
         # Navigating is an active foreground action: claim the voice for this
-        # session so prose streaming in after the replay is spoken, not captured
-        # by a background owner (L3).
-        self._voice_owner = session
-        self._captured_msg.discard(session)
+        # session so prose streaming in after the replay is spoken (L3). Use the
+        # SAME conservative rule as _claim_for_decision (M4): take only a free or
+        # stale-lock voice, or one we already own — never SEIZE it from a different
+        # session still streaming a reply (owner in _open_msg), which would strand
+        # that in-progress response (the very thing H1 prevents).
+        if self._voice_owner == session or self._voice_owner not in self._open_msg:
+            self._voice_owner = session
+            self._captured_msg.discard(session)
         n = len(ids)
         # Anchor on a STABLE message id, not a position: new paragraphs streaming
         # in append ids without shifting where the cursor points. Unset/stale ->
