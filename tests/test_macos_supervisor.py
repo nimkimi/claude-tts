@@ -1,5 +1,20 @@
 # tests/test_macos_supervisor.py
+import plistlib
+
 from sonari.platform.macos.supervisor import MacSupervisorBackend
+
+
+def test_launchagent_plist_body_locks_autostart_contract():
+    # Distinctive sentinels so the assertions prove the body, not constants.
+    python = "/usr/bin/python3"
+    app_dir = "/my/app/src"
+    log = "/tmp/speechd.log"
+    xml = MacSupervisorBackend().launchagent_plist(
+        python_executable=python, src_path=app_dir, log_path=log)
+    parsed = plistlib.loads(xml.encode("utf-8"))
+    assert parsed["ProgramArguments"] == [python, "-m", "sonari.daemon"]
+    assert parsed["EnvironmentVariables"]["PYTHONPATH"] == app_dir
+    assert parsed["RunAtLoad"] is True
 
 
 def test_resolve_python_prefers_usr_bin(monkeypatch):
