@@ -838,7 +838,12 @@ class WinSupervisorBackend(SupervisorBackend):
         # 2. Task Scheduler autostart (pythonw runs the supervisor loop).
         supervisor_py = os.path.join(app_dir, "sonari", "platform",
                                      "windows", "supervisor_loop.py")
-        self._schtasks(["/end", "/tn", TASK_NAME])  # best-effort: stop the running daemon so the new interpreter activates now
+        # Best-effort stop the running task before overwriting its definition, so a
+        # stale daemon on the OLD interpreter doesn't linger (parity with macOS
+        # launchctl unload+load). /end is async and /create does not auto-start, so
+        # the new interpreter activates on the NEXT daemon start (next logon, or the
+        # lazy-start path which now resolves the venv pythonw via daemon_pythonw()).
+        self._schtasks(["/end", "/tn", TASK_NAME])
         rc = task_install(pythonw, supervisor_py)
         if rc == 0:
             print("Registered Task Scheduler task: {0}".format(TASK_NAME))
