@@ -188,6 +188,19 @@ def _probe_version_via_launcher(py_exe: str) -> "str | None":
         return None
 
 
+def daemon_pythonw() -> "str | None":
+    """The pythonw.exe the daemon should run on: the neural venv's when neural is
+    enabled AND it probes >=3.10, else the system pythonw. Windows analog of
+    cli._daemon_python, yielding the windowless interpreter for the background daemon."""
+    from sonari import kokoro_provision as kp, paths
+    if kp.neural_enabled():
+        venv_py = paths.kokoro_venv_python()
+        ver = _probe_python_version(venv_py)
+        if ver is not None and ver >= (3, 10):
+            return _find_pythonw(venv_py) or venv_py
+    return resolve_python_windows()
+
+
 def resolve_python_windows() -> "str | None":
     """Return pythonw.exe path for the best Python 3 >= 3.9, or None.
 
@@ -719,7 +732,7 @@ class WinSupervisorBackend(SupervisorBackend):
     def launch_spec(self) -> tuple:
         """Return (argv, spawn_kwargs) for lazy daemon start."""
         from sonari import paths
-        pw = self.resolve_python() or "pythonw.exe"
+        pw = daemon_pythonw() or "pythonw.exe"
         argv = [pw, "-m", "sonari.daemon"]
         # The daemon runs in a fresh process; without PYTHONPATH it cannot import
         # 'sonari' -> it exits instantly -> every hook event respawns it (a
