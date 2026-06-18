@@ -812,6 +812,7 @@ class WinSupervisorBackend(SupervisorBackend):
         return rows
 
     def install(self, python: str, app_dir: str) -> None:
+        pythonw = _find_pythonw(python) or python  # background daemon/hooks: no console window
         # 1. Exec-form hooks FIRST. This is the step that can fail on a malformed
         #    user settings.json (it raises ValueError); doing it before the Task
         #    Scheduler registration means a failure leaves no orphaned autostart
@@ -832,12 +833,12 @@ class WinSupervisorBackend(SupervisorBackend):
                 print("Sonari plugin enabled; hooks come from the plugin "
                       "(nothing written to {0}).".format(settings))
         else:
-            merge_hooks_into_settings(settings, python, _hook_py())
+            merge_hooks_into_settings(settings, pythonw, _hook_py())
             print("Wrote Sonari hooks to: {0}".format(settings))
         # 2. Task Scheduler autostart (pythonw runs the supervisor loop).
         supervisor_py = os.path.join(app_dir, "sonari", "platform",
                                      "windows", "supervisor_loop.py")
-        rc = task_install(python, supervisor_py)
+        rc = task_install(pythonw, supervisor_py)
         if rc == 0:
             print("Registered Task Scheduler task: {0}".format(TASK_NAME))
         else:

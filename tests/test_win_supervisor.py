@@ -274,6 +274,34 @@ def test_install_registers_task_merges_hooks_and_places_launcher(tmp_path, monke
     assert (tmp_path / "bin" / "sonari.cmd").exists()
 
 
+# ---------------------------------------------------------------------------
+# FIX D: install() passes pythonw (not the raw python) to task_install + hooks
+# ---------------------------------------------------------------------------
+
+def test_install_wires_task_and_hooks_with_pythonw(tmp_path, monkeypatch):
+    task_calls = []
+    hook_calls = []
+    monkeypatch.setattr(sup_mod, "_find_pythonw", lambda p: "/v/Scripts/pythonw.exe")
+    monkeypatch.setattr(sup_mod, "task_install",
+                        lambda pw, spy: task_calls.append(pw) or 0)
+    monkeypatch.setattr(sup_mod, "merge_hooks_into_settings",
+                        lambda sp, pw, hp: hook_calls.append(pw))
+    monkeypatch.setattr(sup_mod, "claude_settings_path",
+                        lambda: str(tmp_path / "settings.json"))
+    monkeypatch.setattr(sup_mod, "settings_has_sonari_plugin", lambda sp: False)
+    monkeypatch.setattr(sup_mod, "_local_bin_dir", lambda: str(tmp_path / "bin"))
+    monkeypatch.setattr("sonari.paths.repo_root", lambda: str(tmp_path / "plug"))
+    launcher_calls = []
+    s = sup_mod.WinSupervisorBackend()
+    real_place = s._place_launcher
+    monkeypatch.setattr(s, "_place_launcher",
+                        lambda py, app: launcher_calls.append(py) or real_place(py, app))
+    s.install("/v/Scripts/python.exe", str(tmp_path / "app"))
+    assert task_calls == ["/v/Scripts/pythonw.exe"], "task_install must receive pythonw"
+    assert hook_calls == ["/v/Scripts/pythonw.exe"], "merge_hooks must receive pythonw"
+    assert launcher_calls == ["/v/Scripts/python.exe"], "_place_launcher must keep python.exe"
+
+
 def test_uninstall_removes_task_hooks_and_launcher(tmp_path, monkeypatch):
     from sonari.platform.windows import supervisor as sup
     monkeypatch.setattr(sup, "task_install", lambda pw, spy: 0)
