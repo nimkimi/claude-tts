@@ -268,6 +268,7 @@ def test_install_registers_task_merges_hooks_and_places_launcher(tmp_path, monke
     monkeypatch.setattr(sup, "_local_bin_dir", lambda: str(tmp_path / "bin"))
     monkeypatch.setattr("sonari.paths.repo_root", lambda: str(tmp_path / "plug"))
     s = sup.WinSupervisorBackend()
+    monkeypatch.setattr(s, "_schtasks", lambda args: 0)  # FIX E adds a _schtasks call
     s.install(r"C:\Py\pythonw.exe", str(tmp_path / "app"))
     assert ("task", r"C:\Py\pythonw.exe") in calls
     assert sup.settings_has_sonari_hooks(str(tmp_path / "settings.json"))
@@ -293,6 +294,7 @@ def test_install_wires_task_and_hooks_with_pythonw(tmp_path, monkeypatch):
     monkeypatch.setattr("sonari.paths.repo_root", lambda: str(tmp_path / "plug"))
     launcher_calls = []
     s = sup_mod.WinSupervisorBackend()
+    monkeypatch.setattr(s, "_schtasks", lambda args: 0)  # FIX E adds a _schtasks /end call
     real_place = s._place_launcher
     monkeypatch.setattr(s, "_place_launcher",
                         lambda py, app: launcher_calls.append(py) or real_place(py, app))
@@ -311,7 +313,35 @@ def test_uninstall_removes_task_hooks_and_launcher(tmp_path, monkeypatch):
     monkeypatch.setattr(sup, "_local_bin_dir", lambda: str(tmp_path / "bin"))
     monkeypatch.setattr("sonari.paths.repo_root", lambda: str(tmp_path / "plug"))
     s = sup.WinSupervisorBackend()
+    monkeypatch.setattr(s, "_schtasks", lambda args: 0)  # FIX E adds a _schtasks call
     s.install(r"C:\Py\pythonw.exe", str(tmp_path / "app"))
     s.uninstall()
     assert not sup.settings_has_sonari_hooks(str(tmp_path / "settings.json"))
     assert not (tmp_path / "bin" / "sonari.cmd").exists()
+
+
+# ---------------------------------------------------------------------------
+# FIX E: install() stops the running task before re-registering it
+# ---------------------------------------------------------------------------
+
+def test_install_ends_task_before_reregister(tmp_path, monkeypatch):
+    schtasks_calls = []
+    monkeypatch.setattr(sup_mod, "task_install",
+                        lambda pw, spy: schtasks_calls.append(("/create", pw)) or 0)
+    monkeypatch.setattr(sup_mod, "merge_hooks_into_settings",
+                        lambda sp, pw, hp: None)
+    monkeypatch.setattr(sup_mod, "claude_settings_path",
+                        lambda: str(tmp_path / "settings.json"))
+    monkeypatch.setattr(sup_mod, "settings_has_sonari_plugin", lambda sp: False)
+    monkeypatch.setattr(sup_mod, "_local_bin_dir", lambda: str(tmp_path / "bin"))
+    monkeypatch.setattr("sonari.paths.repo_root", lambda: str(tmp_path / "plug"))
+    s = sup_mod.WinSupervisorBackend()
+    monkeypatch.setattr(s, "_schtasks", lambda args: schtasks_calls.append(tuple(args)) or 0)
+    s.install(r"C:\Py\pythonw.exe", str(tmp_path / "app"))
+    # The /end call must appear and must precede any /create
+    assert ("/end", "/tn", TASK_NAME) in schtasks_calls
+    end_idx = schtasks_calls.index(("/end", "/tn", TASK_NAME))
+    create_indices = [i for i, c in enumerate(schtasks_calls) if c[0] == "/create"]
+    assert all(end_idx < ci for ci in create_indices), (
+        "/end must come before any /create: {0}".format(schtasks_calls)
+    )
