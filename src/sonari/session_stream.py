@@ -17,8 +17,6 @@ class SessionStream:
         self.prose_buffer: list = []        # [(text, HistoryEntry)] awaiting minqueue flush
         self.options: "str | None" = None   # last decision text, for reread
         self.nav_cursor = None              # anchored message id (None == latest)
-        self.captured = False               # message started while the voice was unavailable
-        self.open_msg = False               # an assistant message is currently streaming
         self.muted = False                  # sticky per-session mute
         self.warned_immediate = False       # warned once about immediate selection
         self.guided = False                 # received the setup-guidance cue once
@@ -32,5 +30,3 @@ class SessionStream:
         self.prose_buffer = []
         self.options = None
         self.nav_cursor = None
-        self.captured = False
-        self.open_msg = False

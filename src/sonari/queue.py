@@ -27,9 +27,9 @@ class SpeechQueue:
         self._items.appendleft(item)
 
     def pop_next(self) -> "SpeechItem | None":
-        # The speak loop pops outside the daemon lock while flush_session can
-        # swap the deque underneath it; treat a lost race as "nothing to say"
-        # rather than letting an IndexError kill the speak loop (a mute daemon).
+        # The speak loop pops outside the daemon lock while clear() can swap the
+        # deque underneath it; treat a lost race as "nothing to say" rather than
+        # letting an IndexError kill the speak loop (a mute daemon).
         try:
             return self._items.popleft()
         except IndexError:
@@ -59,13 +59,6 @@ class SpeechQueue:
     def clear(self) -> "list[SpeechItem]":
         dropped = list(self._items)
         self._items.clear()
-        return dropped
-
-    def flush_session(self, session: str) -> "list[SpeechItem]":
-        dropped = [i for i in self._items if i.session == session]
-        self._items = deque(
-            item for item in self._items if item.session != session
-        )
         return dropped
 
     def __len__(self) -> int:

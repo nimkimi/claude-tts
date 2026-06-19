@@ -10,7 +10,6 @@ No real audio is ever produced: the Speaker is replaced by a recorder.
 """
 from sonari.hooks_entry import handle_event
 from sonari.protocol import PROTOCOL_VERSION
-from sonari.queue import SpeechQueue
 from sonari.sessions import SessionManager
 from sonari.daemon import SpeechDaemon
 from sonari.config import DEFAULTS
@@ -74,11 +73,10 @@ def drain_queue(daemon, speaker):
 def make_daemon():
     log = []
     speaker = FakeSpeaker(log)
-    queue = SpeechQueue()
     sessions = SessionManager(background_policy="earcon_only")
     cfg = {k: (dict(v) if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
     cfg["verbosity"] = "everything"
-    daemon = SpeechDaemon(queue, speaker, sessions, cfg)
+    daemon = SpeechDaemon(speaker, sessions, cfg)
     daemon._setup_health = lambda v: ("ok", None)  # no setup cue in ordering tests
     return daemon, speaker, log
 

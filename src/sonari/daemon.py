@@ -35,8 +35,7 @@ _MAX_CONN_THREADS = 32
 
 
 class SpeechDaemon:
-    def __init__(self, queue, speaker, sessions, config) -> None:
-        self.queue = queue
+    def __init__(self, speaker, sessions, config) -> None:
         self.speaker = speaker
         self.sessions = sessions
         self.config = config
@@ -50,7 +49,6 @@ class SpeechDaemon:
         self._poll_interval = 0.1
         from sonari.history import SessionHistory
         self.history = SessionHistory(cap=int(config.get("history_cap", 200)))
-        self._voice_owner: "str | None" = None
         self._pending_heard: dict = {}            # SpeechItem.id -> HistoryEntry
         self._paused = threading.Event()          # play/pause: set == speech halted
         self._current_item = None                 # item being spoken right now
@@ -67,15 +65,6 @@ class SpeechDaemon:
             s = SessionStream()
             self._streams[session] = s
         return s
-
-    def _owner_open(self) -> bool:
-        """True if the current voice owner still has a streaming (open) message.
-        Replaces the former `self._voice_owner not in self._open_msg` checks
-        (open_msg only — NOT prose_buffer, unlike `_owner_mid_reply`)."""
-        if self._voice_owner is None:
-            return False
-        st = self._streams.get(self._voice_owner)
-        return st is not None and st.open_msg
 
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
                  entry=None, mute_exempt: bool = False,
@@ -153,49 +142,6 @@ class SpeechDaemon:
             entry = self._pending_heard.pop(item.id, None)
             if entry is not None and completed:
                 entry.heard = True
-
-    def _owner_mid_reply(self, session) -> bool:
-        """True while *session* is still producing a reply: it has an open (still
-        streaming) message OR prose held in the minqueue buffer. Keeps the voice
-        with its owner across the whole reply, including the gaps between batched
-        blocks (without this, batching would let the voice drop mid-reply)."""
-        if session is None:
-            return False
-        st = self._streams.get(session)
-        if st is None:
-            return False
-        return st.open_msg or bool(st.prose_buffer)
-
-    def _may_speak(self, session: str) -> bool:
-        """Voice continuity: a busy voice stays with its owner to the end; a
-        free voice is acquired only by the FOREGROUND session, and only at a
-        message boundary (a message that started captured stays captured)."""
-        if self._voice_owner == session:
-            return True
-        if (self._voice_owner is None
-                and self.sessions.is_foreground(session)
-                and not self._stream(session).captured):
-            self._voice_owner = session
-            return True
-        return False
-
-    def _claim_for_decision(self, session: str) -> bool:
-        """Decisions (question/plan/permission) are user-blocking and belong to the
-        window the user is looking at. A decision for the FOREGROUND session claims
-        a voice that is free OR held by a session whose message has already ENDED
-        (a stale lock) — so the options are read even when a background owner still
-        holds a finished-message lock (M4). It deliberately does NOT steal the voice
-        from a session still STREAMING a reply (owner in _open_msg): interrupting an
-        in-progress response is exactly what H1 prevents, so such a decision stays
-        captured (its text is stored for reread / catch_up). A decision for the
-        current owner is always honored. Superset of _may_speak."""
-        if self._voice_owner == session:
-            return True
-        if self.sessions.is_foreground(session) and not self._owner_open():
-            self._voice_owner = session
-            self._stream(session).captured = False
-            return True
-        return False
 
     @staticmethod
     def _choice_text(msg) -> str:
@@ -321,9 +267,6 @@ class SpeechDaemon:
 
         if t == MsgType.PROSE:
             final = msg.get("final", False)
-            if not final:
-                # A message is now streaming for this session.
-                self._stream(session).open_msg = True
             a = self._stream(session).assembler
             chunks = a.feed(msg.get("delta", ""), msg.get("index", 0), final)
             if chunks:
@@ -347,7 +290,6 @@ class SpeechDaemon:
                 # turn — the buffer is flushed at the real turn boundary (turn_done)
                 # and when the threshold is hit, so it is NOT flushed here.
                 self.history.end_message(session)
-                self._stream(session).open_msg = False
                 self._stream(session).options = None
             return None
 
@@ -415,12 +357,10 @@ class SpeechDaemon:
             kind = msg.get("kind", "")
             self.speaker.earcon(kind)
             if kind == "turn_done":
-                # End-of-turn boundary: the assistant produced its last delta, so
-                # the prose message is no longer open and the voice may release even
-                # if the final PROSE flag never arrived (H1 safety net). Flush any
-                # sub-threshold buffered prose here too, for the same reason.
+                # End-of-turn boundary: flush any sub-threshold buffered prose so
+                # it is not silently dropped when the assistant produces fewer items
+                # than the minqueue threshold.
                 self._flush_prose_buffer(session)
-                self._stream(session).open_msg = False
             return None
 
         if t == MsgType.FLUSH:
@@ -1115,7 +1055,6 @@ def main() -> None:
         return  # another daemon already owns the single-instance lock
 
     from sonari.speaker import Speaker
-    from sonari.queue import SpeechQueue
     from sonari.sessions import SessionManager
     from sonari.platform import get_platform
 
@@ -1123,7 +1062,6 @@ def main() -> None:
     cfg = load_config()
     if "earcons" not in cfg:
         cfg["earcons"] = _backend.earcon.default_earcons()
-    queue = SpeechQueue()
     speaker = Speaker(
         voice=cfg.get("voice"),
         rate=cfg.get("rate", 200),
@@ -1132,7 +1070,7 @@ def main() -> None:
         earcons=cfg.get("earcons"),
     )
     sessions = SessionManager(background_policy=cfg.get("background_policy", "earcon_only"))
-    daemon = SpeechDaemon(queue, speaker, sessions, cfg)
+    daemon = SpeechDaemon(speaker, sessions, cfg)
     daemon.run()
 
 
