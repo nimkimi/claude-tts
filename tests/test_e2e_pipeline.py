@@ -57,12 +57,15 @@ class FakeSpeaker:
 def drain_queue(daemon, speaker):
     """Run the _speak_loop logic to exhaustion: pop FIFO, speak each item.
 
-    This is exactly what SpeechDaemon._speak_loop does per iteration
-    (item = queue.pop_next(); if item: speaker.speak(item.text)), minus the
-    blocking wait, so the test is deterministic and never touches threads.
+    Stage 2: the voice plays the FOREGROUND session's own stream (not a shared
+    queue), so drain that — exactly what SpeechDaemon._speak_loop_once does, minus
+    the blocking wait, so the test is deterministic and never touches threads.
+    Background streams accumulate untouched (the earcon-only test relies on this).
     """
     while True:
-        item = daemon.queue.pop_next()
+        fg = daemon.sessions.foreground()
+        st = daemon._streams.get(fg)
+        item = st.queue.pop_next() if st is not None else None
         if item is None:
             return
         speaker.speak(item.text)
@@ -163,8 +166,10 @@ def test_scripted_session_full_ordering():
 
 
 def test_background_session_is_earcon_only():
-    """A non-foreground session still fires decision earcons but its prose
-    and decision TEXT are NOT spoken (foreground gating)."""
+    """A non-foreground session still fires decision earcons immediately, but its
+    prose and decision TEXT are NOT voiced: they accumulate in the background
+    session's own stream, and the voice only plays the FOREGROUND stream (Stage 2
+    flip — the text is no longer dropped, just held until that session is current)."""
     daemon, speaker, log = make_daemon()
 
     feed_event(daemon, "SessionStart", {"session_id": "fg"})

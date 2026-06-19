@@ -1,6 +1,6 @@
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 from sonari.queue import SpeechItem
-from tests.daemon_helpers import make_daemon
+from tests.daemon_helpers import make_daemon, stream_queue
 
 
 def _msg(mtype, session=None, **extra):
@@ -12,9 +12,11 @@ def _msg(mtype, session=None, **extra):
 
 
 def _seed(queue, daemon, session, n, decision_at=None):
+    # Per-stream: each item lands in its OWN session's stream (the speak loop plays
+    # the foreground stream). For the foreground session that IS the unpacked queue.
     for i in range(n):
         is_dec = decision_at is not None and i == decision_at
-        queue.enqueue(SpeechItem(
+        daemon._stream(session).queue.enqueue(SpeechItem(
             id=daemon._alloc_id(),
             session=session,
             kind="plan" if is_dec else "prose",
@@ -31,9 +33,10 @@ def test_flush_drops_session_items_without_cancelling_other_speech():
     _seed(queue, daemon, "other", 1)
     daemon.handle_message(_msg(MsgType.FLUSH, "fg"))
     assert speaker.cancels == 0
-    # only the 'other' session item remains
-    assert len(queue) == 1
-    assert queue.pop_next().session == "other"
+    # fg's own stream is cleared; the 'other' session's stream is untouched
+    assert len(queue) == 0
+    assert len(stream_queue(daemon, "other")) == 1
+    assert stream_queue(daemon, "other").pop_next().session == "other"
 
 
 def test_stop_clears_all_and_cancels():

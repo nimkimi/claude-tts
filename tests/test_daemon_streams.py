@@ -1,5 +1,5 @@
 from sonari.protocol import MsgType, PROTOCOL_VERSION
-from tests.daemon_helpers import make_daemon
+from tests.daemon_helpers import make_daemon, stream_queue
 
 
 def _msg(mtype, session, **extra):
@@ -47,3 +47,66 @@ def test_no_legacy_per_session_containers_remain():
                  "_open_msg", "_nav_cursor", "_muted_sessions",
                  "_warned_immediate", "_guided_sessions"):
         assert not hasattr(daemon, attr), f"legacy container {attr} still present"
+
+
+# --- the flip: per-stream enqueue + foreground-driven speak loop -------------
+
+def _pump_one(daemon):
+    """Run exactly one speak-loop iteration (no thread)."""
+    daemon._speak_loop_once()
+
+
+def test_enqueue_lands_in_the_sessions_own_stream_queue():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon._enqueue("a", "prose", "for a", False)
+    daemon._enqueue("b", "prose", "for b", False)
+    assert [i.text for i in stream_queue(daemon, "a")._items] == ["for a"]
+    assert [i.text for i in stream_queue(daemon, "b")._items] == ["for b"]
+
+
+def test_speak_loop_plays_only_the_foreground_stream():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon._enqueue("a", "prose", "alpha", False)
+    daemon._enqueue("b", "prose", "beta", False)   # background — must wait
+    _pump_one(daemon)
+    assert speaker.spoken == ["alpha"]
+    assert len(stream_queue(daemon, "b")) == 1      # beta untouched
+
+
+def test_background_accumulates_then_is_heard_after_switching_foreground():
+    # Symptom 1 + 3a regression: B's output while A is foreground is NOT lost.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon._enqueue("b", "prose", "beta-1", False)
+    daemon._enqueue("b", "prose", "beta-2", False)
+    _pump_one(daemon)
+    assert speaker.spoken == []                      # nothing foreground to say
+    sessions.set_foreground("b")                     # user switches to B
+    _pump_one(daemon)
+    _pump_one(daemon)
+    assert speaker.spoken == ["beta-1", "beta-2"]    # heard, in order
+
+
+def test_muted_foreground_item_is_dropped_but_exempt_is_spoken():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon._stream("a").muted = True
+    daemon._enqueue("a", "prose", "silenced", False)
+    daemon._enqueue("a", "prose", "muted-cue", False, mute_exempt=True)
+    _pump_one(daemon)   # drops "silenced"
+    _pump_one(daemon)   # speaks the exempt cue
+    assert speaker.spoken == ["muted-cue"]
+
+
+def test_catch_up_routes_cross_session_backlog_into_the_foreground_stream():
+    # Stage 2 pins catch_up's new behavior so Stages 3-6 can't silently regress it:
+    # the unheard from ANOTHER session is replayed under the foreground voice and
+    # heard, with its history entries marked heard.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon.handle_message(_msg(MsgType.PROSE, "b", delta="B unheard. ",
+                               index=0, final=True))   # background, accumulates
+    daemon.handle_message(_msg(MsgType.CATCH_UP, "a"))
+    assert [i.text for i in stream_queue(daemon, "a")._items] == [
+        "Catching up on another session.", "B unheard."]
+    while len(stream_queue(daemon, "a")):
+        _pump_one(daemon)
+    assert speaker.spoken[-1] == "B unheard."
+    assert daemon.history.unheard("b") == []          # entry marked heard

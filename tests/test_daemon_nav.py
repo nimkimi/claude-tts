@@ -100,36 +100,23 @@ def test_nav_then_live_prose_continues_after_replay_no_interleave():
     assert texts.index("Live continues.") > texts.index("m2")   # after, not interleaved
 
 
-def test_nav_makes_foreground_session_the_voice_owner():
-    """L3: navigating is an active foreground action; it must claim the voice so
-    that prose streaming in after the replay is spoken, not captured, even if a
-    background session currently owns the voice."""
+def test_nav_replays_then_live_prose_for_foreground_is_spoken():
+    """The flip: nav has no voice-claim. It replays the foreground session's history
+    into the foreground stream, and live prose streaming in afterwards enqueues there
+    too and is drained/spoken. Was test_nav_makes_foreground_session_the_voice_owner."""
     daemon, queue, *_ = make_daemon(foreground="fg")
-    daemon._voice_owner = "bg"                 # a background session holds the voice
-    daemon._stream("fg").captured = True        # and fg's message was being captured
     _seed(daemon)
     _nav(daemon, "prev")
-    assert daemon._voice_owner == "fg"         # nav reclaimed the voice for fg
-    assert not daemon._stream("fg").captured
-    # live prose for fg now enqueues (spoken), not captured
+    # live prose for fg now enqueues into fg's stream and is spoken
     _drain(queue)
     daemon.handle_message({"type": "prose", "session": "fg",
                            "delta": "Live after nav. ", "index": 9, "final": False})
     assert [s.text for s in _drain(queue)] == ["Live after nav."]
 
 
-def test_nav_does_not_steal_voice_from_a_streaming_session():
-    """L3 + review: nav claims a free/stale/own voice, but must NOT seize it from a
-    different session still streaming a reply (owner in _open_msg) — that would
-    strand the streamer mid-sentence, the very thing H1 prevents. The replay items
-    are still enqueued regardless; only voice ownership is left untouched."""
-    daemon, queue, *_ = make_daemon(foreground="fg")
-    daemon._voice_owner = "a"            # a background session is mid-stream...
-    daemon._stream("a").open_msg = True  # ...its message is open
-    _seed(daemon)                         # fg has history to navigate
-    _nav(daemon, "prev")
-    assert daemon._voice_owner == "a"    # not stolen from the streamer
-    assert len(queue) > 0                # fg's replay items still enqueued
+# Removed test_nav_does_not_steal_voice_from_a_streaming_session: there is no voice
+# ownership to protect in the Stage 2 flip; "nav enqueues replay items for fg" is
+# covered by test_nav_replays_then_live_prose_for_foreground_is_spoken above.
 
 
 def test_nav_with_empty_history_announces():

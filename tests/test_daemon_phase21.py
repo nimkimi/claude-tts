@@ -1,5 +1,5 @@
 from sonari.protocol import MsgType, PROTOCOL_VERSION
-from tests.daemon_helpers import make_daemon
+from tests.daemon_helpers import make_daemon, stream_queue
 
 
 def _msg(mtype, session=None, **extra):
@@ -77,70 +77,63 @@ def test_history_cap_comes_from_config():
     assert daemon.history._cap == config["history_cap"] == 200
 
 
-# --- voice continuity / capture ---------------------------------------------
+# --- per-stream accumulation (was: voice continuity / capture) --------------
 
-def test_foreground_session_acquires_free_voice():
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    _prose(daemon, "a", "Hi. ", final=False)
-    assert daemon._voice_owner == "a"
-    assert len(queue) == 1
+# Removed test_foreground_session_acquires_free_voice: voice-acquisition concept
+# retired in the Stage 2 flip; foreground-enqueue is covered by
+# test_enqueue_lands_in_the_sessions_own_stream_queue (tests/test_daemon_streams.py).
 
 
-def test_nonforeground_response_is_captured_not_spoken():
+def test_nonforeground_response_accumulates_in_its_own_stream():
+    # The flip: background "b" prose is no longer captured/dropped — it accumulates
+    # in b's own stream (foreground "a" is unaffected).
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     _prose(daemon, "b", "Background. ")
-    assert len(queue) == 0                                  # not spoken live
+    assert [i.text for i in stream_queue(daemon, "b")._items] == ["Background."]
+    assert len(queue) == 0                                  # foreground a untouched
     assert [e.text for e in daemon.history.unheard("b")] == ["Background."]
 
 
 def test_owner_keeps_voice_after_foreground_moves():
+    # The flip: there is no voice owner. After foreground moves to b, a's continued
+    # deltas accumulate in a's OWN stream (not lost, not auto-played).
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    _prose(daemon, "a", "A speaking. ", final=False)        # a owns the voice
+    _prose(daemon, "a", "A speaking. ", final=False)        # lands in a's stream
     sessions.set_foreground("b")                            # user prompts in b
     _prose(daemon, "a", "Still a. ", index=1, final=False)  # a keeps talking
-    assert daemon._voice_owner == "a"
-    assert len(queue) == 2
+    assert len(stream_queue(daemon, "a")) == 2              # accumulated, not lost
 
 
-def test_response_landing_on_busy_voice_stays_captured_to_its_end():
+# Removed test_response_landing_on_busy_voice_stays_captured_to_its_end: capture +
+# the H1 voice-busy hold are retired; a background session's output now accumulates
+# in its own stream instead of being captured-to-history-only.
+
+
+def test_backlog_accumulates_and_is_never_autostarted_for_background():
+    # Was test_voice_frees_but_never_autostarts_nonforeground_backlog. The backlog
+    # is no longer captured-and-silent: it sits in b's own stream, and the speak loop
+    # (foreground a) never auto-plays it.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    _prose(daemon, "a", "A holds the voice. ", final=False)
-    sessions.set_foreground("b")
-    _prose(daemon, "b", "B part one. ", final=False)        # voice busy -> captured
-    # a's turn ENDS (the Stop hook's turn_done earcon), then a drains: the voice is
-    # held across inter-chunk drains and released only at the turn boundary (H1).
-    daemon.handle_message(_msg(MsgType.EARCON, "a", kind="turn_done"))
-    while len(queue):
-        _drain_one(daemon, queue, speaker)
-    assert daemon._voice_owner is None                      # freed at a's turn boundary
-    # b's SAME message continues -> still captured (no mid-thought join)
-    _prose(daemon, "b", "B part two. ", index=1, final=True)
-    assert len(queue) == 0
-    texts = [e.text for e in daemon.history.unheard("b")]
-    assert texts == ["B part one.", "B part two."]
-    # b's NEXT message may acquire the free voice (b is foreground)
-    _prose(daemon, "b", "B fresh message. ")
-    assert daemon._voice_owner == "b"
-    assert len(queue) == 1
+    _prose(daemon, "b", "B backlog. ")                      # accumulates in b's stream
+    assert len(stream_queue(daemon, "b")) == 1
+    daemon._speak_loop_once()
+    assert speaker.spoken == []                             # never auto-plays background
+    assert len(queue) == 0                                  # foreground a has nothing
 
 
-def test_voice_frees_but_never_autostarts_nonforeground_backlog():
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    _prose(daemon, "b", "B backlog. ")                      # captured
-    assert daemon._voice_owner is None
-    assert len(queue) == 0                                  # stays silent
-
-
-def test_choice_for_nonowner_is_captured_and_options_stored():
+def test_choice_for_background_session_enqueues_to_its_own_stream():
+    # Was test_choice_for_nonowner_is_captured_and_options_stored. The background "b"
+    # choice now enqueues into b's own stream (not captured); options still stored.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     _prose(daemon, "a", "A talking. ", final=False)
     sessions.set_foreground("b")
     daemon.handle_message(_msg(MsgType.CHOICE, "b", questions=[
         {"question": "Pick one?", "options": [{"label": "X"}, {"label": "Y"}]}
     ]))
-    assert len(queue) == 1                                  # only a's prose queued
+    assert len(stream_queue(daemon, "b")) == 1              # b's choice -> b's stream
+    assert [i.text for i in queue._items] == ["A talking."]  # a's prose stays in a's stream
     assert "Pick one?" in daemon._stream("b").options       # reread works on return
-    assert daemon.history.unheard("b")                      # captured for catch_up
+    assert daemon.history.unheard("b")                      # recorded for catch_up
 
 
 # --- repeat ------------------------------------------------------------------
@@ -179,7 +172,7 @@ def test_repeat_with_no_history_says_nothing_to_repeat():
 def test_repeat_acts_on_foreground_session_history():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     _prose(daemon, "a", "A message. ")
-    _prose(daemon, "b", "B captured. ")
+    _prose(daemon, "b", "B accumulates in its own stream. ")
     while len(queue):
         _drain_one(daemon, queue, speaker)
     daemon.handle_message(_msg(MsgType.REPEAT))
@@ -227,7 +220,7 @@ def test_catch_up_falls_back_to_other_session_backlog():
     _prose(daemon, "a", "A heard. ")
     while len(queue):
         _drain_one(daemon, queue, speaker)
-    _prose(daemon, "b", "B unheard. ")                      # captured silently
+    _prose(daemon, "b", "B unheard. ")                      # accumulates in b's stream
     daemon.handle_message(_msg(MsgType.CATCH_UP))
     texts = []
     while len(queue):

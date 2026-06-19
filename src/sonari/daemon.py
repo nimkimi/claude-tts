@@ -89,12 +89,13 @@ class SpeechDaemon:
             mute_exempt=mute_exempt,
             pause_exempt=pause_exempt,
         )
+        st = self._stream(session)
         if entry is not None:
             self._pending_heard[item.id] = entry
         if at_front:
-            self.queue.enqueue_front(item)
+            st.queue.enqueue_front(item)
         else:
-            self.queue.enqueue(item)
+            st.queue.enqueue(item)
         self._wake.set()
 
     def _minqueue(self) -> int:
@@ -146,18 +147,12 @@ class SpeechDaemon:
 
     def note_spoken(self, item, completed: bool) -> None:
         """Speak-loop bookkeeping: confirm (or decline) the heard-marker for a
-        finished utterance, and release the voice when the queue drains."""
+        finished utterance, and release the current-item claim."""
         with self._lock:
             self._current_item = None
             entry = self._pending_heard.pop(item.id, None)
             if entry is not None and completed:
                 entry.heard = True
-            if len(self.queue) == 0 and not self._owner_mid_reply(self._voice_owner):
-                # Hold the voice while the owner is still mid-reply (the queue drains
-                # to 0 between chunks of one reply, and between batched blocks while
-                # prose sits in the minqueue buffer); release only at the turn
-                # boundary (H1).
-                self._voice_owner = None
 
     def _owner_mid_reply(self, session) -> bool:
         """True while *session* is still producing a reply: it has an open (still
@@ -327,14 +322,17 @@ class SpeechDaemon:
         if t == MsgType.PROSE:
             final = msg.get("final", False)
             if not final:
-                # A message is now streaming for this session: hold its voice
-                # across inter-chunk drains until the turn boundary (see open_msg).
+                # A message is now streaming for this session.
                 self._stream(session).open_msg = True
             a = self._stream(session).assembler
             chunks = a.feed(msg.get("delta", ""), msg.get("index", 0), final)
             if chunks:
                 from sonari.assembler import PARAGRAPH_BREAK
-                speak = verbosity != "quiet" and self._may_speak(session)
+                # The flip: every non-quiet session buffers its OWN prose into its
+                # OWN stream (the speak loop plays only the foreground stream). The
+                # old _may_speak gate + captured-drop are gone — background output
+                # accumulates instead of being lost.
+                speak = verbosity != "quiet"
                 for chunk in chunks:
                     if chunk is PARAGRAPH_BREAK:
                         # A blank-line boundary: start a new message group so the
@@ -344,18 +342,12 @@ class SpeechDaemon:
                     entry = self.history.record(session, "prose", chunk)
                     if speak:
                         self._buffer_prose(session, chunk, entry)
-                    else:
-                        self._stream(session).captured = True
             if final:
-                # NOTE: `final` marks the end of ONE assistant text block, not the
-                # whole turn — Claude Code emits many per reply (the prose between
-                # tool calls). Flushing the minqueue buffer here would read every
-                # block separately and defeat batching. The buffer is flushed at the
-                # real turn boundary (the turn_done earcon) and when the threshold
-                # is hit; so it is deliberately NOT flushed on `final`.
+                # `final` marks the end of ONE assistant text block, not the whole
+                # turn — the buffer is flushed at the real turn boundary (turn_done)
+                # and when the threshold is hit, so it is NOT flushed here.
                 self.history.end_message(session)
-                self._stream(session).captured = False
-                self._stream(session).open_msg = False   # turn boundary: voice may release
+                self._stream(session).open_msg = False
                 self._stream(session).options = None
             return None
 
@@ -375,9 +367,10 @@ class SpeechDaemon:
             self._stream(session).options = text
             entry = self.history.record(session, "choice", text)
             self.history.end_message(session)
-            if self._claim_for_decision(session):
-                self._flush_prose_buffer(session)   # prose before the question
-                self._enqueue(session, "choice", text, True, entry=entry)
+            # The flip: gating moved to playback. Every session enqueues its own
+            # decision into its own stream; the foreground-driven loop voices it.
+            self._flush_prose_buffer(session)   # prose before the question
+            self._enqueue(session, "choice", text, True, entry=entry)
             return None
 
         if t == MsgType.PLAN:
@@ -388,9 +381,9 @@ class SpeechDaemon:
             self._stream(session).options = text
             entry = self.history.record(session, "plan", text)
             self.history.end_message(session)
-            if self._claim_for_decision(session):
-                self._flush_prose_buffer(session)   # prose before the plan
-                self._enqueue(session, "plan", text, True, entry=entry)
+            # The flip: enqueue unconditionally into this session's own stream.
+            self._flush_prose_buffer(session)   # prose before the plan
+            self._enqueue(session, "plan", text, True, entry=entry)
             return None
 
         if t == MsgType.PERMISSION:
@@ -401,18 +394,17 @@ class SpeechDaemon:
             self._stream(session).options = text
             entry = self.history.record(session, "permission", text)
             self.history.end_message(session)
-            if self._claim_for_decision(session):
-                self._flush_prose_buffer(session)   # prose before the permission ask
-                self._enqueue(session, "permission", text, True, entry=entry)
+            # The flip: enqueue unconditionally into this session's own stream.
+            self._flush_prose_buffer(session)   # prose before the permission ask
+            self._enqueue(session, "permission", text, True, entry=entry)
             return None
 
         if t == MsgType.TOOL:
-            if verbosity == "everything" and self._may_speak(session):
+            if verbosity == "everything":
                 tool = msg.get("tool", "")
                 summary = (msg.get("summary") or "").strip()
                 text = summary if summary else "Running {0}.".format(tool)
-                # Keep textual order: read prose that preceded this tool call before
-                # the tool cue, rather than letting the immediate cue jump ahead.
+                # Keep textual order: read prose that preceded this tool call first.
                 self._flush_prose_buffer(session)
                 self._enqueue(session, "tool_announce", text, False)
             return None
@@ -432,15 +424,14 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.FLUSH:
-            self._drop_pending(self.queue.flush_session(session))
+            st = self._stream(session)
+            self._drop_pending(st.queue.clear())
             cur = self._current_item
             if cur is not None and cur.session == session:
                 self.speaker.cancel()
-            if self._voice_owner == session:
-                self._voice_owner = None
-            self._stream(session).reset_for_new_prompt()
+            st.reset_for_new_prompt()
             self.history.reset(session)
-            # A new prompt is a user action -> auto-resume from pause (temp pause).
+            # A new prompt is a user action -> auto-resume from pause.
             self._paused.clear()
             self._wake.set()
             return None
@@ -454,17 +445,19 @@ class SpeechDaemon:
 
         if t == MsgType.SESSION_END:
             self.sessions.unregister(session)
-            self._drop_pending(self.queue.flush_session(session))
-            if self._voice_owner == session:
-                self._voice_owner = None
+            st = self._streams.get(session)
+            if st is not None:
+                self._drop_pending(st.queue.clear())
             self.history.reset(session)
             self._streams.pop(session, None)
             return None
 
         if t == MsgType.STOP:
-            self._drop_pending(self.queue.clear())
+            # Global stop clears EVERY stream's queue (behavior-preserving;
+            # rescoping to foreground is a later stage).
+            for st in self._streams.values():
+                self._drop_pending(st.queue.clear())
             self.speaker.cancel()
-            self._voice_owner = None
             return None
 
         if t == MsgType.SKIP:
@@ -523,7 +516,7 @@ class SpeechDaemon:
                 self._enqueue(fg, "prose", "Session unmuted.", False)
             else:
                 st.muted = True
-                self._drop_pending(self.queue.flush_session(fg))
+                self._drop_pending(st.queue.clear())
                 cur = self._current_item
                 if cur is not None and cur.session == fg:
                     self.speaker.cancel()
@@ -587,15 +580,17 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.JUMP_DECISION:
-            # Mark the cancelled current item heard and drop the heard-markers of
-            # the skipped prose, so a later CATCH_UP doesn't replay them out of
-            # order (mirrors SKIP) (M6).
+            # Mark the cancelled current item heard and drop the heard-markers of the
+            # skipped prose, so a later CATCH_UP doesn't replay them out of order (M6).
             cur = self._current_item
             if cur is not None:
                 entry = self._pending_heard.get(cur.id)
                 if entry is not None:
                     entry.heard = True
-            self._drop_pending(self.queue.jump_to_decision())
+            fg = self.sessions.foreground()
+            st = self._streams.get(fg)
+            if st is not None:
+                self._drop_pending(st.queue.jump_to_decision())
             self.speaker.cancel()
             return None
 
@@ -603,29 +598,29 @@ class SpeechDaemon:
             fg = self.sessions.foreground()
             if fg is None:
                 return None
-            target = fg
             entries = self.history.unheard(fg)
             preamble = None
             if not entries:
                 other = self.history.other_session_with_unheard(fg)
                 if other is not None:
-                    target = other
                     entries = self.history.unheard(other)
                     preamble = "Catching up on another session."
             if not entries:
                 self._enqueue(fg, "prose", "You're all caught up.", False)
                 return None
-            # Replay cleanly: cut the target's current utterance (it stays
-            # unheard, so it replays FROM ITS START) and drop its queued
-            # duplicates — every unheard entry is re-enqueued in order below.
+            # The voice plays the foreground stream, so replay into it: cut the
+            # foreground's current utterance, clear its queue (so the replay isn't
+            # duplicated by pending live items), then re-enqueue each unheard entry
+            # there. Heard-marking rides on `entry=e`, independent of the stream the
+            # text is read under.
             cur = self._current_item
-            if cur is not None and cur.session == target:
+            if cur is not None and cur.session == fg:
                 self.speaker.cancel()
-            self._drop_pending(self.queue.flush_session(target))
+            self._drop_pending(self._stream(fg).queue.clear())
             if preamble:
                 self._enqueue(fg, "prose", preamble, False)
             for e in entries:
-                self._enqueue(target, e.kind, e.text,
+                self._enqueue(fg, e.kind, e.text,
                               e.kind in ("choice", "plan", "permission"),
                               entry=e)
             return None
@@ -697,7 +692,7 @@ class SpeechDaemon:
                 "rate": self.config.get("rate"),
                 "voice": self.config.get("voice"),
                 "foreground": self.sessions.foreground(),
-                "queue_len": len(self.queue),
+                "queue_len": sum(len(st.queue) for st in self._streams.values()),
                 "minqueue": self.config.get("minqueue"),
             }
 
@@ -774,19 +769,9 @@ class SpeechDaemon:
         if not ids:
             self._enqueue(session, "prose", "Nothing to navigate yet.", False)
             return
-        # Navigating is an active foreground action: claim the voice for this
-        # session so prose streaming in after the replay is spoken (L3). Use the
-        # SAME conservative rule as _claim_for_decision (M4): take only a free or
-        # stale-lock voice, or one we already own — never SEIZE it from a different
-        # session still streaming a reply (owner in _open_msg), which would strand
-        # that in-progress response (the very thing H1 prevents).
-        if self._voice_owner == session or not self._owner_open():
-            self._voice_owner = session
-            self._stream(session).captured = False
         n = len(ids)
-        # Anchor on a STABLE message id, not a position: new paragraphs streaming
-        # in append ids without shifting where the cursor points. Unset/stale ->
-        # the latest. The cursor only clears on a new prompt (FLUSH).
+        # Anchor on a STABLE message id, not a position: new paragraphs streaming in
+        # append ids without shifting where the cursor points. Unset/stale -> latest.
         cur_id = self._stream(session).nav_cursor
         cur = ids.index(cur_id) if cur_id in ids else n - 1
         if to == "next":
@@ -800,17 +785,12 @@ class SpeechDaemon:
         else:
             return
         if new >= n - 1:
-            # Reached the latest message: clear the cursor so it tracks the live
-            # edge again (absent == latest), and so a following 'prev' steps back
-            # from the newest rather than a stale anchor.
             self._stream(session).nav_cursor = None
         else:
-            self._stream(session).nav_cursor = ids[new]   # parked on a past message
+            self._stream(session).nav_cursor = ids[new]
         self.speaker.cancel()
-        self._drop_pending(self.queue.flush_session(session))
-        # Seek-and-play: enqueue the target item AND every later item, so nav reads
-        # from here forward (not just one item). Newly streamed prose enqueues after
-        # these and continues seamlessly — no jump from the replay into a live delta.
+        self._drop_pending(self._stream(session).queue.clear())
+        # Seek-and-play: enqueue the target item AND every later one.
         for mid in ids[new:]:
             for e in self.history.entries_for_message(session, mid):
                 self._enqueue(session, e.kind, e.text, False, entry=e)
@@ -872,13 +852,19 @@ class SpeechDaemon:
             pass
 
     def _speak_loop_once(self) -> None:
-        """One iteration of the speak loop. May raise; _speak_loop contains it."""
+        """One iteration of the speak loop. May raise; _speak_loop contains it.
+
+        The voice plays the FOREGROUND session's stream: every pop reads the
+        foreground stream's own queue. Background streams accumulate untouched
+        until they become foreground."""
         if self._paused.is_set():
             # Play/pause: the loop is held, but a pause-exempt cue ("Paused.") must
-            # still be voiced. Speak one if present; otherwise hold without consuming
-            # the queue. Pop+claim under the lock, mirroring the normal branch.
+            # still be voiced. Scan the foreground stream's queue for one; otherwise
+            # hold. Pop+claim under the lock, mirroring the normal branch.
             with self._lock:
-                item = self.queue.pop_pause_exempt()
+                fg = self.sessions.foreground()
+                st = self._streams.get(fg)
+                item = st.queue.pop_pause_exempt() if st is not None else None
                 self._current_item = item
                 cancel_epoch = self.speaker.cancel_epoch()
             if item is None:
@@ -892,32 +878,28 @@ class SpeechDaemon:
                 completed = False
             self.note_spoken(item, completed)
             return
-        # Pop and CLAIM the item atomically under the lock. PAUSE/MUTE/FLUSH run
-        # under this same lock, so popping + setting _current_item together means
-        # they always observe a consistent current item and can't slip into the
-        # gap between pop and claim (losing the item or failing to cancel it).
+        # Pop and CLAIM the foreground stream's next item atomically under the lock.
+        # foreground() is read here too, so a switch arriving on another connection
+        # (also under the lock) is observed consistently. PAUSE/MUTE/FLUSH run under
+        # this lock, so they can't slip into the gap between pop and claim.
         with self._lock:
-            item = self.queue.pop_next()
+            fg = self.sessions.foreground()
+            st = self._streams.get(fg)
+            item = st.queue.pop_next() if st is not None else None
             self._current_item = item
-            # Capture the speaker's cancel baseline HERE, atomically with the claim.
-            # A cancel() arriving after we release the lock (but before/while speak()
-            # runs) bumps the epoch past this baseline, so the cancelled utterance is
-            # detected instead of playing in full (M2 — the pop->speak gap).
+            # Capture the speaker's cancel baseline atomically with the claim, so a
+            # cancel() arriving during speak() is detected (M2 — the pop->speak gap).
             cancel_epoch = self.speaker.cancel_epoch()
-            st = self._streams.get(item.session) if item is not None else None
+            ist = self._streams.get(item.session) if item is not None else None
             muted = (item is not None
-                     and st is not None and st.muted
+                     and ist is not None and ist.muted
                      and not item.mute_exempt)
             if muted:
                 # Muted session: drop without speaking; release the claim.
                 self._current_item = None
                 self._pending_heard.pop(item.id, None)
         if item is None:
-            with self._lock:
-                if (self._voice_owner is not None and len(self.queue) == 0
-                        and not self._owner_mid_reply(self._voice_owner)):
-                    self._voice_owner = None
-            # nothing to say: wait until woken by an enqueue or until stop()
+            # Foreground stream empty (or no foreground): wait until woken.
             self._wake.wait(self._poll_interval)
             self._wake.clear()
             return
@@ -930,17 +912,15 @@ class SpeechDaemon:
             completed = False
         requeued = False
         with self._lock:
-            # Re-check pause INSIDE the lock (L2). A FLUSH (new prompt) also runs
-            # under this lock and clears pause + flushes the queue; checking pause
-            # outside the lock let a FLUSH land between the check and the
-            # enqueue_front, resurrecting a just-flushed item. Atomic check+enqueue
-            # closes that window.
+            # Re-check pause INSIDE the lock (L2). A FLUSH also runs under this lock
+            # and clears pause + the stream's queue; checking pause outside let a
+            # FLUSH land between check and enqueue_front, resurrecting a flushed item.
             if not completed and self._paused.is_set():
-                # A pause interrupted this utterance: re-queue it at the front so
-                # resume picks back up here, and KEEP its _pending_heard entry (don't
-                # note_spoken) so the eventual replay can still record it as heard.
+                # A pause interrupted this utterance: re-queue it at the front of ITS
+                # OWN stream so resume picks back up here, and KEEP its _pending_heard
+                # entry (don't note_spoken) so the eventual replay records it as heard.
                 self._current_item = None
-                self.queue.enqueue_front(item)
+                self._stream(item.session).queue.enqueue_front(item)
                 requeued = True
         if not requeued:
             self.note_spoken(item, completed)
