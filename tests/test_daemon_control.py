@@ -11,7 +11,7 @@ def _msg(mtype, session=None, **extra):
     return d
 
 
-def _seed(queue, daemon, session, n, decision_at=None):
+def _seed(daemon, session, n, decision_at=None):
     # Per-stream: each item lands in its OWN session's stream (the speak loop plays
     # the foreground stream). For the foreground session that IS the unpacked queue.
     for i in range(n):
@@ -29,8 +29,8 @@ def test_flush_drops_session_items_without_cancelling_other_speech():
     # Flush now cancels only when the current utterance belongs to the flushed
     # session. There is no current utterance in this unit test, so no cancel.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
-    _seed(queue, daemon, "fg", 2)
-    _seed(queue, daemon, "other", 1)
+    _seed(daemon, "fg", 2)
+    _seed(daemon, "other", 1)
     daemon.handle_message(_msg(MsgType.FLUSH, "fg"))
     assert speaker.cancels == 0
     # fg's own stream is cleared; the 'other' session's stream is untouched
@@ -41,7 +41,7 @@ def test_flush_drops_session_items_without_cancelling_other_speech():
 
 def test_stop_clears_foreground_and_cancels():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
-    _seed(queue, daemon, "fg", 3)
+    _seed(daemon, "fg", 3)
     daemon.handle_message(_msg(MsgType.STOP, "fg"))
     assert len(queue) == 0
     assert speaker.cancels == 1
@@ -49,8 +49,8 @@ def test_stop_clears_foreground_and_cancels():
 
 def test_stop_leaves_background_streams_untouched():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    _seed(stream_queue(daemon, "b"), daemon, "b", 2)    # background b has backlog
-    _seed(queue, daemon, "a", 2)                         # foreground a
+    _seed(daemon, "b", 2)    # background b has backlog
+    _seed(daemon, "a", 2)    # foreground a
     daemon.handle_message(_msg(MsgType.STOP, "a"))
     assert len(queue) == 0                               # foreground cleared
     assert len(stream_queue(daemon, "b")) == 2           # background untouched
@@ -59,7 +59,7 @@ def test_stop_leaves_background_streams_untouched():
 
 def test_skip_only_cancels_current():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
-    _seed(queue, daemon, "fg", 3)
+    _seed(daemon, "fg", 3)
     daemon.handle_message(_msg(MsgType.SKIP, "fg"))
     assert speaker.cancels == 1
     # queue untouched by skip
@@ -69,7 +69,7 @@ def test_skip_only_cancels_current():
 def test_jump_decision_drops_to_first_decision_and_cancels():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     # items 0,1 prose; item 2 is a decision
-    _seed(queue, daemon, "fg", 4, decision_at=2)
+    _seed(daemon, "fg", 4, decision_at=2)
     daemon.handle_message(_msg(MsgType.JUMP_DECISION, "fg"))
     assert speaker.cancels == 1
     nxt = queue.pop_next()

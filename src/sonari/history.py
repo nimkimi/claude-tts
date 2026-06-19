@@ -31,8 +31,6 @@ class SessionHistory:
         self._msg_id: "dict[str, int]" = {}
         self._group_seq: "dict[str, int]" = {}   # next entry index within the open group
         self._turn_id: "dict[str, int]" = {}     # current turn per session (a new prompt bumps it)
-        self._touch: "dict[str, int]" = {}   # recency across sessions
-        self._tick = 0
 
     def record(self, session: str, kind: str, text: str) -> HistoryEntry:
         d = self._entries.get(session)
@@ -44,8 +42,6 @@ class SessionHistory:
                              self._turn_id.get(session, 0))
         self._group_seq[session] = seq + 1
         d.append(entry)
-        self._tick += 1
-        self._touch[session] = self._tick
         return entry
 
     def end_message(self, session: str) -> None:
@@ -156,5 +152,4 @@ class SessionHistory:
         self._msg_id.pop(session, None)
         self._group_seq.pop(session, None)
         self._turn_id.pop(session, None)
-        self._touch.pop(session, None)
 
