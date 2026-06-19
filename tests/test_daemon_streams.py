@@ -108,22 +108,6 @@ def test_muted_foreground_item_is_dropped_but_exempt_is_spoken():
     assert speaker.spoken == ["muted-cue"]
 
 
-def test_catch_up_routes_cross_session_backlog_into_the_foreground_stream():
-    # Stage 2 pins catch_up's new behavior so Stages 3-6 can't silently regress it:
-    # the unheard from ANOTHER session is replayed under the foreground voice and
-    # heard, with its history entries marked heard.
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    daemon.handle_message(_msg(MsgType.PROSE, "b", delta="B unheard. ",
-                               index=0, final=True))   # background, accumulates
-    daemon.handle_message(_msg(MsgType.CATCH_UP, "a"))
-    assert [i.text for i in stream_queue(daemon, "a")._items] == [
-        "Catching up on another session.", "B unheard."]
-    while len(stream_queue(daemon, "a")):
-        _pump_one(daemon)
-    assert speaker.spoken[-1] == "B unheard."
-    assert daemon.history.unheard("b") == []          # entry marked heard
-
-
 # --- jump_waiting handler (Task 2) -------------------------------------------
 
 def test_jump_waiting_switches_to_background_and_announces_folder():

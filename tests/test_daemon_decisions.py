@@ -145,8 +145,7 @@ def test_decision_for_background_session_enqueues_to_its_own_stream():
 def test_jump_decision_drops_pending_and_marks_current_heard():
     """M6: JUMP_DECISION discards queued non-decision items before the decision.
     Those items' _pending_heard entries must be dropped (no leak) and the cancelled
-    current item must be marked heard, so a later CATCH_UP doesn't replay them out
-    of order."""
+    current item must be marked heard so they don't linger in unheard()."""
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     # A current item being spoken, with a heard-marker entry.
     cur_entry = daemon.history.record("fg", "prose", "current")

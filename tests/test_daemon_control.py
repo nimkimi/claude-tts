@@ -77,15 +77,6 @@ def test_jump_decision_drops_to_first_decision_and_cancels():
     assert nxt.text == "item 2"
 
 
-def test_catch_up_no_longer_discards_the_backlog():
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
-    daemon.handle_message(_msg(MsgType.PROSE, "fg", delta="Keep me. ",
-                               index=0, final=True))
-    daemon.handle_message(_msg(MsgType.CATCH_UP))
-    texts = [queue.pop_next().text for _ in range(len(queue))]
-    assert "Keep me." in texts
-
-
 def test_set_foreground_sets_foreground():
     daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
     daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "s9"))
@@ -105,83 +96,6 @@ def test_session_end_unregisters():
     daemon.handle_message(_msg(MsgType.SESSION_END, "s9"))
     assert sessions.foreground() is None
 
-
-# ---------------------------------------------------------------------------
-# REPEAT tests (history-based — see Phase 2.1)
-# ---------------------------------------------------------------------------
-
-def _prose(daemon, session, text, index=0, final=True):
-    daemon.handle_message(_msg(MsgType.PROSE, session, delta=text,
-                               index=index, final=final))
-
-
-def _drain_one(daemon, queue, speaker):
-    item = queue.pop_next()
-    assert item is not None
-    completed = speaker.speak(item.text)
-    daemon.note_spoken(item, completed)
-    return item
-
-
-def test_repeat_noop_when_nothing_spoken_yet():
-    """REPEAT before any speech says "Nothing to repeat." when foreground exists."""
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
-    daemon.handle_message(_msg(MsgType.REPEAT, "fg"))
-    item = queue.pop_next()
-    assert item.text == "Nothing to repeat."
-
-
-def test_repeat_reenqueues_last_spoken_text():
-    """After prose is spoken, REPEAT re-enqueues the whole last message."""
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
-    _prose(daemon, "fg", "Hello world. ")
-    while len(queue):
-        _drain_one(daemon, queue, speaker)
-    daemon.handle_message(_msg(MsgType.REPEAT, "fg"))
-    assert len(queue) == 1
-    item = queue.pop_next()
-    assert item.text == "Hello world."
-    assert item.kind == "prose"
-    assert item.session == "fg"
-    assert item.is_decision is False
-
-
-def test_repeat_noop_when_no_foreground_session():
-    """REPEAT with no foreground session must not enqueue anything."""
-    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
-    daemon.handle_message(_msg(MsgType.REPEAT))
-    assert len(queue) == 0
-
-
-def test_repeat_drives_speak_path():
-    """Integration: enqueue prose, drain it, REPEAT, then drain again through
-    the speak path and assert the text is spoken a second time."""
-    import threading, time
-
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
-    _prose(daemon, "fg", "Repeat me please. ")
-
-    # Kick the speak loop.
-    t = threading.Thread(target=daemon._speak_loop, daemon=True)
-    t.start()
-    try:
-        deadline = time.time() + 2.0
-        while time.time() < deadline and not speaker.spoken:
-            time.sleep(0.01)
-        assert "Repeat me please." in speaker.spoken
-
-        # Issue REPEAT after the first round has been spoken.
-        daemon.handle_message(_msg(MsgType.REPEAT, "fg"))
-
-        deadline = time.time() + 2.0
-        initial_count = len(speaker.spoken)
-        while time.time() < deadline and len(speaker.spoken) <= initial_count:
-            time.sleep(0.01)
-
-        assert speaker.spoken.count("Repeat me please.") >= 2
-    finally:
-        daemon.stop()
-        t.join(timeout=2.0)
 
 
 # ---------------------------------------------------------------------------
