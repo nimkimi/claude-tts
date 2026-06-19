@@ -65,6 +65,27 @@ def test_stale_generation_aborts_before_raise():
     assert called == []             # no stale failure cue
 
 
+def test_backend_exception_is_caught_and_on_failure_fires():
+    """A raising backend must not crash the thread, and ok=False must trigger on_failure."""
+    class RaisingBackend:
+        def __init__(self):
+            self.entered = False
+        def supports(self, identity):
+            return True
+        def raise_session(self, identity):
+            self.entered = True   # record entry BEFORE raising
+            raise RuntimeError("boom")
+
+    be = RaisingBackend()
+    svc = RaiseService(be, {"focus_follow": True})
+    called = []
+    gen = svc.bump_generation()
+    svc.raise_async(Identity(tty="/dev/ttys1"), gen, on_failure=lambda: called.append(1))
+    svc.join(2.0)
+    assert be.entered          # backend was actually called (exception path ran)
+    assert called == [1]       # exception → ok=False, generation still current → on_failure fired
+
+
 def test_supersede_during_slow_raise_suppresses_failure_cue():
     gate, entered = threading.Event(), threading.Event()
     be = FakeBackend(result=False, gate=gate, entered=entered)

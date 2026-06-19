@@ -48,6 +48,7 @@ class RaiseService:
                 on_failure()
         t = threading.Thread(target=_run, name="sonari-raise", daemon=True)
         with self._lock:
+            self._threads = [x for x in self._threads if x.is_alive()]
             self._threads.append(t)
         t.start()
 
