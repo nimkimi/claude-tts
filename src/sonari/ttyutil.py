@@ -11,7 +11,7 @@ import os
 
 
 def _default_ps(pid: int) -> "tuple[int, str]":
-    """Return (ppid, tty_raw) for *pid* via `ps`. Raises on failure (caller guards)."""
+    """Return (ppid, tty_raw) parsed from `ps`. Returns (0, "") if ps yields no output (e.g. pid gone). Subprocess/parse errors propagate; caller's try/except guards."""
     import subprocess
     out = subprocess.run(
         ["ps", "-o", "ppid=,tty=", "-p", str(pid)],
