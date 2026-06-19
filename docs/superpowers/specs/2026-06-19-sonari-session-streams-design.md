@@ -233,6 +233,17 @@ design.
 6. **Speaker cancel verification (symptom 2b).** Audit and harden the cancel-epoch /
    synth-gap path with the real `Speaker` + a slow fake `say_runner`; fix only a
    demonstrated defect, otherwise document it as solid.
+   **Outcome (verified solid — no defect):** `tests/test_speaker_cancel_2b.py` drives the
+   real `Speaker` with an Event-gated slow fake `say_runner` and a worker thread firing
+   `cancel()`, exhaustively probing the `speak()`×`cancel()` windows (synth-gap W2,
+   claim→speak external-epoch gap, playback W3, completion-coincident W4, clean baseline)
+   plus the daemon PAUSE requeue/replay end-to-end. Every interleaving resolves correctly
+   (cancel detected → terminate + `False`; clean → `True`); no lost cancel, double-play,
+   hang, or dangling `_current`. 6 probes banked as regressions, each mutation-verified
+   non-vacuous, and adversarially reviewed (3 skeptics). Scope of the claim: cancel-driven
+   termination only — `speak()`'s fallback wait-timeout (say-hung safety net) is a separate
+   non-cancel path; "resumed wrong"/double-play is structurally PAUSE-only (the sole
+   disposition that requeues). No production code changed.
 7. **Backlog bounds, caps, cleanup, dead-code removal.**
 
 (The former Stage 6 "replay duplication fix" is **removed** — retiring `REPEAT`/`catch_up`
