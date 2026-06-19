@@ -46,6 +46,17 @@ class WinHotkeyBackend(HotkeyBackend):
     def default_mods(self) -> list:
         return list(keytables.DEFAULT_MODS)
 
+    def extra_default_bindings(self) -> dict:
+        # The Windows base chord (Ctrl+Shift+Alt) already spends Shift, so response-nav
+        # can't be "arrows + Shift" the way it is on macOS — that chord IS within-response
+        # nav. Give it distinct KEYS under the same chord instead: Ctrl+Shift+Alt+[ / ].
+        # ([ and ] are unused by the base bindings, so they don't collide.)
+        mods = list(self.default_mods())
+        return {
+            "nav_prev_response": {"key": "[", "mods": mods},
+            "nav_next_response": {"key": "]", "mods": mods},
+        }
+
     # --- monkeypatchable user32/kernel32 wrappers (lazy ctypes) ---
     def _register(self, hid: int, mods: int, vk: int) -> int:
         import ctypes
