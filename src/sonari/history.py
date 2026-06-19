@@ -95,6 +95,13 @@ class SessionHistory:
         `message_ids_in_turn` serves any past turn for Stage 5's two-level nav."""
         return self.message_ids_in_turn(session, self._turn_id.get(session, 0))
 
+    def current_turn(self, session: str) -> int:
+        """The session's current (live) turn id — the turn a new entry would join.
+        Unlike the last id in `turn_ids()`, this is the LIVE turn even when it has no
+        entries yet (the FLUSH->first-prose window), so callers can tell 'newest
+        navigable turn' apart from 'the live turn'. Defaults to 0 for an unknown session."""
+        return self._turn_id.get(session, 0)
+
     def turn_ids(self, session: str) -> list:
         """Navigable turn ids for the session, oldest first. A turn is navigable iff it
         still has at least one present message-group head (`message_ids_in_turn` non-empty)

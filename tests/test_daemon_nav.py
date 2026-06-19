@@ -285,3 +285,25 @@ def test_live_prose_while_parked_on_past_response_enqueues_after_replay():
     assert "R2." in texts and "Live more." in texts
     assert texts.index("Live more.") > texts.index("R2.")    # after the replay, not interleaved
     assert daemon._stream("fg").nav_turn is not None         # still parked, not yanked to live
+
+
+def test_back_to_latest_with_empty_live_turn_pins_anchor_not_none():
+    # Deferred Stage-5 Minor: a FLUSH after the last prose opens an EMPTY live turn
+    # (excluded from turn_ids). Navigating back to the latest must pin the anchor to the
+    # newest CONTENT turn (not None == the empty live turn), so a follow-up within-nav
+    # still works instead of saying "Nothing to navigate yet."
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    _responses(daemon, "fg", ["R1.", "R2."])         # turns with content; live turn has R2.
+    _drain(queue)
+    daemon.handle_message({"type": "flush", "session": "fg"})   # opens an EMPTY live turn
+    daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})  # park back
+    _drain(queue)
+    daemon.handle_message({"type": "nav", "to": "next_response", "session": "fg"})  # to latest
+    cues = [s.text for s in _drain(queue)]
+    assert "Back to the latest." in cues                         # cue unchanged
+    st = daemon._stream("fg")
+    assert st.nav_turn is not None                               # PINNED, not the empty live turn
+    assert st.nav_turn in daemon.history.turn_ids("fg")          # a real navigable turn
+    # within-nav over the pinned turn works (no dead-end cue)
+    daemon.handle_message({"type": "nav", "to": "prev", "session": "fg"})
+    assert "Nothing to navigate yet." not in [s.text for s in _drain(queue)]
