@@ -72,30 +72,48 @@ class SessionHistory:
         last_id = d[-1].msg_id
         return [e for e in d if e.msg_id == last_id]
 
-    def message_ids(self, session: str) -> list:
-        """Distinct message ids of the CURRENT turn, oldest first. Each id is one
-        'item' (an assistant message / paragraph) within the live turn. History
-        persists across turns (Stage 4), so this is bounded to the current turn —
-        the existing within-turn nav must not walk into prior turns (cross-turn
-        navigation is Stage 5). Powers the next/prev/first/last navigation cursor."""
+    def message_ids_in_turn(self, session: str, turn_id: int) -> list:
+        """Distinct message ids of the given turn, oldest first. Same truncated-head
+        exclusion as `message_ids` (#8): a group whose head was evicted by the rolling
+        cap is excluded so nav never replays a fragment. Powers within-response nav
+        over any turn — current or past (Stage 5 two-level navigation)."""
         d = self._entries.get(session)
         if not d:
             return []
-        cur_turn = self._turn_id.get(session, 0)
         ids = []
         seen = set()
         for e in d:
-            if e.turn_id != cur_turn:
+            if e.turn_id != turn_id:
                 continue
             if e.msg_id in seen:
                 continue
             seen.add(e.msg_id)
-            # The first PRESENT entry of a group. If its seq != 0 the group's head
-            # was evicted by the rolling cap, so the group is truncated — exclude it
-            # from navigation rather than letting nav replay a fragment (#8).
             if e.seq == 0:
                 ids.append(e.msg_id)
         return ids
+
+    def message_ids(self, session: str) -> list:
+        """Distinct message ids of the CURRENT turn, oldest first (the live response).
+        Bounded to the current turn so the single-level within-response nav never walks
+        into prior turns (Stage 4). Delegates to `message_ids_in_turn` for the live turn;
+        `message_ids_in_turn` serves any past turn for Stage 5's two-level nav."""
+        return self.message_ids_in_turn(session, self._turn_id.get(session, 0))
+
+    def turn_ids(self, session: str) -> list:
+        """Navigable turn ids for the session, oldest first. A turn is navigable iff it
+        still has at least one present message-group head (`message_ids_in_turn` non-empty)
+        — a turn whose entries were entirely evicted, or whose only survivors are mid-group
+        fragments, is excluded. Powers response-to-response navigation (Stage 5)."""
+        d = self._entries.get(session)
+        if not d:
+            return []
+        ordered = []
+        seen = set()
+        for e in d:
+            if e.turn_id not in seen:
+                seen.add(e.turn_id)
+                ordered.append(e.turn_id)
+        return [t for t in ordered if self.message_ids_in_turn(session, t)]
 
     def entries_for_message(self, session: str, msg_id: int) -> list:
         """All entries of a given message id, oldest first."""

@@ -191,3 +191,46 @@ def test_cap_spans_whole_session_evicting_oldest_turns():
     assert len(ids) == 3                               # current turn (t2a/t2b/t2c) intact
     # the evicted oldest turn is gone from the transcript entirely
     assert all(e.text != "t1" for e in h._entries["s"])
+
+
+def test_message_ids_in_turn_returns_that_turns_groups():
+    h = SessionHistory()
+    h.record("s", "prose", "t0a"); h.end_message("s")
+    h.record("s", "prose", "t0b"); h.end_message("s")
+    h.start_turn("s")                                       # -> turn 1
+    h.record("s", "prose", "t1a")
+    t0 = h.message_ids_in_turn("s", 0)
+    t1 = h.message_ids_in_turn("s", 1)
+    assert len(t0) == 2 and len(t1) == 1
+    assert [e.text for e in h.entries_for_message("s", t1[0])] == ["t1a"]
+    assert h.message_ids_in_turn("s", 99) == []             # no such turn
+
+
+def test_message_ids_delegates_to_current_turn():
+    h = SessionHistory()
+    h.record("s", "prose", "t0a"); h.end_message("s")
+    h.start_turn("s")
+    h.record("s", "prose", "t1a")
+    # message_ids == message_ids of the live turn (regression: Stage 4 behavior kept)
+    assert h.message_ids("s") == h.message_ids_in_turn("s", 1)
+
+
+def test_turn_ids_lists_navigable_turns_oldest_first():
+    h = SessionHistory()
+    h.record("s", "prose", "a"); h.end_message("s")         # turn 0
+    h.start_turn("s"); h.record("s", "prose", "b"); h.end_message("s")   # turn 1
+    h.start_turn("s"); h.record("s", "prose", "c")          # turn 2
+    assert h.turn_ids("s") == [0, 1, 2]
+    assert h.turn_ids("missing") == []
+
+
+def test_turn_ids_excludes_evicted_and_truncated_turns():
+    # cap small enough that turn 0's group HEAD evicts -> turn 0 becomes a fragment
+    # (no seq==0 head present) -> not navigable -> excluded from turn_ids.
+    h = SessionHistory(cap=3)
+    h.record("s", "prose", "a1"); h.record("s", "prose", "a2")
+    h.record("s", "prose", "a3")                            # turn 0: one group, 3 entries
+    h.start_turn("s")                                       # turn 1 (bumps msg_id -> fresh group)
+    h.record("s", "prose", "b1")                            # evicts a1 (turn 0 head)
+    assert h.message_ids_in_turn("s", 0) == []              # turn 0 truncated
+    assert h.turn_ids("s") == [1]                           # turn 0 excluded
