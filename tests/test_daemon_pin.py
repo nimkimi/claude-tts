@@ -3,6 +3,16 @@ from sonari.protocol import MsgType, PROTOCOL_VERSION
 from tests.daemon_helpers import make_daemon, stream_queue
 
 
+def _drain(daemon):
+    """Run the speak loop until the foreground stream's queue is empty."""
+    for _ in range(1000):
+        fg = daemon.sessions.foreground()
+        st = daemon._streams.get(fg)
+        if st is None or len(st.queue) == 0:
+            break
+        daemon._speak_loop_once()
+
+
 def _prose(session, delta, index, final):
     return {
         "v": PROTOCOL_VERSION,
@@ -66,6 +76,37 @@ def test_pin_toggle_with_no_session_beeps_error_only():
     assert sessions.pinned() is None
     assert speaker.earcons == ["error"]      # only the error earcon, nothing else
     assert speaker.spoken == []
+
+
+def test_pin_confirmation_does_not_double_announce_folder():
+    """names_session=True on the "Pinned <folder>." cue must claim _last_spoken_session
+    so the very next prose from the same session is NOT prefixed with the folder again.
+
+    Mirrors test_jump_preamble_does_not_double_announce_the_folder: prime
+    _last_spoken_session to a DIFFERENT session first, then pin the target session,
+    so if names_session were broken (and _last_spoken stayed on the other session)
+    the subsequent prose WOULD get a "<folder>. <prose>" prefix — catching the bug."""
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="other")
+    sessions.register("other", cwd="/x/elsewhere")
+    sessions.register("target", cwd="/x/myapp")
+    # Prime _last_spoken_session to "other" so a session switch IS detected.
+    daemon.handle_message(_prose("other", "priming text. ", 0, False))
+    _drain(daemon)
+    # Move foreground to "target" and pin it.
+    daemon.handle_message({"type": "set_foreground", "session": "target",
+                           "cwd": "/x/myapp"})
+    daemon.handle_message({"type": "pin_toggle", "session": "target"})
+    _drain(daemon)  # drains "Pinned myapp." — names_session=True claims _last_spoken -> target
+    # Feed prose to the pinned session.
+    daemon.handle_message(_prose("target", "result text. ", 0, False))
+    _drain(daemon)
+    assert "myapp. result text." not in speaker.spoken, (
+        "double-announce: pin cue's names_session did not claim _last_spoken_session; "
+        "got: {0}".format(speaker.spoken)
+    )
+    assert any("result text." in s for s in speaker.spoken), (
+        "prose was not spoken at all: {0}".format(speaker.spoken)
+    )
 
 
 def test_pinned_session_keeps_voice_so_bg_prose_accumulates_separately():
