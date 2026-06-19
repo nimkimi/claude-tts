@@ -141,3 +141,39 @@ def test_nav_steps_by_paragraph_within_one_message():
         "Para one sentence.", "Para two sentence.", "Para three sentence."]
     _nav(daemon, "last")                            # -> para3 only
     assert [s.text for s in _drain(queue)] == ["Para three sentence."]
+
+
+def test_nav_stays_within_current_turn_after_new_prompt():
+    # Stage 4 discriminator (the existing nav suite is blind to this — every other
+    # test seeds a single turn). History persists across turns, but the existing
+    # within-turn nav must NOT walk into a prior turn; that's Stage 5's two-level nav.
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "T1 alpha.", "index": 0, "final": True})
+    daemon.handle_message({"type": "flush", "session": "fg"})        # open turn 2
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "T2 one.", "index": 0, "final": True})
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "T2 two.", "index": 1, "final": True})
+    _drain(queue)                                                    # clear live playback
+    _nav(daemon, "first")                                           # first of CURRENT turn
+    texts = [s.text for s in _drain(queue)]
+    assert texts == ["T2 one.", "T2 two."]                          # whole current turn
+    assert "T1 alpha." not in texts                                 # never the prior turn
+
+
+def test_nav_prev_clamps_at_current_turn_start_not_prior_turn():
+    # After a new prompt with a single message in the fresh turn, 'prev' clamps on
+    # that message and never reaches into the prior turn's transcript.
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "Prior turn.", "index": 0, "final": True})
+    daemon.handle_message({"type": "flush", "session": "fg"})        # open new turn
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "Current turn.", "index": 0, "final": True})
+    _drain(queue)
+    for _ in range(3):
+        _nav(daemon, "prev")                                        # clamps, no wrap/leak
+    texts = [s.text for s in _drain(queue)]
+    assert texts == ["Current turn."]
+    assert "Prior turn." not in texts

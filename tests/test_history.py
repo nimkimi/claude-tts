@@ -174,3 +174,20 @@ def test_empty_current_turn_has_no_nav_or_unheard_but_persists():
     assert h.message_ids("s") == []
     assert h.unheard("s") == []
     assert [e.text for e in h.last_message("s")] == ["kept"]   # not wiped
+
+
+def test_cap_spans_whole_session_evicting_oldest_turns():
+    # Stage 4: the rolling cap now bounds the WHOLE-session transcript (it was
+    # effectively per-turn when history reset each prompt). Oldest entries (oldest
+    # turns) evict first; the current turn stays intact and navigable.
+    h = SessionHistory(cap=3)
+    h.start_turn("s")                                  # turn 1
+    h.record("s", "prose", "t1"); h.end_message("s")
+    h.start_turn("s")                                  # turn 2
+    h.record("s", "prose", "t2a"); h.end_message("s")
+    h.record("s", "prose", "t2b"); h.end_message("s")
+    h.record("s", "prose", "t2c")                      # 4th entry -> evicts "t1"
+    ids = h.message_ids("s")
+    assert len(ids) == 3                               # current turn (t2a/t2b/t2c) intact
+    # the evicted oldest turn is gone from the transcript entirely
+    assert all(e.text != "t1" for e in h._entries["s"])

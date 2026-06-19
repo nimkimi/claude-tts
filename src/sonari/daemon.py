@@ -426,7 +426,11 @@ class SpeechDaemon:
                                     or self.sessions.foreground() == session):
                 self.speaker.cancel()
             st.reset_for_new_prompt()
-            self.history.reset(session)
+            # Stage 4: a new prompt opens a NEW TURN and KEEPS the prior turn's
+            # transcript (persistent, navigable in Stage 5). reset_for_new_prompt()
+            # already cleared live playback (queue, assembler, nav_cursor -> snap to
+            # live edge); history is no longer wiped here. SESSION_END still clears it.
+            self.history.start_turn(session)
             # A new prompt is a user action -> auto-resume from pause.
             self._paused.clear()
             self._wake.set()
