@@ -33,15 +33,16 @@ that determines whether the per-stream redesign fixes it or a separate fix is ne
 |---|---|---|---|---|
 | 1 | Voice stolen / sessions interfere | Switch to B while A streams → A finishes, voice frees, B is foreground & streaming, **B stays silent for the rest of its message**, no signal | voice-ownership / capture | **Yes — dissolves** |
 | 2a | Control hit the wrong session | `STOP` while focus=B (empty) **cleared A's whole queue**; `PAUSE` routed "Paused." to B while the voice was reading A | voice-ownership / queue scope (`foreground()` ≠ `voice_owner`) | **Yes — dissolves** |
-| 2b | Interrupt "didn't cut cleanly" / lag / resumed wrong | Not reproducible in FakeSpeaker (instant); lives in the `Speaker` cancel-epoch / synth-gap mechanism | **Speaker / cancel-epoch** | **No — separate verify (Stage 7)** |
+| 2b | Interrupt "didn't cut cleanly" / lag / resumed wrong | Not reproducible in FakeSpeaker (instant); lives in the `Speaker` cancel-epoch / synth-gap mechanism | **Speaker / cancel-epoch** | **No — separate verify (Stage 6)** |
 | 3a | Output dropped / misordered across sessions | Background session's prose captured (silently dropped from playback) | voice-ownership / capture | **Yes — dissolves** |
-| 3b | Output duplicated | `REPEAT` re-enqueued the last message while it was still queued → `["one","two"]` became `["one","two","one","two"]` | **replay (history+queue)** | **No — separate fix (Stage 6)** |
+| 3b | Output duplicated | `REPEAT` re-enqueued the last message while it was still queued → `["one","two"]` became `["one","two","one","two"]` | **replay (history+queue)** | **Yes — dissolves: `REPEAT`/`catch_up` are retired entirely (§6, Stage 3); with no replay command there is nothing to re-enqueue** |
 
 The honest summary: the redesign **dissolves symptom 1 and the cross-session flavors
-of 2 and 3**; the **REPEAT/catch_up replay duplication (3b)** and the **Speaker cancel
-timing (2b)** are independent and get their own stages. The redesign is justified on
-its own merits as the multi-session architecture + navigation Nima requested — not by
-an over-claim that it fixes everything.
+of 2 and 3**, and **3b dissolves once `REPEAT`/`catch_up` are retired** (Stage 3 —
+single-queue-era replay commands the per-stream model makes redundant: see §6). The only
+independent item left is the **Speaker cancel timing (2b)**, which gets its own verify
+stage. The redesign is justified on its own merits as the multi-session architecture +
+navigation Nima requested — not by an over-claim that it fixes everything.
 
 ## 2. Goals / Non-goals
 
@@ -54,7 +55,9 @@ an over-claim that it fixes everything.
   two-level (within-response + response-to-response).
 - Retire the `_voice_owner` / `_captured_msg` / `_open_msg` / sticky-capture lattice and
   the FLUSH-vs-SESSION_END cleanup divergence.
-- Fix the replay duplication (3b) and verify the cancel timing (2b).
+- Retire the single-queue-era replay commands `catch_up` / `REPEAT` (the per-stream
+  model subsumes them — see §6), which makes the 3b duplication impossible (nothing to
+  re-enqueue), and verify the cancel timing (2b).
 
 **Non-goals (deliberate, may revisit)**
 - Durable on-disk transcript surviving a daemon restart. Stays in-memory + capped.
@@ -92,7 +95,7 @@ The speak loop drains **`streams[foreground].queue`** instead of one global queu
 `foreground` comes from `SessionManager` (unchanged: last session to prompt/start, or
 the pinned one). If the foreground stream's queue is empty, the loop idles — it does
 **not** pull from background streams. Switching foreground (a new prompt, or the
-switch-&-read hotkey) repoints the loop and cuts the current sentence.
+**jump-to-waiting-session hotkey**) repoints the loop and cuts the current sentence.
 
 ### 4.3 Retired by construction
 `_voice_owner`, `_may_speak`, `_claim_for_decision`, `_owner_mid_reply`,
@@ -121,9 +124,11 @@ which **eliminates the FLUSH-vs-SESSION_END divergence** (the confirmed `_assemb
 |---|---|---|
 | Scope of the work | Per-session-stream redesign (not targeted patching) | Nima |
 | Background prose | Accumulates in its own stream; **one soft, debounced "waiting" earcon** (on empty→waiting and on a new turn, not per sentence) | recommendation |
-| Background **block** (permission/choice/plan) | **Distinct alert earcon, voice NOT hijacked**; a switch-&-read hotkey reads its options when the user chooses | Nima |
-| Switching | foreground = last prompt (unchanged) **+** switch-&-read hotkey (repurpose `catch_up`) to jump to a waiting stream | recommendation |
-| Controls (STOP/PAUSE/SKIP/NAV/REPEAT/MUTE) | Act on the **foreground stream** (fixes global-STOP clobber 2a) | recommendation |
+| Background **block** (permission/choice/plan) | **Distinct alert earcon, voice NOT hijacked**; the jump-to-waiting-session hotkey switches to that stream and plays its queue (incl. the options) when the user chooses | Nima |
+| Switching | foreground = last prompt (unchanged) **+** a dedicated **jump-to-waiting-session hotkey** (NEW binding — not a `catch_up` repurpose) that switches foreground to a stream with backlog and plays it | Nima |
+| Controls (STOP/PAUSE/SKIP/NAV/MUTE) | Act on the **foreground stream** (fixes global-STOP clobber 2a) | recommendation |
+| `catch_up` / `REPEAT` | **Retired entirely** (handlers + CLI removed) — single-queue-era replay workarounds the per-stream model subsumes: backlog accumulates + plays on switch, pause/resume continues, nav-from-start (`Ctrl+Cmd+↑`) re-reads. The default keymap already drops them as hotkeys. | Nima |
+| Hotkey surface (current default, `Ctrl+Cmd`+key) | `nav_prev/next`=←/→, `nav_first`=↑ (read response from start), `nav_last`=↓, `pause`=s (play / resume-from-stopped), `mute`=m, `pin_toggle`=p; Stage 3 adds the jump-to-waiting key | reference |
 | Backlog bound | Per-stream queue capped like history; switching reads what remains, oldest-first | recommendation, adjustable |
 | Navigation granularity | **Two-level** (response + within) | Nima |
 | Durable on-disk transcript | Out of scope for now | recommendation |
@@ -134,10 +139,11 @@ Persisting history across turns interacts with everything built on the per-sessi
 deque: `last_message`, `nth_last_message`, `message_ids`, `unheard`,
 `other_session_with_unheard`, and the heard/unheard voice-continuity capture. Two
 points to settle in Stage 4/5 with tests:
-- **`unheard` semantics** once history spans the whole session — it must stay bounded
-  and not let `catch_up` replay the entire transcript. In the new model, live/backlog
-  playback is driven by the per-stream **queue**, and `heard` is marked when a queued
-  item is spoken; `unheard` should reflect *recent* backlog, not all history.
+- **`unheard` semantics** once history spans the whole session. With `catch_up` retired
+  (§6) `unheard` no longer drives replay; it now only feeds the **waiting earcon** and
+  heard-marking. Live/backlog playback is driven entirely by the per-stream **queue**,
+  and `heard` is marked when a queued item is spoken — so `unheard` must stay bounded to
+  *recent* backlog, never the whole transcript.
 - **`message_ids` must group by turn** so the two-level nav can address "response N"
   vs "item within response N."
 This is internal consistency, resolved during implementation — not a blocker on the
@@ -155,32 +161,38 @@ design.
    the speak-loop file is a correctness hazard. (Moved up from Stage 3: a PR-boundary
    call, no runtime-behavior delta — the flip is the behavior change either way.)
    *Dissolves symptom 1 + 3a.*
-3. **Multi-session UX + per-stream controls.** Waiting earcon, switch-&-read hotkey
-   (repurpose `catch_up`), scope STOP/PAUSE/etc. to the foreground stream, and the
-   **cut-on-switch refinement** (§4.2 — Stage 2 lets the current sentence finish on a
-   foreground switch; this stage cuts it). *Dissolves symptom 2a.*
+3. **Multi-session UX + per-stream controls.** Waiting earcon; a dedicated
+   **jump-to-waiting-session hotkey** (new binding); scope STOP/PAUSE/etc. to the
+   foreground stream; the **cut-on-switch refinement** (§4.2 — Stage 2 lets the current
+   sentence finish on a switch, this stage cuts it); and **retire `catch_up` + `REPEAT`
+   entirely** (handlers + CLI). Retiring `catch_up` *here* — together with the jump
+   hotkey, the first non-FLUSH switch — is what resolves the §11 tripwire; removing
+   `REPEAT` dissolves symptom 3b. *Dissolves symptoms 2a + 3b.*
 4. **Persistent transcript.** Stop reset-on-FLUSH; add turn grouping; snap cursor to
    live edge on a new prompt; keep `SESSION_END` clearing. Resolve the §7 seam.
 5. **Two-level navigation.** `nav_prev_response` / `nav_next_response` + within-response
-   nav over persisted turns; reconcile `repeat` / `catch_up`.
-6. **Replay duplication fix (symptom 3b).** `REPEAT` / `catch_up` must not re-enqueue an
-   entry already pending in the stream's queue. Dedicated failing-then-passing test from
-   the spike.
-7. **Speaker cancel verification (symptom 2b).** Audit and harden the cancel-epoch /
+   nav over persisted turns. (No `repeat`/`catch_up` reconciliation — both retired in
+   Stage 3.)
+6. **Speaker cancel verification (symptom 2b).** Audit and harden the cancel-epoch /
    synth-gap path with the real `Speaker` + a slow fake `say_runner`; fix only a
    demonstrated defect, otherwise document it as solid.
-8. **Backlog bounds, caps, cleanup, dead-code removal.**
+7. **Backlog bounds, caps, cleanup, dead-code removal.**
 
-Each stage is its own PR. Stages 1 and 8 are pure-internal; 2–7 change behavior and
+(The former Stage 6 "replay duplication fix" is **removed** — retiring `REPEAT`/`catch_up`
+in Stage 3 makes symptom 3b impossible by construction.)
+
+Each stage is its own PR. Stages 1 and 7 are pure-internal; 2–6 change behavior and
 each carries its own tests, including the spike scenarios promoted to regressions.
 
 ## 9. Testing
 
 - **Characterization first** on Stage 1 to lock preserved behavior.
-- **Spikes become regressions:** the B-goes-silent, STOP-clobber, PAUSE-misroute, and
-  REPEAT-dup scenarios become permanent failing-then-passing tests.
-- **New policy tests:** background accumulates and is never dropped; switch-&-read;
-  alert-no-hijack; cross-turn navigation; cursor-snaps-to-live on new prompt.
+- **Spikes become regressions:** the B-goes-silent, STOP-clobber, and PAUSE-misroute
+  scenarios become permanent failing-then-passing tests. (The REPEAT-dup spike is moot —
+  `REPEAT` is retired in Stage 3.)
+- **New policy tests:** background accumulates and is never dropped; jump-to-waiting-
+  session; alert-no-hijack; `catch_up`/`REPEAT` fully removed (no handler, no CLI);
+  cross-turn navigation; cursor-snaps-to-live on new prompt.
 - Tests that encode the **old capture policy** are updated (not deleted) with the why
   documented — they assert behavior we are deliberately changing.
 - The full suite (after Stage 1: **698 passed, 2 skipped**; the 2 need the
@@ -200,13 +212,12 @@ each carries its own tests, including the spike scenarios promoted to regression
 - Backlog cap value (start ≈ history cap; tune by feel).
 - Waiting-earcon sound design (must be subtle, distinct from the decision alert).
 - Durable on-disk transcript (non-goal now; revisit if restarts lose useful history).
-- **⚠️ ORDERING TRIPWIRE (from the Stage 2 final review):** the Stage 5/6 `catch_up`
-  cross-session dedup MUST land **before or together with** the Stage 3 switch-&-read
-  hotkey. Stage 2 made `catch_up` route a cross-session replay into the foreground
-  stream but stopped flushing the *other* session's own queued copy, so that copy
-  would be re-spoken on a later switch to it. This is **latent-unreachable in Stage 2**
-  only because every foreground switch today goes through `FLUSH` (UserPromptSubmit) or
-  is a brand-new `SessionStart` id — both of which clear the stale state. The switch-&-
-  read hotkey is the first *non-FLUSH* switch to an existing background session; adding
-  it without the dedup makes the double-speak live. (One-line stopgap if Stage 3 ships
-  first: on `catch_up`'s cross-session branch, also clear the other stream's queue.)
+- **✅ catch_up cross-session double-speak — RESOLVED BY DESIGN (was a Stage 2 final-review tripwire).**
+  Stage 2 left `catch_up` routing a cross-session replay into the foreground stream
+  without flushing the *other* session's own queued copy — a latent double-speak that
+  would surface on a later *non-FLUSH* switch to that session. It is unreachable in
+  Stage 2 (every foreground switch today is a `FLUSH`/UserPromptSubmit or a brand-new
+  `SessionStart` id, both of which clear the stale state). **Stage 3 retires `catch_up`
+  entirely, in the same stage as the jump-to-waiting-session hotkey** (the first
+  non-FLUSH switch) — so the hazard never becomes reachable. The binding constraint
+  (retire `catch_up` no later than the jump hotkey) is satisfied by construction.
