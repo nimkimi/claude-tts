@@ -75,9 +75,28 @@ def test_default_keymap_windows_uses_ctrl_shift_alt(win):
     d = keymap.default_keymap()
     assert d["nav_next"]["mods"] == ["ctrl", "shift", "alt"]
     assert d["mute"]["key"] == "m"
-    # Stage 5: Windows base chord already includes Shift, so +Shift can't differentiate
-    # response-nav from within-nav -> ships UNBOUND on Windows (rebindable by the user).
-    assert "nav_prev_response" not in d and "nav_next_response" not in d
+    # Windows base chord already includes Shift, so response-nav can't be "arrows + Shift"
+    # the way it is on macOS (that chord IS within-response nav). It gets distinct KEYS
+    # under the SAME chord instead: Ctrl+Shift+Alt+[ / ] (mirrors macOS's override).
+    assert d["nav_prev_response"] == {"key": "[", "mods": ["ctrl", "shift", "alt"]}
+    assert d["nav_next_response"] == {"key": "]", "mods": ["ctrl", "shift", "alt"]}
+
+
+def test_windows_default_bindings_are_collision_free(win):
+    # Every Windows default rides the same Ctrl+Shift+Alt chord, so each action MUST use a
+    # distinct key. Response-nav's [ / ] must not collide with the arrows or letters.
+    chords = [(b["key"], tuple(b["mods"])) for b in keymap.default_keymap().values()]
+    assert len(chords) == len(set(chords))
+
+
+def test_response_nav_resolves_on_windows(win):
+    resolved = keymap.resolve_keymap(
+        {"nav_next_response": {"key": "]", "mods": ["ctrl", "shift", "alt"]}})
+    row = resolved[0]
+    assert row["action"] == "nav_next_response"
+    assert row["keyCode"] == 0xDD                            # VK_OEM_6 (])
+    assert row["modifiers"] == (0x0002 | 0x0004 | 0x0001)    # ctrl|shift|alt
+    assert json.loads(row["message"]) == {"type": "nav", "to": "next_response"}
 
 
 # --- resolve_keymap ---------------------------------------------------------
