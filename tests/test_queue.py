@@ -90,25 +90,6 @@ def test_clear_empties_queue():
     assert q.pop_next() is None
 
 
-def test_flush_session_removes_only_that_session_preserving_order():
-    q = SpeechQueue()
-    q.enqueue(_item(1, session="A", text="a1"))
-    q.enqueue(_item(2, session="B", text="b1"))
-    q.enqueue(_item(3, session="A", text="a2"))
-    q.enqueue(_item(4, session="B", text="b2"))
-    q.flush_session("A")
-    assert len(q) == 2
-    assert q.pop_next().text == "b1"
-    assert q.pop_next().text == "b2"
-
-
-def test_flush_session_unknown_session_is_noop():
-    q = SpeechQueue()
-    q.enqueue(_item(1, session="A"))
-    q.flush_session("does-not-exist")
-    assert len(q) == 1
-
-
 def test_clear_returns_dropped_items():
     from sonari.queue import SpeechQueue, SpeechItem
     q = SpeechQueue()
@@ -119,11 +100,4 @@ def test_clear_returns_dropped_items():
     assert len(q) == 0
 
 
-def test_flush_session_returns_dropped_items():
-    from sonari.queue import SpeechQueue, SpeechItem
-    q = SpeechQueue()
-    q.enqueue(SpeechItem(1, "a", "prose", "A.", False))
-    q.enqueue(SpeechItem(2, "b", "prose", "B.", False))
-    dropped = q.flush_session("a")
-    assert [i.id for i in dropped] == [1]
-    assert len(q) == 1
+

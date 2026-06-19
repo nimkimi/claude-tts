@@ -41,15 +41,14 @@ def make_daemon(verbosity: str = "everything", foreground: "str | None" = "fg"):
     """Build a SpeechDaemon. The returned `queue` is the FOREGROUND session's own
     stream queue (where its items now land and where the loop drains), so most
     single-session tests need no change. Use stream_queue() for other sessions."""
-    shared = SpeechQueue()            # still required by the constructor in Stage 2
     speaker = FakeSpeaker()
     sessions = SessionManager()
     if foreground is not None:
         sessions.set_foreground(foreground)
     config = {k: (v.copy() if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
     config["verbosity"] = verbosity
-    daemon = SpeechDaemon(shared, speaker, sessions, config)
-    queue = daemon._stream(foreground).queue if foreground is not None else shared
+    daemon = SpeechDaemon(speaker, sessions, config)
+    queue = daemon._stream(foreground).queue if foreground is not None else SpeechQueue()
     return daemon, queue, speaker, sessions, config
 
 

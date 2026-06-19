@@ -17,14 +17,12 @@ def test_flush_resets_playback_but_keeps_mute():
     daemon.handle_message(_msg(MsgType.PROSE, "A", delta="hello there. ", index=0, final=False))
     st = daemon._stream("A")
     assert st.muted is True
-    assert st.open_msg is True
     # Verify buffer is non-empty before FLUSH (so post-FLUSH == [] actually tests reset)
     assert st.prose_buffer != []
 
     daemon.handle_message(_msg(MsgType.FLUSH, "A"))
 
     st = daemon._stream("A")
-    assert st.open_msg is False          # playback reset
     assert st.prose_buffer == []
     assert st.muted is True              # sticky preserved across a new prompt
 
