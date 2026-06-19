@@ -54,6 +54,7 @@ class SpeechDaemon:
         self._current_item = None                 # item being spoken right now
         self._conn_sem = threading.BoundedSemaphore(_MAX_CONN_THREADS)
         self._reload_lock = threading.Lock()      # serializes off-lock hotkey reloads
+        self._last_spoken_session = None          # for folder attribution on switch
 
     def _alloc_id(self) -> int:
         self._next_id += 1
@@ -68,7 +69,8 @@ class SpeechDaemon:
 
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
                  entry=None, mute_exempt: bool = False,
-                 pause_exempt: bool = False, at_front: bool = False) -> None:
+                 pause_exempt: bool = False, at_front: bool = False,
+                 names_session: bool = False) -> None:
         item = SpeechItem(
             id=self._alloc_id(),
             session=session,
@@ -77,6 +79,7 @@ class SpeechDaemon:
             is_decision=is_decision,
             mute_exempt=mute_exempt,
             pause_exempt=pause_exempt,
+            names_session=names_session,
         )
         st = self._stream(session)
         if entry is not None:
@@ -158,6 +161,27 @@ class SpeechDaemon:
             (blocked if st.queue.has_decision() else prose).append(sess)
         ordered = blocked + prose
         return ordered[0] if ordered else None
+
+    def _attributed_text(self, item) -> str:
+        """item.text, prefixed with the session's folder name when the voice switches
+        to a session different from the one last spoken — so the user knows who's
+        talking. Never prefixes the very first utterance (last == None), a self-naming
+        cue (names_session), or a control cue (mute_exempt). Updates _last_spoken_session.
+        Called under self._lock from the speak loop."""
+        text = item.text
+        if item.names_session:
+            # Self-naming cue (e.g. "Jumping to backend." / "Pinned backend."):
+            # claim this session as last-spoken so the NEXT item from it is
+            # NOT prefixed again — suppresses the double-announce.
+            self._last_spoken_session = item.session
+        elif not item.mute_exempt:
+            if (self._last_spoken_session is not None
+                    and item.session != self._last_spoken_session):
+                folder = self.sessions.folder(item.session)
+                if folder:
+                    text = "{0}. {1}".format(folder, item.text)
+            self._last_spoken_session = item.session
+        return text
 
     def note_spoken(self, item, completed: bool) -> None:
         """Speak-loop bookkeeping: confirm (or decline) the heard-marker for a
@@ -503,7 +527,8 @@ class SpeechDaemon:
                 text = "Pinned {0}.".format(folder) if folder else "Pinned."
             else:
                 text = "Auto."
-            self._enqueue(fg, "prose", text, False, mute_exempt=True)
+            self._enqueue(fg, "prose", text, False, mute_exempt=True,
+                          names_session=(action == "pinned"))
             return None
 
         if t == MsgType.RELOAD_KEYMAP:
@@ -566,7 +591,7 @@ class SpeechDaemon:
             preamble = ("Jumping to {0}.".format(folder) if folder
                         else "Jumping to another session.")
             self._enqueue(target, "prose", preamble, False,
-                          mute_exempt=True, at_front=True)
+                          mute_exempt=True, at_front=True, names_session=True)
             return None
 
         if t == MsgType.JUMP_DECISION:
@@ -884,10 +909,16 @@ class SpeechDaemon:
             muted = (item is not None
                      and ist is not None and ist.muted
                      and not item.mute_exempt)
+            text = None
             if muted:
                 # Muted session: drop without speaking; release the claim.
                 self._current_item = None
                 self._pending_heard.pop(item.id, None)
+            elif item is not None:
+                # Compute the attributed text under the lock so _last_spoken_session
+                # is updated atomically with the pop — a concurrent JUMP_WAITING or
+                # SET_FOREGROUND can't race the attribution read.
+                text = self._attributed_text(item)
         if item is None:
             # Foreground stream empty (or no foreground): wait until woken.
             self._wake.wait(self._poll_interval)
@@ -896,7 +927,7 @@ class SpeechDaemon:
         if muted:
             return
         try:
-            completed = self.speaker.speak(item.text, cancel_epoch=cancel_epoch)
+            completed = self.speaker.speak(text, cancel_epoch=cancel_epoch)
         except Exception:  # noqa: BLE001 - one bad utterance must not abort the item
             self._signal_speak_failure()
             completed = False

@@ -58,6 +58,16 @@ def _pump_one(daemon):
     daemon._speak_loop_once()
 
 
+def _drain(daemon):
+    """Run the speak loop until the foreground stream's queue is empty (no thread)."""
+    for _ in range(1000):
+        fg = daemon.sessions.foreground()
+        st = daemon._streams.get(fg)
+        if st is None or len(st.queue) == 0:
+            break
+        daemon._speak_loop_once()
+
+
 def test_enqueue_lands_in_the_sessions_own_stream_queue():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     daemon._enqueue("a", "prose", "for a", False)
@@ -187,3 +197,37 @@ def test_waiting_rearms_after_new_prompt():
     daemon.handle_message(_msg(MsgType.FLUSH, "b"))      # new prompt to b (still background)
     _prose(daemon, "b", "turn two. ")
     assert speaker.earcons.count("waiting") == 2
+
+
+# --- session attribution ("who's speaking?") (Task 4) ------------------------
+
+def test_no_folder_prefix_on_the_first_utterance_single_session():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    sessions.register("a", cwd="/x/frontend")
+    _prose(daemon, "a", "one. two. ")
+    _drain(daemon)                                       # speak loop processes a's items
+    assert speaker.spoken == ["one.", "two."]            # never labeled — single session
+
+def test_voice_announces_folder_when_switching_sessions():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    sessions.register("a", cwd="/x/frontend")
+    sessions.register("b", cwd="/x/backend")
+    _prose(daemon, "a", "alpha. ")
+    _drain(daemon)                                       # _last_spoken -> a
+    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "b", cwd="/x/backend"))
+    _prose(daemon, "b", "beta. ")
+    _drain(daemon)
+    assert "backend. beta." in speaker.spoken            # folder prefix on the switch
+
+def test_jump_preamble_does_not_double_announce_the_folder():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    sessions.register("a", cwd="/x/frontend")
+    sessions.register("b", cwd="/x/backend")
+    _prose(daemon, "a", "alpha. ")
+    _drain(daemon)                                       # _last_spoken -> a
+    _prose(daemon, "b", "beta. ")                        # b accumulates
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
+    _drain(daemon)
+    assert "Jumping to backend." in speaker.spoken
+    assert "beta." in speaker.spoken                     # the prose itself is NOT prefixed
+    assert "backend. beta." not in speaker.spoken        # no double-announce

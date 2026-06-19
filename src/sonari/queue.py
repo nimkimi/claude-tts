@@ -13,6 +13,7 @@ class SpeechItem:
     is_decision: bool  # True for choice|plan|permission
     mute_exempt: bool = False  # spoken even when the session is muted (e.g. "muted")
     pause_exempt: bool = False  # spoken even while the loop is paused (e.g. "Paused.")
+    names_session: bool = False  # text already speaks the session's folder (jump/pin cue)
 
 
 class SpeechQueue:
