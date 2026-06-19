@@ -98,6 +98,37 @@ class HotkeyBackend(abc.ABC):
         return []
 
 
+class RaiseBackend(abc.ABC):
+    """Bring a session's terminal window/tab to the foreground (focus-follow)."""
+
+    @abc.abstractmethod
+    def raise_session(self, identity) -> bool:
+        """Raise the window/tab for *identity* (a sessions.Identity). Return True
+        only on a confirmed raise; False for unsupported/missing/denied/failed.
+        Safe to call off the main thread; must never raise or hang."""
+
+    def supports(self, identity) -> bool:
+        """True if this backend can attempt a raise for *identity* (right terminal
+        + the needed handle present). Default: no."""
+        return False
+
+    def check_grant(self) -> str:
+        """OS permission state for the raise mechanism: 'granted' | 'denied' |
+        'unknown' | 'unsupported'. Default: 'unsupported'."""
+        return "unsupported"
+
+    def doctor_rows(self) -> "list":
+        """Diagnostic [(name, ok, detail), ...] rows. Default: none."""
+        return []
+
+
+class NoopRaiseBackend(RaiseBackend):
+    """Inert backend for platforms without focus-follow (Windows/Linux/tests)."""
+
+    def raise_session(self, identity) -> bool:
+        return False
+
+
 class SupervisorBackend(abc.ABC):
     @abc.abstractmethod
     def install(self, python: str, app_dir: str) -> None: ...
@@ -135,3 +166,4 @@ class PlatformBackend:
     earcon: EarconBackend
     hotkey: HotkeyBackend
     supervisor: SupervisorBackend
+    raise_backend: RaiseBackend

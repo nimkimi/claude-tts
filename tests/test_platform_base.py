@@ -1,6 +1,7 @@
 import abc
 import pytest
 from sonari.platform import base
+from sonari.platform.base import NoopRaiseBackend
 
 
 def test_backends_are_abstract():
@@ -32,7 +33,8 @@ def test_platform_backend_bundles_the_four():
         def launch_spec(self): return ([], {})
         def doctor_rows(self): return []
     pb = base.PlatformBackend(tts=_Tts(), earcon=_Ear(),
-                              hotkey=_Hk(), supervisor=_Sup())
+                              hotkey=_Hk(), supervisor=_Sup(),
+                              raise_backend=NoopRaiseBackend())
     assert isinstance(pb.tts, base.TtsBackend)
     assert isinstance(pb.supervisor, base.SupervisorBackend)
 

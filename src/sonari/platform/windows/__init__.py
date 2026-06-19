@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sonari.platform.base import PlatformBackend
+from sonari.platform.base import PlatformBackend, NoopRaiseBackend
 from sonari.platform.windows.tts import WinTtsBackend
 from sonari.platform.windows.earcon import WinEarconBackend
 from sonari.platform.windows.hotkeys import WinHotkeyBackend
@@ -13,4 +13,5 @@ def make_backend() -> PlatformBackend:
         earcon=WinEarconBackend(),
         hotkey=WinHotkeyBackend(),
         supervisor=WinSupervisorBackend(),
+        raise_backend=NoopRaiseBackend(),
     )
