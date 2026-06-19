@@ -64,8 +64,8 @@ def default_keymap() -> dict:
 
     The `_DEFAULT_KEYS` actions all share the platform's `default_mods()` chord.
     `extra_default_bindings()` adds any per-platform binding that the uniform chord
-    can't express (Stage 5: response-nav needs +Shift over the arrows on macOS; on
-    platforms whose base chord already includes Shift it returns {} -> unbound)."""
+    can't express (response-nav = arrows +Shift on macOS's Ctrl+Cmd; on Windows the base
+    chord already spends Shift, so response-nav gets distinct keys [ / ] under it)."""
     from sonari.platform import get_platform
     hk = get_platform().hotkey
     mods = hk.default_mods()
