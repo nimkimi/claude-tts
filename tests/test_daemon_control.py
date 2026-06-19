@@ -172,3 +172,32 @@ def test_repeat_drives_speak_path():
     finally:
         daemon.stop()
         t.join(timeout=2.0)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Cut-on-switch (new prompt)
+# ---------------------------------------------------------------------------
+
+def test_new_prompt_cuts_a_different_sessions_current_utterance():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon._current_item = SpeechItem(id=1, session="a", kind="prose",
+                                      text="long answer.", is_decision=False)
+    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "b", cwd="/x/b"))
+    daemon.handle_message(_msg(MsgType.FLUSH, "b"))
+    assert speaker.cancels == 1                          # a's sentence cut
+
+def test_new_prompt_does_not_cut_when_pinned_elsewhere():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon.handle_message(_msg(MsgType.PIN_TOGGLE, "a"))   # pin a
+    daemon._current_item = SpeechItem(id=1, session="a", kind="prose",
+                                      text="answer.", is_decision=False)
+    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "b", cwd="/x/b"))
+    daemon.handle_message(_msg(MsgType.FLUSH, "b"))
+    assert speaker.cancels == 0                          # a stays — pinned
+
+def test_new_prompt_same_session_still_cuts():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon._current_item = SpeechItem(id=1, session="a", kind="prose",
+                                      text="answer.", is_decision=False)
+    daemon.handle_message(_msg(MsgType.FLUSH, "a"))
+    assert speaker.cancels == 1                          # existing behavior preserved

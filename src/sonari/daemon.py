@@ -416,7 +416,14 @@ class SpeechDaemon:
             st = self._stream(session)
             self._drop_pending(st.queue.clear())
             cur = self._current_item
-            if cur is not None and cur.session == session:
+            # Cut the current utterance on a new prompt: same-session (the new prompt
+            # supersedes the old reply) OR a cross-session switch where this prompt's
+            # session is now the foreground (pin-aware) — so the voice moves to it
+            # immediately instead of finishing the old session's sentence (§4.2
+            # cut-on-switch). SESSION_START sends no FLUSH, so a bare new session
+            # never cuts.
+            if cur is not None and (cur.session == session
+                                    or self.sessions.foreground() == session):
                 self.speaker.cancel()
             st.reset_for_new_prompt()
             self.history.reset(session)
