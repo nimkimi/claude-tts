@@ -134,6 +134,21 @@ class SpeechDaemon:
         for it in items:
             self._pending_heard.pop(it.id, None)
 
+    def _waiting_target(self, exclude):
+        """The background session jump-to-waiting should switch to, or None.
+
+        Considers only streams with a non-empty, non-muted queue (live backlog —
+        Stage 3 keys off the queue, not history). A stream holding an unplayed
+        decision (choice|plan|permission) ranks ahead of prose-only ones; ties break
+        by session insertion order. Excludes *exclude* (the current foreground)."""
+        blocked, prose = [], []
+        for sess, st in self._streams.items():          # insertion-ordered
+            if sess == exclude or st.muted or len(st.queue) == 0:
+                continue
+            (blocked if st.queue.has_decision() else prose).append(sess)
+        ordered = blocked + prose
+        return ordered[0] if ordered else None
+
     def note_spoken(self, item, completed: bool) -> None:
         """Speak-loop bookkeeping: confirm (or decline) the heard-marker for a
         finished utterance, and release the current-item claim."""
@@ -517,6 +532,31 @@ class SpeechDaemon:
                 self._enqueue(fg, "choice", text, False)
             else:
                 self._enqueue(fg, "prose", "No options right now.", False)
+            return None
+
+        if t == MsgType.JUMP_WAITING:
+            fg = self.sessions.foreground()
+            target = self._waiting_target(exclude=fg)
+            if target is None:
+                # Nothing waiting: say so (mute_exempt so it's always heard). With no
+                # foreground to speak through, fall back to an error earcon.
+                if fg is not None:
+                    self._enqueue(fg, "prose", "No session waiting.", False,
+                                  mute_exempt=True)
+                else:
+                    self.speaker.earcon("error")
+                return None
+            # Explicit move: clear any pin, switch the VOICE (not OS focus) to the
+            # target, cut the current utterance so the switch is immediate, and lead
+            # with a spoken folder label. The foreground-driven loop then drains the
+            # target's accumulated backlog.
+            self.sessions.focus(target)
+            self.speaker.cancel()
+            folder = self.sessions.folder(target)
+            preamble = ("Jumping to {0}.".format(folder) if folder
+                        else "Jumping to another session.")
+            self._enqueue(target, "prose", preamble, False,
+                          mute_exempt=True, at_front=True)
             return None
 
         if t == MsgType.JUMP_DECISION:
