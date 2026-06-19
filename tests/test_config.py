@@ -11,7 +11,12 @@ def test_defaults_has_documented_top_level_keys():
         "history_cap",
         "backlog_cap",
         "minqueue",
+        "focus_follow",
     }
+
+
+def test_focus_follow_defaults_on():
+    assert DEFAULTS["focus_follow"] is True
 
 
 def test_defaults_scalar_values():

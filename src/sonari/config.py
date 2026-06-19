@@ -14,6 +14,7 @@ DEFAULTS = {
     "history_cap": 200,
     "backlog_cap": 200,
     "minqueue": 1,
+    "focus_follow": True,
 }
 
 
