@@ -809,10 +809,16 @@ class SpeechDaemon:
         else:
             new_idx = min(cur_idx + 1, len(turns) - 1)
         target_turn = turns[new_idx]
-        is_live = (new_idx == len(turns) - 1)
-        st.nav_turn = None if is_live else target_turn
+        at_newest = (new_idx == len(turns) - 1)
+        # Follow live (anchor None) ONLY when the target is the ACTUAL live turn. When the
+        # live turn is empty (FLUSH->first-prose window) it is excluded from turn_ids, so
+        # the newest navigable turn is NOT the live turn — pin the anchor to it instead of
+        # None (which would point at the empty live turn and dead-end within-nav).
+        follow_live = at_newest and target_turn == self.history.current_turn(session)
+        st.nav_turn = None if follow_live else target_turn
         # Relative orientation cue; boundary cues take precedence (Nima's decision).
-        if is_live:
+        # "Back to the latest." fires at the newest navigable response, live or not.
+        if at_newest:
             cue = "Back to the latest."
         elif new_idx == 0:
             cue = "Oldest response."
@@ -821,7 +827,7 @@ class SpeechDaemon:
             cue = "{0} response{1} back.".format(back, "" if back == 1 else "s")
         mids = self.history.message_ids_in_turn(session, target_turn)
         # Anchor the cursor at the START of the target response; None == follow live.
-        st.nav_cursor = None if is_live else (mids[0] if mids else None)
+        st.nav_cursor = None if follow_live else (mids[0] if mids else None)
         self.speaker.cancel()
         self._drop_pending(st.queue.clear())
         self._enqueue(session, "prose", cue, False, mute_exempt=True)
