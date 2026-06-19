@@ -1,7 +1,8 @@
-from sonari.platform.base import PlatformBackend, NoopRaiseBackend
+from sonari.platform.base import PlatformBackend
 from sonari.platform.macos.tts import MacTtsBackend
 from sonari.platform.macos.earcon import MacEarconBackend
 from sonari.platform.macos.hotkeys import MacHotkeyBackend
+from sonari.platform.macos.raiser import MacRaiseBackend
 from sonari.platform.macos.supervisor import MacSupervisorBackend
 
 
@@ -11,5 +12,5 @@ def make_backend() -> PlatformBackend:
         earcon=MacEarconBackend(),
         hotkey=MacHotkeyBackend(),
         supervisor=MacSupervisorBackend(),
-        raise_backend=NoopRaiseBackend(),  # Task 9 swaps this for MacRaiseBackend
+        raise_backend=MacRaiseBackend(),
     )
