@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from sonari.assembler import ProseAssembler
+from sonari.queue import SpeechQueue
 
 
 class SessionStream:
     """All per-session speech state for one Claude Code session, in one place.
 
-    Stage 1 of the per-session-streams redesign: a pure container that replaces
-    the parallel per-session dicts/sets formerly held directly on SpeechDaemon.
-    The speech queue stays shared in Stage 1; per-stream queues arrive in Stage 2.
+    Stage 2 of the per-session-streams redesign: each session owns its own speech
+    queue, and the speak loop plays only the foreground session's stream.
     """
 
     def __init__(self) -> None:
+        self.queue = SpeechQueue()          # this session's own pending-speech queue
         self.assembler = ProseAssembler()
         self.prose_buffer: list = []        # [(text, HistoryEntry)] awaiting minqueue flush
         self.options: "str | None" = None   # last decision text, for reread
@@ -24,8 +25,9 @@ class SessionStream:
 
     def reset_for_new_prompt(self) -> None:
         """A new user prompt (FLUSH): reset playback state with a fresh assembler,
-        but KEEP the sticky flags (muted / warned_immediate / guided), matching the
-        current FLUSH handler exactly."""
+        but KEEP the sticky flags (muted / warned_immediate / guided). Does NOT
+        clear self.queue — the FLUSH handler clears it so it can drop the dropped
+        items' heard-markers."""
         self.assembler = ProseAssembler()
         self.prose_buffer = []
         self.options = None
