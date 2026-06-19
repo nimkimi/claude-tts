@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+
+@dataclass
+class Identity:
+    """Terminal identity captured at SessionStart, used by focus-follow."""
+    term_program: str = ""
+    tty: str = ""
+    iterm_session_id: str = ""
+
 
 def _basename(cwd) -> "str | None":
     """Portable last path component of *cwd*, handling both / and \\ separators
@@ -20,6 +30,7 @@ class SessionManager:
         self._sessions: "dict[str, str | None]" = {}
         self._foreground: "str | None" = None
         self._pinned: "str | None" = None      # None = auto (follow last prompt)
+        self._identities: "dict[str, Identity]" = {}
 
     def _record(self, session: str, cwd) -> None:
         folder = _basename(cwd)
@@ -46,6 +57,7 @@ class SessionManager:
 
     def unregister(self, session: str) -> None:
         self._sessions.pop(session, None)
+        self._identities.pop(session, None)
         if self._foreground == session:
             self._foreground = None
         if self._pinned == session:             # pinned session ended -> auto
@@ -59,6 +71,12 @@ class SessionManager:
 
     def folder(self, session: str) -> "str | None":
         return self._sessions.get(session)
+
+    def set_identity(self, session: str, identity: "Identity") -> None:
+        self._identities[session] = identity
+
+    def identity(self, session: str) -> "Identity | None":
+        return self._identities.get(session)
 
     def focus(self, session: str, cwd=None) -> None:
         """Explicitly move the voice to *session* (the jump-to-waiting hotkey):
