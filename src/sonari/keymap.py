@@ -22,7 +22,7 @@ from sonari.paths import (
 
 # action -> the speechd protocol message it sends. The hotkey-bindable action set
 # is deliberately small: navigation, play/pause, mute, and speech-rate. (stop /
-# repeat / skip stay reachable via the CLI; they are just not hotkey actions.)
+# skip stay reachable via the CLI; they are just not hotkey actions.)
 ACTION_MESSAGES = {
     # Message-cursor navigation over the current turn (next/prev/first/last item).
     "nav_next": {"type": "nav", "to": "next"},

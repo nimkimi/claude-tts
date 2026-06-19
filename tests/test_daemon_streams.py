@@ -217,6 +217,44 @@ def test_jump_preamble_does_not_double_announce_the_folder():
     assert "backend. beta." not in speaker.spoken        # no double-announce
 
 
+def test_minqueue_waiting_earcon_fires_at_flush_not_on_chunk():
+    # With minqueue>1 the "waiting" earcon must fire from _flush_prose_buffer
+    # (when the prose actually reaches the queue), NOT when the chunk arrives.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    config["minqueue"] = 3
+    # Send ONE sentence (fewer than minqueue=3) to background session "b".
+    # At this point the buffer is not yet flushed, so earcon must NOT have fired.
+    _prose(daemon, "b", "one sentence. ")
+    assert "waiting" not in speaker.earcons, (
+        "earcon fired on chunk production, not at flush: earcons={0}".format(speaker.earcons)
+    )
+    assert len(stream_queue(daemon, "b")) == 0, (
+        "queue should still be empty before flush: {0}".format(len(stream_queue(daemon, "b")))
+    )
+    # Trigger the turn-boundary flush via the turn_done earcon for session "b".
+    daemon.handle_message(_msg(MsgType.EARCON, "b", kind="turn_done"))
+    assert speaker.earcons.count("waiting") == 1, (
+        "expected exactly 1 waiting earcon after flush, got: {0}".format(speaker.earcons)
+    )
+    assert len(stream_queue(daemon, "b")) > 0, (
+        "queue must be non-empty after flush"
+    )
+
+
+def test_jump_waiting_with_no_foreground_fires_error_earcon():
+    # JUMP_WAITING with foreground=None and nothing waiting must play the
+    # error earcon only (no "No session waiting." prose, which requires a
+    # foreground session to speak through).
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, "irrelevant"))
+    assert speaker.earcons == ["error"], (
+        "expected ['error'], got: earcons={0}".format(speaker.earcons)
+    )
+    assert speaker.spoken == [], (
+        "expected no spoken text, got: {0}".format(speaker.spoken)
+    )
+
+
 def test_attribution_survives_pause_on_switch():
     # Regression: if a PAUSE interrupts the first post-switch utterance, the
     # _last_spoken_session commit must be rolled back so the resumed utterance
