@@ -476,7 +476,11 @@ class SpeechDaemon:
             fg = self.sessions.foreground()
             if fg is None:
                 return None
-            self._nav(fg, msg.get("to", "prev"))
+            to = msg.get("to", "prev")
+            if to in ("prev_response", "next_response"):
+                self._nav_response(fg, to)
+            else:
+                self._nav(fg, to)
             return None
 
         if t == MsgType.PAUSE:
@@ -782,6 +786,46 @@ class SpeechDaemon:
         self._drop_pending(self._stream(session).queue.clear())
         # Seek-and-play: enqueue the target item AND every later one.
         for mid in ids[new:]:
+            for e in self.history.entries_for_message(session, mid):
+                self._enqueue(session, e.kind, e.text, False, entry=e)
+
+    def _nav_response(self, session: str, direction: str) -> None:
+        """Response-to-response navigation (Stage 5). Move the turn anchor a whole
+        response, read the target response from its start (seek-and-play), and lead with
+        a relative orientation cue. Clamps at the oldest/latest. Read-only — replays
+        stored text, never re-triggers the agent."""
+        st = self._stream(session)
+        turns = self.history.turn_ids(session)
+        if len(turns) < 2:
+            # 0 or 1 navigable responses -> nothing to move between.
+            cue = "Nothing to navigate yet." if not turns else "No other response."
+            self._enqueue(session, "prose", cue, False, mute_exempt=True)
+            return
+        # Current anchored index (None anchor == live == the latest turn).
+        cur_turn = st.nav_turn
+        cur_idx = turns.index(cur_turn) if cur_turn in turns else len(turns) - 1
+        if direction == "prev_response":
+            new_idx = max(cur_idx - 1, 0)
+        else:
+            new_idx = min(cur_idx + 1, len(turns) - 1)
+        target_turn = turns[new_idx]
+        is_live = (new_idx == len(turns) - 1)
+        st.nav_turn = None if is_live else target_turn
+        # Relative orientation cue; boundary cues take precedence (Nima's decision).
+        if is_live:
+            cue = "Back to the latest."
+        elif new_idx == 0:
+            cue = "Oldest response."
+        else:
+            back = (len(turns) - 1) - new_idx
+            cue = "{0} response{1} back.".format(back, "" if back == 1 else "s")
+        mids = self.history.message_ids_in_turn(session, target_turn)
+        # Anchor the cursor at the START of the target response; None == follow live.
+        st.nav_cursor = None if is_live else (mids[0] if mids else None)
+        self.speaker.cancel()
+        self._drop_pending(st.queue.clear())
+        self._enqueue(session, "prose", cue, False, mute_exempt=True)
+        for mid in mids:
             for e in self.history.entries_for_message(session, mid):
                 self._enqueue(session, e.kind, e.text, False, entry=e)
 

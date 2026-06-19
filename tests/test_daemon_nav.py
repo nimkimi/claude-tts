@@ -216,3 +216,72 @@ def test_within_nav_falls_back_to_live_when_anchor_turn_evicted():
     _nav(daemon, "first")
     assert [s.text for s in _drain(queue)] == ["Live one.", "Live two."]   # navigated LIVE
     assert daemon._stream("fg").nav_turn is None                           # anchor cleared
+
+
+def _responses(daemon, session, texts):
+    # Each FLUSH opens a new turn; each prose is that turn's single response.
+    for i, t in enumerate(texts):
+        daemon.handle_message({"type": "flush", "session": session})
+        daemon.handle_message({"type": "prose", "session": session,
+                               "delta": t, "index": i, "final": True})
+
+
+def test_prev_response_reads_previous_response_with_relative_cue():
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    _responses(daemon, "fg", ["R1.", "R2.", "R3."])        # turns: live = R3
+    _drain(queue)
+    daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})
+    assert [s.text for s in _drain(queue)] == ["1 response back.", "R2."]
+
+
+def test_prev_response_clamps_at_oldest_with_boundary_cue():
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    _responses(daemon, "fg", ["R1.", "R2.", "R3."])
+    _drain(queue)
+    daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})  # R2
+    _drain(queue)
+    daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})  # R1 (oldest)
+    assert [s.text for s in _drain(queue)] == ["Oldest response.", "R1."]
+    daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})  # clamp
+    assert [s.text for s in _drain(queue)] == ["Oldest response.", "R1."]
+
+
+def test_next_response_returns_to_latest_with_boundary_cue():
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    _responses(daemon, "fg", ["R1.", "R2.", "R3."])
+    _drain(queue)
+    daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})  # R2
+    _drain(queue)
+    daemon.handle_message({"type": "nav", "to": "next_response", "session": "fg"})  # back to live R3
+    assert [s.text for s in _drain(queue)] == ["Back to the latest.", "R3."]
+    assert daemon._stream("fg").nav_turn is None           # anchored back to live
+
+
+def test_response_nav_with_one_response_says_no_other():
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    _responses(daemon, "fg", ["Only."])
+    _drain(queue)
+    daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})
+    assert [s.text for s in _drain(queue)] == ["No other response."]
+
+
+def test_response_nav_with_no_history_says_nothing_to_navigate():
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})
+    assert [s.text for s in _drain(queue)] == ["Nothing to navigate yet."]
+
+
+def test_live_prose_while_parked_on_past_response_enqueues_after_replay():
+    # Advisor pin: parked on a past response, new live prose for the live turn enqueues
+    # AFTER the replayed items (no buffering, no yank to live). Same invariant as
+    # within-turn nav's "streaming continues after replay".
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    _responses(daemon, "fg", ["R1.", "R2.", "R3."])
+    _drain(queue)
+    daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})  # park on R2
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "Live more.", "index": 9, "final": True})        # live (R3) prose
+    texts = [s.text for s in _drain(queue)]
+    assert "R2." in texts and "Live more." in texts
+    assert texts.index("Live more.") > texts.index("R2.")    # after the replay, not interleaved
+    assert daemon._stream("fg").nav_turn is not None         # still parked, not yanked to live
