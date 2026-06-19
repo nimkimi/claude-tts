@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from sonari import hooks_entry
 from sonari.hooks_entry import handle_event
 from sonari.protocol import PROTOCOL_VERSION, MsgType
 
@@ -247,10 +248,14 @@ def test_user_prompt_submit_sets_foreground_then_flush():
 def test_session_start_carries_plugin_version_and_root_from_env(monkeypatch):
     monkeypatch.setenv("CLAUDE_PLUGIN_VERSION", "0.4.0")
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", "/plug/root")
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    monkeypatch.delenv("ITERM_SESSION_ID", raising=False)
+    monkeypatch.setattr(hooks_entry.ttyutil, "controlling_tty", lambda: "")
     assert handle_event("SessionStart", {"session_id": "sess-9"}) == [
         {"v": PROTOCOL_VERSION, "type": MsgType.SET_FOREGROUND, "session": "sess-9", "cwd": ""},
         {"v": PROTOCOL_VERSION, "type": MsgType.SESSION_START, "session": "sess-9", "cwd": "",
-         "plugin_version": "0.4.0", "plugin_root": "/plug/root"},
+         "plugin_version": "0.4.0", "plugin_root": "/plug/root",
+         "term_program": "", "iterm_session_id": "", "tty": ""},
     ]
 
 
@@ -296,3 +301,39 @@ def test_missing_cwd_defaults_to_empty_string():
     msgs = handle_event("UserPromptSubmit", {"session_id": "s1"})
     fg = [m for m in msgs if m["type"] == "set_foreground"]
     assert fg and fg[0]["cwd"] == ""
+
+
+def _session_start_msg(msgs):
+    return next(m for m in msgs if m.get("type") == MsgType.SESSION_START)
+
+
+def test_session_start_captures_identity(monkeypatch):
+    monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
+    monkeypatch.setenv("ITERM_SESSION_ID", "")
+    monkeypatch.setattr(hooks_entry.ttyutil, "controlling_tty", lambda: "/dev/ttys005")
+    msgs = hooks_entry.handle_event("SessionStart", {"session_id": "s1", "cwd": "/x"})
+    m = _session_start_msg(msgs)
+    assert m["term_program"] == "Apple_Terminal"
+    assert m["tty"] == "/dev/ttys005"
+    assert m["iterm_session_id"] == ""
+
+
+def test_session_start_captures_iterm_id(monkeypatch):
+    monkeypatch.setenv("TERM_PROGRAM", "iTerm.app")
+    monkeypatch.setenv("ITERM_SESSION_ID", "w0t0p0:ABC-123")
+    monkeypatch.setattr(hooks_entry.ttyutil, "controlling_tty", lambda: "")
+    m = _session_start_msg(
+        hooks_entry.handle_event("SessionStart", {"session_id": "s1", "cwd": "/x"}))
+    assert m["term_program"] == "iTerm.app"
+    assert m["iterm_session_id"] == "w0t0p0:ABC-123"
+
+
+def test_session_start_missing_env_yields_empty_strings(monkeypatch):
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    monkeypatch.delenv("ITERM_SESSION_ID", raising=False)
+    monkeypatch.setattr(hooks_entry.ttyutil, "controlling_tty", lambda: "")
+    m = _session_start_msg(
+        hooks_entry.handle_event("SessionStart", {"session_id": "s1", "cwd": "/x"}))
+    assert m["term_program"] == ""
+    assert m["tty"] == ""
+    assert m["iterm_session_id"] == ""
