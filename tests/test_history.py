@@ -99,3 +99,34 @@ def test_message_ids_and_entries_for_message():
     assert [e.text for e in h.entries_for_message("s", 0)] == ["a1", "a2"]
     assert [e.text for e in h.entries_for_message("s", 1)] == ["b1"]
     assert h.message_ids("missing") == []
+
+
+def test_record_stamps_current_turn_id():
+    h = SessionHistory()
+    e0 = h.record("s", "prose", "a")
+    assert e0.turn_id == 0                      # default turn before any start_turn
+    h.start_turn("s")
+    e1 = h.record("s", "prose", "b")
+    assert e1.turn_id == 1                      # new turn after start_turn
+    assert e0.turn_id == 0                      # prior entry unchanged
+
+
+def test_start_turn_starts_a_fresh_message_group():
+    h = SessionHistory()
+    h.record("s", "prose", "a1"); h.end_message("s")
+    h.record("s", "prose", "a2")               # an OPEN group in turn 0 (no end_message)
+    h.start_turn("s")
+    e = h.record("s", "prose", "b1")           # first entry of turn 1
+    assert e.seq == 0                           # fresh group, did not continue a2's group
+    assert e.turn_id == 1
+    assert [x.text for x in h.last_message("s")] == ["b1"]   # its own group
+
+
+def test_start_turn_keeps_prior_entries_unlike_reset():
+    h = SessionHistory()
+    h.record("s", "prose", "old")
+    h.start_turn("s")                          # opens turn 1, KEEPS "old"
+    assert [e.text for e in h.last_message("s")] == ["old"]   # prior turn persists
+    h.reset("s")                               # SESSION_END semantics: forget everything
+    assert h.last_message("s") == []
+    assert h.record("s", "prose", "fresh").turn_id == 0       # reset cleared _turn_id
