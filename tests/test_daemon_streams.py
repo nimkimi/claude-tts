@@ -118,7 +118,10 @@ def test_jump_waiting_switches_to_background_and_announces_folder():
     daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
     assert sessions.foreground() == "b"
     assert speaker.cancels == 1                          # cut-on-switch
-    assert stream_queue(daemon, "b")._items[0].text == "Jumping to backend."
+    # No identity set (and the macOS NoopRaiseBackend won't attempt a raise), so the
+    # preamble names the folder AND appends the bring-forward cue (focus-follow, Task 7).
+    assert stream_queue(daemon, "b")._items[0].text == \
+        "Jumping to backend. Bring it forward to type."
 
 def test_jump_waiting_prefers_a_blocked_session():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
@@ -212,7 +215,9 @@ def test_jump_preamble_does_not_double_announce_the_folder():
     _prose(daemon, "b", "beta. ")                        # b accumulates
     daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
     _drain(daemon)
-    assert "Jumping to backend." in speaker.spoken
+    # No raise will be attempted (no identity / NoopRaiseBackend), so the preamble
+    # carries the bring-forward cue (focus-follow, Task 7).
+    assert "Jumping to backend. Bring it forward to type." in speaker.spoken
     assert "beta." in speaker.spoken                     # the prose itself is NOT prefixed
     assert "backend. beta." not in speaker.spoken        # no double-announce
 

@@ -35,7 +35,7 @@ _MAX_CONN_THREADS = 32
 
 
 class SpeechDaemon:
-    def __init__(self, speaker, sessions, config) -> None:
+    def __init__(self, speaker, sessions, config, raise_service=None) -> None:
         self.speaker = speaker
         self.sessions = sessions
         self.config = config
@@ -56,6 +56,26 @@ class SpeechDaemon:
         self._conn_sem = threading.BoundedSemaphore(_MAX_CONN_THREADS)
         self._reload_lock = threading.Lock()      # serializes off-lock hotkey reloads
         self._last_spoken_session = None          # for folder attribution on switch
+        self.raise_service = raise_service        # lazily built on first jump
+
+    def _raise(self):
+        """The RaiseService, built lazily on first use (so tests can inject a fake
+        via `daemon.raise_service` before any jump). Cached after the first call."""
+        if self.raise_service is None:
+            from sonari.raise_service import RaiseService
+            from sonari.platform import get_platform
+            self.raise_service = RaiseService(get_platform().raise_backend, self.config)
+        return self.raise_service
+
+    def _raise_failed(self, session: str, folder) -> None:
+        """Raise thread reported failure for a still-current jump: tell the user
+        to bring the window forward by hand. Acquires the daemon lock (this runs
+        off the message-handler path)."""
+        text = ("Bring {0} forward to type.".format(folder) if folder
+                else "Bring it forward to type.")
+        with self._lock:
+            self._enqueue(session, "prose", text, False,
+                          mute_exempt=True, at_front=True)
 
     def _alloc_id(self) -> int:
         self._next_id += 1
@@ -443,6 +463,12 @@ class SpeechDaemon:
             self.sessions.set_foreground(session, cwd=msg.get("cwd"))
             if t == MsgType.SESSION_START:
                 self.sessions.register(session, cwd=msg.get("cwd"))
+                from sonari.sessions import Identity
+                self.sessions.set_identity(session, Identity(
+                    term_program=msg.get("term_program", ""),
+                    tty=msg.get("tty", ""),
+                    iterm_session_id=msg.get("iterm_session_id", ""),
+                ))
                 self._maybe_guide_setup(session, msg.get("plugin_version", ""))
             return None
 
@@ -596,10 +622,19 @@ class SpeechDaemon:
             self.sessions.focus(target)
             self.speaker.cancel()
             folder = self.sessions.folder(target)
-            preamble = ("Jumping to {0}.".format(folder) if folder
-                        else "Jumping to another session.")
-            self._enqueue(target, "prose", preamble, False,
+            identity = self.sessions.identity(target)
+            will_raise = self._raise().will_attempt(identity)
+            base = ("Jumping to {0}.".format(folder) if folder
+                    else "Jumping to another session.")
+            if not will_raise:
+                base += " Bring it forward to type."
+            self._enqueue(target, "prose", base, False,
                           mute_exempt=True, at_front=True, names_session=True)
+            if will_raise:
+                gen = self._raise().bump_generation()
+                self._raise().raise_async(
+                    identity, gen,
+                    on_failure=lambda s=target, f=folder: self._raise_failed(s, f))
             return None
 
         if t == MsgType.JUMP_DECISION:
