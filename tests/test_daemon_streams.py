@@ -8,6 +8,10 @@ def _msg(mtype, session, **extra):
     return d
 
 
+def _prose(daemon, session, text, index=0, final=False):
+    daemon.handle_message(_msg(MsgType.PROSE, session, delta=text, index=index, final=final))
+
+
 def test_flush_resets_playback_but_keeps_mute():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     # mute A (sticky) and give it open/streaming + buffered state
@@ -108,3 +112,51 @@ def test_catch_up_routes_cross_session_backlog_into_the_foreground_stream():
         _pump_one(daemon)
     assert speaker.spoken[-1] == "B unheard."
     assert daemon.history.unheard("b") == []          # entry marked heard
+
+
+# --- jump_waiting handler (Task 2) -------------------------------------------
+
+def test_jump_waiting_switches_to_background_and_announces_folder():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    sessions.register("b", cwd="/work/backend")
+    _prose(daemon, "b", "All done. ")                  # b accumulates in the background
+    assert len(stream_queue(daemon, "b")) >= 1
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
+    assert sessions.foreground() == "b"
+    assert speaker.cancels == 1                          # cut-on-switch
+    assert stream_queue(daemon, "b")._items[0].text == "Jumping to backend."
+
+def test_jump_waiting_prefers_a_blocked_session():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    sessions.register("b", cwd="/x/proseonly")
+    sessions.register("c", cwd="/x/blocked")
+    _prose(daemon, "b", "just text. ")
+    daemon.handle_message(_msg(MsgType.CHOICE, "c",
+                               questions=[{"question": "Pick?",
+                                           "options": [{"label": "One"}, {"label": "Two"}]}]))
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
+    assert sessions.foreground() == "c"                  # blocked outranks prose-only
+
+def test_jump_waiting_excludes_current_foreground_backlog():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    _prose(daemon, "a", "my own backlog. ")             # only the foreground has backlog
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
+    assert sessions.foreground() == "a"
+    assert queue._items[-1].text == "No session waiting."
+
+def test_jump_waiting_skips_a_muted_background_session():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon._stream("b").muted = True
+    _prose(daemon, "b", "secret. ")
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
+    assert sessions.foreground() == "a"
+    assert queue._items[-1].text == "No session waiting."
+
+def test_jump_waiting_clears_an_active_pin():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon.handle_message(_msg(MsgType.PIN_TOGGLE, "a"))   # pin a
+    sessions.register("b", cwd="/x/backend")
+    _prose(daemon, "b", "ready. ")
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
+    assert sessions.pinned() is None
+    assert sessions.foreground() == "b"
