@@ -12,6 +12,7 @@ LOG_PATH = SONARI_DIR / "speechd.log"
 KEYMAP_PATH = SONARI_DIR / "keymap.json"
 HOTKEYD_RESOLVED_PATH = SONARI_DIR / "hotkeyd.resolved.json"
 HOTKEYD_BIN_PATH = SONARI_DIR / "sonari-hotkeyd"
+RAISE_BIN_PATH = SONARI_DIR / "sonari-raise"
 INSTALL_RECORD_PATH = SONARI_DIR / "install.json"
 KOKORO_VENV = SONARI_DIR / "venv"   # opt-in uv-managed venv for neural voices
 
