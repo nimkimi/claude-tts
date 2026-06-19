@@ -77,3 +77,20 @@ def test_jump_decision_message_cancels():
     assert speaker.cancels == 1
 
 
+def test_response_nav_action_messages_drive_a_jump():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    for i, t in enumerate(["A.", "B."]):
+        daemon.handle_message(_msg({"type": "flush"}))
+        daemon.handle_message(_msg({"type": "prose", "delta": t, "index": i, "final": True}))
+    # drain live playback
+    while queue.pop_next() is not None:
+        pass
+    daemon.handle_message(_msg(keymap.ACTION_MESSAGES["nav_prev_response"]))
+    texts = []
+    while True:
+        it = queue.pop_next()
+        if it is None:
+            break
+        texts.append(it.text)
+    assert "A." in texts                              # jumped back to the previous response
+
