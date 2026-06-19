@@ -148,10 +148,17 @@ design.
 1. **Extract `SessionStream` container.** Move the per-session dicts into it.
    Pure refactor, behavior-preserving; characterization tests guard it.
 2. **Per-stream queues + foreground-driven speak loop.** The multi-session policy flip:
-   background accumulates instead of being captured. *Dissolves symptom 1 + 3a.*
-3. **Multi-session UX + per-stream controls.** Waiting earcon, switch-&-read hotkey,
-   scope STOP/PAUSE/etc. to the foreground stream; delete the retired guards.
-   *Dissolves symptom 2a.*
+   background accumulates instead of being captured. Also **deletes the retired
+   guards** (`_voice_owner` / `_may_speak` / `_claim_for_decision` / `_owner_open` /
+   `_owner_mid_reply` and the `captured` / `open_msg` fields) — they are dead by
+   construction once selection is foreground-driven, and leaving inert arbitration in
+   the speak-loop file is a correctness hazard. (Moved up from Stage 3: a PR-boundary
+   call, no runtime-behavior delta — the flip is the behavior change either way.)
+   *Dissolves symptom 1 + 3a.*
+3. **Multi-session UX + per-stream controls.** Waiting earcon, switch-&-read hotkey
+   (repurpose `catch_up`), scope STOP/PAUSE/etc. to the foreground stream, and the
+   **cut-on-switch refinement** (§4.2 — Stage 2 lets the current sentence finish on a
+   foreground switch; this stage cuts it). *Dissolves symptom 2a.*
 4. **Persistent transcript.** Stop reset-on-FLUSH; add turn grouping; snap cursor to
    live edge on a new prompt; keep `SESSION_END` clearing. Resolve the §7 seam.
 5. **Two-level navigation.** `nav_prev_response` / `nav_next_response` + within-response
@@ -176,8 +183,8 @@ each carries its own tests, including the spike scenarios promoted to regression
   alert-no-hijack; cross-turn navigation; cursor-snaps-to-live on new prompt.
 - Tests that encode the **old capture policy** are updated (not deleted) with the why
   documented — they assert behavior we are deliberately changing.
-- The full suite (currently **693 passed, 2 skipped**; the 2 need the `[kokoro]`/numpy
-  extra) stays green at every stage.
+- The full suite (after Stage 1: **698 passed, 2 skipped**; the 2 need the
+  `[kokoro]`/numpy extra) stays green at every stage.
 
 ## 10. Risks & constraints
 
