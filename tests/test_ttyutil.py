@@ -4,7 +4,7 @@ from sonari import ttyutil
 def _fake_ps(table):
     # table: {pid: (ppid, tty_raw)}
     def runner(pid):
-        return table.get(pid, (0, "??"))
+        return table.get(pid, (0, "??"))  # default: pid absent from table (test convenience, not emulated OS)
     return runner
 
 
@@ -33,3 +33,11 @@ def test_runner_exception_degrades_to_empty():
     def boom(_pid):
         raise OSError("ps failed")
     assert ttyutil.controlling_tty(pid=100, ps_runner=boom) == ""
+
+
+def test_no_args_uses_default_pid_and_ps():
+    # Exercises production path: os.getpid() + _default_ps (real subprocess).
+    # Result is "" or starts with "/dev/"; call never raises.
+    result = ttyutil.controlling_tty()
+    assert isinstance(result, str)
+    assert result == "" or result.startswith("/dev/"), f"unexpected tty: {result}"
