@@ -17,14 +17,31 @@ class SpeechItem:
 
 
 class SpeechQueue:
-    def __init__(self) -> None:
+    def __init__(self, cap: "int | None" = None) -> None:
         self._items: "deque[SpeechItem]" = deque()
+        self._cap = cap                      # None == unbounded backlog
 
-    def enqueue(self, item: SpeechItem) -> None:
+    def enqueue(self, item: SpeechItem) -> "SpeechItem | None":
+        """Append *item*. When a cap is set and the queue is full, evict and RETURN the
+        oldest NON-decision item so the caller can drop its pending-heard marker (a
+        backgrounded stream must stay memory-bounded). Decision items (plan/choice/
+        permission) are EXEMPT — never silently dropped, so a waiting prompt is preserved;
+        if every queued item is a decision, the queue is allowed to exceed the cap rather
+        than drop one. Returns the evicted item, or None."""
+        evicted = None
+        if self._cap is not None and len(self._items) >= self._cap:
+            for i, it in enumerate(self._items):
+                if not it.is_decision:
+                    evicted = it
+                    del self._items[i]
+                    break
+            # all-decisions: nothing evictable; the queue temporarily exceeds the cap
         self._items.append(item)
+        return evicted
 
     def enqueue_front(self, item: SpeechItem) -> None:
-        """Put *item* at the head — used to resume the utterance paused mid-play."""
+        """Put *item* at the head — used to resume the utterance paused mid-play.
+        Not subject to the cap: it re-inserts an item just popped from this queue."""
         self._items.appendleft(item)
 
     def pop_next(self) -> "SpeechItem | None":

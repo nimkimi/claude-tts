@@ -11,8 +11,8 @@ class SessionStream:
     queue, and the speak loop plays only the foreground session's stream.
     """
 
-    def __init__(self) -> None:
-        self.queue = SpeechQueue()          # this session's own pending-speech queue
+    def __init__(self, queue_cap: "int | None" = None) -> None:
+        self.queue = SpeechQueue(cap=queue_cap)   # this session's own pending-speech queue
         self.assembler = ProseAssembler()
         self.prose_buffer: list = []        # [(text, HistoryEntry)] awaiting minqueue flush
         self.options: "str | None" = None   # last decision text, for reread
