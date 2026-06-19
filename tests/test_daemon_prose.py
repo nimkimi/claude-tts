@@ -137,11 +137,12 @@ def test_flush_resets_assembler_so_next_turn_is_clean():
     # Step 1: partial delta – no sentence terminator, nothing enqueued.
     daemon.handle_message(_prose("fg", "old partial content", 0, False))
     assert len(queue) == 0
+    old_assembler = daemon._stream("fg").assembler
 
     # Step 2: FLUSH – clears queue items and drops the assembler.
     daemon.handle_message(_flush("fg"))
     assert len(queue) == 0
-    assert daemon._stream("fg").assembler is not None   # fresh assembler after FLUSH
+    assert daemon._stream("fg").assembler is not old_assembler   # FLUSH installed a fresh assembler
 
     # Step 3: fresh final message re-using index 0 (new turn, new assembler).
     daemon.handle_message(_prose("fg", "New sentence here.", 0, True))
