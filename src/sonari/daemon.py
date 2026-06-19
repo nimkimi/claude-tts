@@ -740,26 +740,29 @@ class SpeechDaemon:
                 pass
 
     def _nav(self, session: str, to: str) -> None:
-        """Move the per-session message cursor and play from there to the end.
+        """Move the per-session message cursor within the ANCHORED response and play
+        from there to its end. The anchored response is `nav_turn` (None == the live
+        turn); a response jump (`_nav_response`) sets it, a new prompt clears it. If the
+        anchored turn was evicted by the rolling cap, fall back to the live turn.
 
-        The cursor indexes the current turn's messages (history now persists
-        across turns — Stage 4 — but message_ids bounds this to the current
-        turn; cross-turn nav is Stage 5), oldest..newest; absent == the latest.
-        'next'/'prev' step one
-        message and CLAMP at the ends (no wrap; at the newest, 'next' just
-        re-reads it); 'first'/'last' jump to the start/end of the turn. Every
-        move cuts current speech, clears the queue, and reads the target message
-        AND every later one (seek-and-play) so playback continues instead of
-        stopping after a single item. Newly streamed prose enqueues after these
-        and continues seamlessly."""
-        ids = self.history.message_ids(session)
+        The cursor indexes the anchored turn's messages, oldest..newest; absent == the
+        latest. 'next'/'prev' step one message and CLAMP at the ends (no wrap; at the
+        newest, 'next' just re-reads it); 'first'/'last' jump to the start/end. Every
+        move cuts current speech, clears the queue, and reads the target message AND
+        every later one (seek-and-play). Newly streamed prose enqueues after these."""
+        st = self._stream(session)
+        if st.nav_turn is not None and st.nav_turn not in self.history.turn_ids(session):
+            st.nav_turn = None              # anchored turn evicted -> follow live again
+            st.nav_cursor = None
+        if st.nav_turn is None:
+            ids = self.history.message_ids(session)
+        else:
+            ids = self.history.message_ids_in_turn(session, st.nav_turn)
         if not ids:
             self._enqueue(session, "prose", "Nothing to navigate yet.", False)
             return
         n = len(ids)
-        # Anchor on a STABLE message id, not a position: new paragraphs streaming in
-        # append ids without shifting where the cursor points. Unset/stale -> latest.
-        cur_id = self._stream(session).nav_cursor
+        cur_id = st.nav_cursor
         cur = ids.index(cur_id) if cur_id in ids else n - 1
         if to == "next":
             new = min(cur + 1, n - 1)

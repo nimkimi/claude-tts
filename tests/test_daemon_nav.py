@@ -177,3 +177,42 @@ def test_nav_prev_clamps_at_current_turn_start_not_prior_turn():
     texts = [s.text for s in _drain(queue)]
     assert texts == ["Current turn."]
     assert "Prior turn." not in texts
+
+
+def test_flush_resets_nav_turn_anchor():
+    # A new prompt snaps the response anchor back to live (Stage 5).
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    daemon._stream("fg").nav_turn = 5
+    daemon.handle_message({"type": "flush", "session": "fg"})
+    assert daemon._stream("fg").nav_turn is None
+
+
+def test_within_nav_operates_on_anchored_past_turn():
+    # With the anchor on a past turn, within-response nav reads THAT turn, not live.
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "T0 a.", "index": 0, "final": True})   # turn 0
+    daemon.handle_message({"type": "flush", "session": "fg"})              # -> turn 1 (live)
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "T1 a.", "index": 0, "final": True})
+    _drain(queue)
+    daemon._stream("fg").nav_turn = 0          # anchor on the PAST turn
+    daemon._stream("fg").nav_cursor = None
+    _nav(daemon, "first")
+    assert [s.text for s in _drain(queue)] == ["T0 a."]   # the anchored turn, not "T1 a."
+
+
+def test_within_nav_falls_back_to_live_when_anchor_turn_evicted():
+    # Stage 5 (anchor-eviction guard): if the anchored turn was evicted by the rolling
+    # cap mid-session, within-nav falls back to the live turn rather than announcing empty.
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "Live one.", "index": 0, "final": True})
+    daemon.handle_message({"type": "prose", "session": "fg",
+                           "delta": "Live two.", "index": 1, "final": True})
+    _drain(queue)
+    daemon._stream("fg").nav_turn = 999        # an anchor that no longer exists
+    daemon._stream("fg").nav_cursor = None
+    _nav(daemon, "first")
+    assert [s.text for s in _drain(queue)] == ["Live one.", "Live two."]   # navigated LIVE
+    assert daemon._stream("fg").nav_turn is None                           # anchor cleared

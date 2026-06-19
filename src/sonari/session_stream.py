@@ -17,6 +17,8 @@ class SessionStream:
         self.prose_buffer: list = []        # [(text, HistoryEntry)] awaiting minqueue flush
         self.options: "str | None" = None   # last decision text, for reread
         self.nav_cursor = None              # anchored message id (None == latest)
+        self.nav_turn = None                # two-level nav anchor: the turn being navigated
+                                            # (None == the live turn); a new prompt snaps it back
         self.muted = False                  # sticky per-session mute
         self.warned_immediate = False       # warned once about immediate selection
         self.guided = False                 # received the setup-guidance cue once
@@ -31,4 +33,5 @@ class SessionStream:
         self.prose_buffer = []
         self.options = None
         self.nav_cursor = None
+        self.nav_turn = None
         self.waiting_signaled = False
