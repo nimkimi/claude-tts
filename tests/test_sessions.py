@@ -141,3 +141,19 @@ def test_unregister_pinned_session_falls_back_to_auto():
     sm.unregister("s1")
     assert sm.pinned() is None
     assert sm.foreground() is None
+
+
+def test_focus_clears_pin_and_sets_foreground():
+    sm = SessionManager()
+    sm.set_foreground("a")
+    sm.pin_toggle()                       # pin a
+    assert sm.pinned() == "a"
+    sm.focus("b")
+    assert sm.pinned() is None            # explicit jump overrides the pin
+    assert sm.foreground() == "b"
+
+
+def test_focus_records_cwd_folder():
+    sm = SessionManager()
+    sm.focus("b", cwd="/work/backend")
+    assert sm.folder("b") == "backend"

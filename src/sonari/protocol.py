@@ -25,6 +25,7 @@ class MsgType:
     PIN_TOGGLE = "pin_toggle"   # pin/unpin the voice to the current session (#31)
     REPEAT = "repeat"
     JUMP_DECISION = "jump_decision"
+    JUMP_WAITING = "jump_waiting"   # switch the voice to a waiting background session
     CATCH_UP = "catch_up"
     SET_RATE = "set_rate"
     SET_VERBOSITY = "set_verbosity"
