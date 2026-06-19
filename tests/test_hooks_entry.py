@@ -262,6 +262,9 @@ def test_session_start_carries_plugin_version_and_root_from_env(monkeypatch):
 def test_session_start_empty_strings_when_env_unset(monkeypatch):
     monkeypatch.delenv("CLAUDE_PLUGIN_VERSION", raising=False)
     monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    monkeypatch.delenv("ITERM_SESSION_ID", raising=False)
+    monkeypatch.setattr(hooks_entry.ttyutil, "controlling_tty", lambda: "")
     msgs = handle_event("SessionStart", {"session_id": "sess-9"})
     assert msgs[1]["plugin_version"] == ""
     assert msgs[1]["plugin_root"] == ""
