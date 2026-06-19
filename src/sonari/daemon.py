@@ -876,6 +876,8 @@ class SpeechDaemon:
                      and ist is not None and ist.muted
                      and not item.mute_exempt)
             text = None
+            # Snapshot before _attributed_text so we can roll back if pause interrupts.
+            prev = self._last_spoken_session
             if muted:
                 # Muted session: drop without speaking; release the claim.
                 self._current_item = None
@@ -906,8 +908,12 @@ class SpeechDaemon:
                 # A pause interrupted this utterance: re-queue it at the front of ITS
                 # OWN stream so resume picks back up here, and KEEP its _pending_heard
                 # entry (don't note_spoken) so the eventual replay records it as heard.
+                # Roll back the _last_spoken_session commit from _attributed_text so
+                # the re-popped item on resume sees the pre-switch state and re-adds
+                # the folder prefix correctly (pause-attribution-drop regression).
                 self._current_item = None
                 self._stream(item.session).queue.enqueue_front(item)
+                self._last_spoken_session = prev
                 requeued = True
         if not requeued:
             self.note_spoken(item, completed)
