@@ -79,7 +79,7 @@ def test_cycle_verbosity_message_advances():
 
 def test_reread_options_message_works():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
-    daemon._options["fg"] = "Option 1: A."
+    daemon._stream("fg").options = "Option 1: A."
     daemon.handle_message(_msg({"type": "reread_options"}))
     assert queue.pop_next().text == "Option 1: A."
 

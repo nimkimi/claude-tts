@@ -63,14 +63,14 @@ def test_pause_and_resume_cues_are_audible_even_when_muted():
 def test_mute_drops_speech_but_unmute_resumes():
     daemon, queue, speaker, *_ = make_daemon(foreground="fg")
     daemon.handle_message({"type": "mute", "session": "fg"})
-    assert "fg" in daemon._muted_sessions
+    assert daemon._stream("fg").muted
     daemon._speak_loop_once()             # speak the "Session muted." confirmation
     speaker.spoken.clear()
     daemon._enqueue("fg", "prose", "secret", False)
     daemon._speak_loop_once()
     assert speaker.spoken == []           # real content: dropped, not spoken
     daemon.handle_message({"type": "mute", "session": "fg"})
-    assert "fg" not in daemon._muted_sessions
+    assert not daemon._stream("fg").muted
     daemon._speak_loop_once()             # "Session unmuted."
     speaker.spoken.clear()
     daemon._enqueue("fg", "prose", "hello", False)

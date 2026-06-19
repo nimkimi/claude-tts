@@ -136,7 +136,7 @@ def test_reread_after_choice_reenqueues_same_text():
 
 def test_reread_with_no_prior_says_nothing_to_repeat():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
-    assert daemon._options.get("fg") is None
+    assert daemon._streams.get("fg") is None or daemon._stream("fg").options is None
     daemon.handle_message(_msg(MsgType.REREAD_OPTIONS, "fg"))
     item = queue.pop_next()
     assert item is not None
@@ -146,7 +146,7 @@ def test_reread_with_no_prior_says_nothing_to_repeat():
 
 def test_reread_no_foreground_is_noop():
     daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
-    daemon._options["some_session"] = "Option 1: Red."
+    daemon._stream("some_session").options = "Option 1: Red."
     daemon.handle_message(_msg(MsgType.REREAD_OPTIONS))
     assert len(queue) == 0
 
@@ -171,7 +171,7 @@ def test_flush_clears_option_cache():
     ]))
     queue.pop_next()  # drain
     daemon.handle_message(_msg(MsgType.FLUSH, "fg"))
-    assert daemon._options.get("fg") is None
+    assert daemon._stream("fg").options is None
     daemon.handle_message(_msg(MsgType.REREAD_OPTIONS, "fg"))
     assert queue.pop_next().text == "No options right now."
 
@@ -183,7 +183,8 @@ def test_session_end_clears_option_cache():
     ]))
     queue.pop_next()
     daemon.handle_message(_msg(MsgType.SESSION_END, "fg"))
-    assert daemon._options.get("fg") is None
+    st = daemon._streams.get("fg")
+    assert st is None or st.options is None
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +312,8 @@ def test_session_end_resets_immediate_warning():
     # session ends -> the per-session warned flag is cleared (bounds the set,
     # and a reconnect under the same id re-hears the warning)
     daemon.handle_message(_msg(MsgType.SESSION_END, "fg"))
-    assert "fg" not in daemon._warned_immediate
+    st = daemon._streams.get("fg")
+    assert st is None or not st.warned_immediate
     sessions.set_foreground("fg")
     daemon.handle_message(_two_option_choice("fg"))
     assert WARN in queue.pop_next().text

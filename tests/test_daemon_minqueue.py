@@ -104,4 +104,4 @@ def test_new_prompt_flush_discards_buffered_prose():
     daemon.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.FLUSH,
                            "session": "fg"})
     assert len(queue) == 0
-    assert daemon._prose_buffer.get("fg", []) == []   # buffer dropped
+    assert daemon._stream("fg").prose_buffer == []   # buffer dropped
