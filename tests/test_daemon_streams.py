@@ -12,10 +12,14 @@ def test_flush_resets_playback_but_keeps_mute():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     # mute A (sticky) and give it open/streaming + buffered state
     daemon.handle_message(_msg(MsgType.MUTE, "A"))
+    # Raise minqueue so prose buffer accumulates instead of immediately draining
+    config["minqueue"] = 5
     daemon.handle_message(_msg(MsgType.PROSE, "A", delta="hello there. ", index=0, final=False))
     st = daemon._stream("A")
     assert st.muted is True
     assert st.open_msg is True
+    # Verify buffer is non-empty before FLUSH (so post-FLUSH == [] actually tests reset)
+    assert st.prose_buffer != []
 
     daemon.handle_message(_msg(MsgType.FLUSH, "A"))
 
