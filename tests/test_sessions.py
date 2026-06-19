@@ -1,4 +1,26 @@
-from sonari.sessions import SessionManager
+from sonari.sessions import SessionManager, Identity
+
+
+def test_set_and_get_identity():
+    sm = SessionManager()
+    sm.set_identity("s1", Identity(term_program="Apple_Terminal", tty="/dev/ttys005"))
+    ident = sm.identity("s1")
+    assert ident is not None
+    assert ident.term_program == "Apple_Terminal"
+    assert ident.tty == "/dev/ttys005"
+    assert ident.iterm_session_id == ""
+
+
+def test_identity_absent_is_none():
+    assert SessionManager().identity("nope") is None
+
+
+def test_unregister_clears_identity():
+    sm = SessionManager()
+    sm.register("s1")
+    sm.set_identity("s1", Identity(term_program="iTerm.app", iterm_session_id="X"))
+    sm.unregister("s1")
+    assert sm.identity("s1") is None
 
 
 def test_foreground_starts_none():
