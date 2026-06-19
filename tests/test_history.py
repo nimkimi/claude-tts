@@ -71,25 +71,6 @@ def test_complete_groups_remain_navigable():
     assert h.message_ids("s") == [0, 1]
 
 
-def test_other_session_with_unheard_most_recent_first():
-    h = SessionHistory()
-    h.record("a", "prose", "A1.")
-    h.record("b", "prose", "B1.")          # b touched most recently
-    assert h.other_session_with_unheard("fg") == "b"
-    for e in h.unheard("b"):
-        e.heard = True
-    assert h.other_session_with_unheard("fg") == "a"
-    for e in h.unheard("a"):
-        e.heard = True
-    assert h.other_session_with_unheard("fg") is None
-
-
-def test_other_session_excludes_the_given_session():
-    h = SessionHistory()
-    h.record("fg", "prose", "X.")
-    assert h.other_session_with_unheard("fg") is None
-
-
 def test_nth_last_message_walks_back_through_groups():
     from sonari.history import SessionHistory
     h = SessionHistory()

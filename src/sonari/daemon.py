@@ -554,19 +554,6 @@ class SpeechDaemon:
                              name="sonari-keymap-reload", daemon=True).start()
             return None
 
-        if t == MsgType.REPEAT:
-            fg = self.sessions.foreground()
-            if fg is None:
-                return None
-            self._stream(fg).nav_cursor = None   # repeat returns to the latest message
-            entries = self.history.last_message(fg)
-            if not entries:
-                self._enqueue(fg, "prose", "Nothing to repeat.", False)
-                return None
-            for e in entries:
-                self._enqueue(fg, e.kind, e.text, False, entry=e)
-            return None
-
         if t == MsgType.REREAD_OPTIONS:
             fg = self.sessions.foreground()
             if fg is None:
@@ -605,8 +592,8 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.JUMP_DECISION:
-            # Mark the cancelled current item heard and drop the heard-markers of the
-            # skipped prose, so a later CATCH_UP doesn't replay them out of order (M6).
+            # Mark the cancelled current item heard and clear heard-markers of the
+            # skipped prose items so they don't linger in unheard() (M6).
             cur = self._current_item
             if cur is not None:
                 entry = self._pending_heard.get(cur.id)
@@ -617,37 +604,6 @@ class SpeechDaemon:
             if st is not None:
                 self._drop_pending(st.queue.jump_to_decision())
             self.speaker.cancel()
-            return None
-
-        if t == MsgType.CATCH_UP:
-            fg = self.sessions.foreground()
-            if fg is None:
-                return None
-            entries = self.history.unheard(fg)
-            preamble = None
-            if not entries:
-                other = self.history.other_session_with_unheard(fg)
-                if other is not None:
-                    entries = self.history.unheard(other)
-                    preamble = "Catching up on another session."
-            if not entries:
-                self._enqueue(fg, "prose", "You're all caught up.", False)
-                return None
-            # The voice plays the foreground stream, so replay into it: cut the
-            # foreground's current utterance, clear its queue (so the replay isn't
-            # duplicated by pending live items), then re-enqueue each unheard entry
-            # there. Heard-marking rides on `entry=e`, independent of the stream the
-            # text is read under.
-            cur = self._current_item
-            if cur is not None and cur.session == fg:
-                self.speaker.cancel()
-            self._drop_pending(self._stream(fg).queue.clear())
-            if preamble:
-                self._enqueue(fg, "prose", preamble, False)
-            for e in entries:
-                self._enqueue(fg, e.kind, e.text,
-                              e.kind in ("choice", "plan", "permission"),
-                              entry=e)
             return None
 
         if t == MsgType.SET_RATE:
@@ -835,8 +791,8 @@ class SpeechDaemon:
         config) concurrently with the speak loop, so without the lock it races
         -> 'list changed size during iteration' / corruption. handle_message and
         its callees never acquire self._lock (note_spoken/speak run on the speak
-        thread), so this is deadlock-free. An enqueue-based action (repeat /
-        skip_back / catch_up) is likewise safe from losing its item to that race.
+        thread), so this is deadlock-free. An enqueue-based action (skip_back /
+        jump_waiting) is likewise safe from losing its item to that race.
         """
         try:
             with self._lock:

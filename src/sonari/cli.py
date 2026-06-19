@@ -93,11 +93,6 @@ def _cmd_voice(args) -> int:
     return 0
 
 
-def _cmd_repeat(_args) -> int:
-    _send({"v": PROTOCOL_VERSION, "type": MsgType.REPEAT})
-    return 0
-
-
 def _cmd_stop(_args) -> int:
     _send({"v": PROTOCOL_VERSION, "type": MsgType.STOP})
     return 0
@@ -170,8 +165,6 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("n", type=int)
     sp.set_defaults(func=_cmd_minqueue)
 
-    sub.add_parser("repeat", help="repeat the last spoken item").set_defaults(
-        func=_cmd_repeat)
     sub.add_parser("stop", help="stop all speech and clear the queue").set_defaults(
         func=_cmd_stop)
     sub.add_parser("skip", help="skip the current item").set_defaults(

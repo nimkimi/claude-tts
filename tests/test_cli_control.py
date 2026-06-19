@@ -111,13 +111,6 @@ def test_voice_no_arg_lists_voices_without_changing_anything(capsys):
     send.assert_not_called()   # listing must not set the voice
 
 
-def test_repeat_sends_repeat():
-    with mock.patch("sonari.client.send", return_value=None) as send:
-        cli.main(["repeat"])
-    msg, _, _ = _sent(send)
-    assert msg == {"v": PROTOCOL_VERSION, "type": MsgType.REPEAT}
-
-
 def test_stop_sends_stop():
     with mock.patch("sonari.client.send", return_value=None) as send:
         cli.main(["stop"])
@@ -155,7 +148,6 @@ CONTROL_SUBCOMMANDS = [
     ["verbosity", "quiet"],
     ["rate", "200"],
     ["voice", "Samantha"],
-    ["repeat"],
     ["stop"],
     ["skip"],
 ]

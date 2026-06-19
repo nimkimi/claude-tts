@@ -1,10 +1,8 @@
 """Per-session narration history + sentence-granular heard-marker.
 
-PURE: no I/O. The Phase 2.1 substrate behind repeat / catch_up /
-voice-continuity capture: every narrated-or-captured sentence is recorded per
-session; `heard` flips True only when the speak loop confirms the utterance
-COMPLETED, so an interrupted sentence stays unheard and a replay restarts from
-the start of that sentence.
+PURE: no I/O. Records every narrated sentence per session; `heard` flips True
+only when the speak loop confirms the utterance COMPLETED, so an interrupted
+sentence stays unheard. Powers nav (next/prev/first/last) and Stage 4 catch-up.
 """
 from __future__ import annotations
 
@@ -114,14 +112,3 @@ class SessionHistory:
         self._group_seq.pop(session, None)
         self._touch.pop(session, None)
 
-    def other_session_with_unheard(self, exclude: str):
-        """The most recently active OTHER session that has unheard entries,
-        or None. Lets catch_up recover a session you left without re-typing
-        in it (there is no OS window-focus hook)."""
-        best, best_tick = None, -1
-        for session, tick in self._touch.items():
-            if session == exclude:
-                continue
-            if tick > best_tick and self.unheard(session):
-                best, best_tick = session, tick
-        return best
