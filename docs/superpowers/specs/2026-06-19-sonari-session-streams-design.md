@@ -64,6 +64,9 @@ navigation Nima requested — not by an over-claim that it fixes everything.
 - Speaking two sessions simultaneously (physically unintelligible eyes-free).
 - A full threading/locking rewrite. The concurrency model (one speak thread, one lock,
   per-connection handlers) is preserved.
+- **OS keyboard-focus follow on a session switch**, and a **distinct voice per session** —
+  both valuable for the eyes-free audience, both deferred to their own design pass
+  (roadmap, §11). The `jump_waiting` hotkey moves the voice only.
 
 ## 3. The model — one rule
 
@@ -85,7 +88,10 @@ Owns the complete per-session state currently fragmented across ~10 dicts/sets i
 - `prose_buffer: list` — minqueue batching
 - `nav_cursor`, `options` (last decision text), `muted: bool`
 - `warned_immediate: bool`, `guided: bool`
-- `has_waiting` — derived: queue non-empty / unheard backlog (drives the waiting earcon)
+- `has_waiting` — derived. **In Stage 3 this keys off the per-stream queue alone**
+  (queue holds unplayed items the user hasn't heard). The `unheard`/history-derived
+  refinement waits for Stage 4 (§7 settles `unheard` semantics there) — Stage 3 must
+  not build on that unsettled ground. Drives the waiting earcon and the jump-target set.
 
 History stays in `SessionHistory` (already per-session, `history.py`) but is reached via
 the stream and **persists across turns** (see §5).
@@ -123,12 +129,13 @@ which **eliminates the FLUSH-vs-SESSION_END divergence** (the confirmed `_assemb
 | Decision | Choice | Who |
 |---|---|---|
 | Scope of the work | Per-session-stream redesign (not targeted patching) | Nima |
-| Background prose | Accumulates in its own stream; **one soft, debounced "waiting" earcon** (on empty→waiting and on a new turn, not per sentence) | recommendation |
+| Background prose | Accumulates in its own stream; **one soft, debounced "waiting" earcon** — **`Pop`** (`/System/Library/Sounds/Pop.aiff`; a one-line default in the earcons map, re-tunable by feel), on empty→waiting and on a new turn, not per sentence | recommendation; **sound = Pop (Nima)** |
 | Background **block** (permission/choice/plan) | **Distinct alert earcon, voice NOT hijacked**; the jump-to-waiting-session hotkey switches to that stream and plays its queue (incl. the options) when the user chooses | Nima |
-| Switching | foreground = last prompt (unchanged) **+** a dedicated **jump-to-waiting-session hotkey** (NEW binding — not a `catch_up` repurpose) that switches foreground to a stream with backlog and plays it | Nima |
+| Switching | foreground = last prompt (unchanged) **+** a dedicated **jump-to-waiting-session hotkey** (**`Ctrl+Cmd+J`**, new `jump_waiting` action — not a `catch_up` repurpose). It switches the **voice only** (audio foreground — **not** OS keyboard focus; Sonari is output-only and does not track a session's window/tab — see roadmap §11) to a waiting stream, speaks a **"Jumping to `<folder>`."** preamble, then plays that stream's backlog. **Blocked-first target:** a stream whose queue holds an unplayed decision item (choice/plan/permission) ranks ahead of prose-only; ties break by session order; draining/resolving a stream drops it from the waiting set, so repeated presses walk through everyone waiting. Empty case → speak **"No session waiting."** Jump sets foreground only — it does **not** pin. | Nima |
 | Controls (STOP/PAUSE/SKIP/NAV/MUTE) | Act on the **foreground stream** (fixes global-STOP clobber 2a) | recommendation |
+| Session attribution ("who's speaking?") | The voice prepends the **folder name** the first time it speaks from a session different from the one last spoken (any foreground switch). Self-naming switch cues — jump's "Jumping to `<folder>`.", pin's "Pinned `<folder>`." — set the last-spoken session so they suppress the generic prefix (no double-announce). The prefix attaches to the **first actually-spoken item** from the new session, so switching to a muted/silent session never leaves an orphan label. A single ongoing session is never re-announced. | recommendation |
 | `catch_up` / `REPEAT` | **Retired entirely** (handlers + CLI removed) — single-queue-era replay workarounds the per-stream model subsumes: backlog accumulates + plays on switch, pause/resume continues, nav-from-start (`Ctrl+Cmd+↑`) re-reads. The default keymap already drops them as hotkeys. | Nima |
-| Hotkey surface (current default, `Ctrl+Cmd`+key) | `nav_prev/next`=←/→, `nav_first`=↑ (read response from start), `nav_last`=↓, `pause`=s (play / resume-from-stopped), `mute`=m, `pin_toggle`=p; Stage 3 adds the jump-to-waiting key | reference |
+| Hotkey surface (current default, `Ctrl+Cmd`+key) | `nav_prev/next`=←/→, `nav_first`=↑ (read response from start), `nav_last`=↓, `pause`=s (play / resume-from-stopped), `mute`=m, `pin_toggle`=p; Stage 3 adds **`jump_waiting`=j** (Ctrl+Cmd+J) | reference |
 | Backlog bound | Per-stream queue capped like history; switching reads what remains, oldest-first | recommendation, adjustable |
 | Navigation granularity | **Two-level** (response + within) | Nima |
 | Durable on-disk transcript | Out of scope for now | recommendation |
@@ -161,13 +168,32 @@ design.
    the speak-loop file is a correctness hazard. (Moved up from Stage 3: a PR-boundary
    call, no runtime-behavior delta — the flip is the behavior change either way.)
    *Dissolves symptom 1 + 3a.*
-3. **Multi-session UX + per-stream controls.** Waiting earcon; a dedicated
-   **jump-to-waiting-session hotkey** (new binding); scope STOP/PAUSE/etc. to the
-   foreground stream; the **cut-on-switch refinement** (§4.2 — Stage 2 lets the current
-   sentence finish on a switch, this stage cuts it); and **retire `catch_up` + `REPEAT`
-   entirely** (handlers + CLI). Retiring `catch_up` *here* — together with the jump
-   hotkey, the first non-FLUSH switch — is what resolves the §11 tripwire; removing
-   `REPEAT` dissolves symptom 3b. *Dissolves symptoms 2a + 3b.*
+3. **Multi-session UX + per-stream controls.** Six pieces:
+   (a) **waiting earcon** (`Pop`, debounced, queue-state driven — §4.1/§6);
+   (b) a dedicated **`jump_waiting` hotkey** (`Ctrl+Cmd+J`) that switches the **voice
+   only** to the blocked-first waiting stream, speaks "Jumping to `<folder>`.", and plays
+   its backlog (target/empty-case/no-pin rules in §6);
+   (c) **scope STOP/PAUSE/SKIP/NAV/MUTE to the foreground stream** (fixes 2a);
+   (d) the **cut-on-switch refinement** (§4.2 — Stage 2 lets the current sentence finish
+   on a switch, this stage cuts it) applied to *both* the jump hotkey and a new-prompt
+   foreground change;
+   (e) **session attribution** — prepend the folder name on the first speech from a
+   newly-foregrounded session, with self-naming cues suppressing the double-announce (§6);
+   (f) **retire `catch_up` + `REPEAT` entirely** (handlers + CLI + protocol + tests; keep
+   `JUMP_DECISION` and `REREAD_OPTIONS`).
+   Retiring `catch_up` *here* — together with the jump hotkey, the first non-FLUSH
+   switch — is what resolves the §11 tripwire; removing `REPEAT` dissolves symptom 3b.
+   **Durability scope (queue ≠ history — do not conflate):** the earcon, `has_waiting`,
+   and jump all read the **live per-stream queue** (the to-read pile, current turn). A new
+   prompt resets the prompting session's own queue via FLUSH (`daemon.py:366` — FLUSH
+   targets the prompting session, not the foreground). Clearing the *queue* on a new
+   prompt is correct and **permanent** (the old answer's leftovers must not read over the
+   new one). Separately, FLUSH **today also wipes `history`** (`daemon.py:373`) — that is
+   the existing limitation §5 removes in **Stage 4**, when the transcript persists across
+   turns and stays navigable. So Stage 3 must **not** touch history lifecycle: it promises
+   "jump plays the session's *current* accumulated backlog," and cross-*turn* replay
+   (navigate back to an earlier response) is Stage 4's deliverable, not Stage 3's.
+   *Dissolves symptoms 2a + 3b.*
 4. **Persistent transcript.** Stop reset-on-FLUSH; add turn grouping; snap cursor to
    live edge on a new prompt; keep `SESSION_END` clearing. Resolve the §7 seam.
 5. **Two-level navigation.** `nav_prev_response` / `nav_next_response` + within-response
@@ -180,6 +206,13 @@ design.
 
 (The former Stage 6 "replay duplication fix" is **removed** — retiring `REPEAT`/`catch_up`
 in Stage 3 makes symptom 3b impossible by construction.)
+
+**Roadmap (post-campaign, each its own brainstorm + spec — see §11):**
+**OS keyboard-focus follow** on a switch (raise the session's window/tab so the user can
+type after a jump) and a **distinct voice per session** (ambient attribution). Both are
+high-value for the eyes-free audience but carry their own scope (OS Accessibility/
+Automation permission, a terminal-by-terminal raise/tab-select matrix, a voice pool +
+per-folder assignment) and stay out of this campaign's audio-stream core.
 
 Each stage is its own PR. Stages 1 and 7 are pure-internal; 2–6 change behavior and
 each carries its own tests, including the spike scenarios promoted to regressions.
@@ -210,8 +243,24 @@ each carries its own tests, including the spike scenarios promoted to regression
 
 ## 11. Open / deferred
 - Backlog cap value (start ≈ history cap; tune by feel).
-- Waiting-earcon sound design (must be subtle, distinct from the decision alert).
+- **✅ Waiting-earcon sound — RESOLVED: `Pop`** (`/System/Library/Sounds/Pop.aiff`).
+  Subtle, distinct from the decision alerts (Funk/Ping/Submarine); a one-line earcons-map
+  default, re-tunable by feel.
+- **✅ Jump-to-waiting hotkey binding — RESOLVED: `Ctrl+Cmd+J`** (`jump_waiting` action).
 - Durable on-disk transcript (non-goal now; revisit if restarts lose useful history).
+
+**Roadmap (own brainstorm + spec; deferred out of this campaign):**
+- **OS keyboard-focus follow on switch.** The `jump_waiting` hotkey moves the *voice*
+  only; OS keyboard focus does not follow, so the user must bring the target window
+  forward to type. A focus-follow feature needs: session→window/tab identity captured at
+  session start (`TERM_PROGRAM` + `ITERM_SESSION_ID`/`TERM_SESSION_ID`/`KITTY_WINDOW_ID`…),
+  a per-terminal raise/tab-select backend (iTerm2 & Terminal.app scriptable; Ghostty/
+  Alacritty/WezTerm/Kitty largely not), and macOS Accessibility/Automation permission.
+  One-window-per-session is the tractable half; tabs-in-one-window is terminal-specific.
+- **Distinct voice per session.** Ambient attribution with zero spoken overhead
+  (`set_voice` already exists); needs a voice pool, per-folder assignment, and quality/
+  consistency design.
+- **On-demand "Currently `<folder>`." query** (CLI now; a spare hotkey only if it earns one).
 - **✅ catch_up cross-session double-speak — RESOLVED BY DESIGN (was a Stage 2 final-review tripwire).**
   Stage 2 left `catch_up` routing a cross-session replay into the foreground stream
   without flushing the *other* session's own queued copy — a latent double-speak that
