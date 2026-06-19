@@ -39,11 +39,21 @@ def test_flush_drops_session_items_without_cancelling_other_speech():
     assert stream_queue(daemon, "other").pop_next().session == "other"
 
 
-def test_stop_clears_all_and_cancels():
+def test_stop_clears_foreground_and_cancels():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     _seed(queue, daemon, "fg", 3)
     daemon.handle_message(_msg(MsgType.STOP, "fg"))
     assert len(queue) == 0
+    assert speaker.cancels == 1
+
+
+def test_stop_leaves_background_streams_untouched():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    _seed(stream_queue(daemon, "b"), daemon, "b", 2)    # background b has backlog
+    _seed(queue, daemon, "a", 2)                         # foreground a
+    daemon.handle_message(_msg(MsgType.STOP, "a"))
+    assert len(queue) == 0                               # foreground cleared
+    assert len(stream_queue(daemon, "b")) == 2           # background untouched
     assert speaker.cancels == 1
 
 
