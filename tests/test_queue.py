@@ -113,4 +113,51 @@ def test_has_decision_true_when_a_decision_is_queued():
     assert q.has_decision() is True
 
 
+# --- backlog cap tests ---
+
+def _cap_item(i, decision=False):
+    return SpeechItem(id=i, session="s", kind="plan" if decision else "prose",
+                      text="t{0}".format(i), is_decision=decision)
+
+
+def test_enqueue_unbounded_when_no_cap():
+    q = SpeechQueue()
+    assert all(q.enqueue(_cap_item(i)) is None for i in range(50))
+    assert len(q) == 50
+
+
+def test_enqueue_evicts_and_returns_oldest_prose_at_cap():
+    q = SpeechQueue(cap=3)
+    assert q.enqueue(_cap_item(0)) is None
+    assert q.enqueue(_cap_item(1)) is None
+    assert q.enqueue(_cap_item(2)) is None
+    evicted = q.enqueue(_cap_item(3))            # full -> evict oldest (id 0)
+    assert evicted is not None and evicted.id == 0
+    assert len(q) == 3
+    assert [it.id for it in (q.pop_next(), q.pop_next(), q.pop_next())] == [1, 2, 3]
+
+
+def test_enqueue_exempts_decisions_evicting_oldest_prose_instead():
+    q = SpeechQueue(cap=3)
+    q.enqueue(_cap_item(0, decision=True))       # a waiting decision, oldest
+    q.enqueue(_cap_item(1))                       # prose
+    q.enqueue(_cap_item(2))                       # prose
+    evicted = q.enqueue(_cap_item(3))            # full -> skip the decision, evict oldest prose (id 1)
+    assert evicted is not None and evicted.id == 1
+    assert [it.id for it in list(q._items)] == [0, 2, 3]   # decision retained at head
+
+
+def test_enqueue_all_decisions_exceeds_cap_rather_than_drop():
+    q = SpeechQueue(cap=2)
+    assert q.enqueue(_cap_item(0, decision=True)) is None
+    assert q.enqueue(_cap_item(1, decision=True)) is None
+    assert q.enqueue(_cap_item(2, decision=True)) is None       # nothing evictable -> exceed cap
+    assert len(q) == 3
+
+
+def test_enqueue_front_is_not_subject_to_cap():
+    q = SpeechQueue(cap=2)
+    q.enqueue(_cap_item(1)); q.enqueue(_cap_item(2))
+    q.enqueue_front(_cap_item(0))                 # resume-requeue: re-inserts a just-popped item
+    assert [it.id for it in list(q._items)] == [0, 1, 2]
 

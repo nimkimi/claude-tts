@@ -255,6 +255,24 @@ def test_jump_waiting_with_no_foreground_fires_error_earcon():
     )
 
 
+def test_backlog_cap_evicts_oldest_prose_and_drops_its_pending_heard():
+    # A capped background stream must drop the evicted item's _pending_heard entry,
+    # else the cap bounds the queue but leaks the pending dict (defeating the bound).
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    daemon._backlog_cap = 2
+    daemon._streams.clear()                  # rebuild streams under the small cap
+    entries = [daemon.history.record("bg", "prose", "p{0}".format(i)) for i in range(3)]
+    for i, e in enumerate(entries):
+        daemon._enqueue("bg", "prose", "p{0}".format(i), False, entry=e)
+    bg = daemon._stream("bg").queue
+    assert len(bg) == 2                                    # capped
+    # Confirm oldest item was evicted: entries[0] is no longer tracked in _pending_heard
+    # (HistoryEntry has no .id; we key off the entry object as a value in the pending dict)
+    assert entries[0] not in daemon._pending_heard.values()  # evicted entry's marker dropped (no leak)
+    assert entries[1] in daemon._pending_heard.values()      # survivor retained
+    assert entries[2] in daemon._pending_heard.values()      # survivor retained
+
+
 def test_attribution_survives_pause_on_switch():
     # Regression: if a PAUSE interrupts the first post-switch utterance, the
     # _last_spoken_session commit must be rolled back so the resumed utterance

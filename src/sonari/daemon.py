@@ -49,6 +49,7 @@ class SpeechDaemon:
         self._poll_interval = 0.1
         from sonari.history import SessionHistory
         self.history = SessionHistory(cap=int(config.get("history_cap", 200)))
+        self._backlog_cap = int(config.get("backlog_cap", 200))
         self._pending_heard: dict = {}            # SpeechItem.id -> HistoryEntry
         self._paused = threading.Event()          # play/pause: set == speech halted
         self._current_item = None                 # item being spoken right now
@@ -63,7 +64,7 @@ class SpeechDaemon:
     def _stream(self, session: str) -> SessionStream:
         s = self._streams.get(session)
         if s is None:
-            s = SessionStream()
+            s = SessionStream(queue_cap=self._backlog_cap)
             self._streams[session] = s
         return s
 
@@ -87,7 +88,9 @@ class SpeechDaemon:
         if at_front:
             st.queue.enqueue_front(item)
         else:
-            st.queue.enqueue(item)
+            evicted = st.queue.enqueue(item)
+            if evicted is not None:
+                self._drop_pending([evicted])
         self._wake.set()
 
     def _minqueue(self) -> int:
