@@ -73,16 +73,20 @@ class SessionHistory:
         return [e for e in d if e.msg_id == last_id]
 
     def message_ids(self, session: str) -> list:
-        """Distinct message ids for the session, oldest first. Each id is one
-        'item' (one assistant message) within the current turn; the list is the
-        current turn's messages (history resets on each new prompt). Powers the
-        next/prev/first/last navigation cursor."""
+        """Distinct message ids of the CURRENT turn, oldest first. Each id is one
+        'item' (an assistant message / paragraph) within the live turn. History
+        persists across turns (Stage 4), so this is bounded to the current turn —
+        the existing within-turn nav must not walk into prior turns (cross-turn
+        navigation is Stage 5). Powers the next/prev/first/last navigation cursor."""
         d = self._entries.get(session)
         if not d:
             return []
+        cur_turn = self._turn_id.get(session, 0)
         ids = []
         seen = set()
         for e in d:
+            if e.turn_id != cur_turn:
+                continue
             if e.msg_id in seen:
                 continue
             seen.add(e.msg_id)
@@ -118,8 +122,15 @@ class SessionHistory:
         return [e for e in d if e.msg_id == target]
 
     def unheard(self, session: str) -> list:
-        """All not-yet-completed entries for session, oldest first."""
-        return [e for e in self._entries.get(session, ()) if not e.heard]
+        """Not-yet-heard entries of the CURRENT turn only, oldest first.
+
+        §7 (Stage 4): the transcript persists across turns, but `unheard` stays
+        bounded to the live turn. With catch_up/REPEAT retired it has no replay
+        consumer; spanning the whole transcript would be unbounded and meaningless.
+        Heard-marking still flips entries from the speak loop regardless of turn."""
+        cur_turn = self._turn_id.get(session, 0)
+        return [e for e in self._entries.get(session, ())
+                if e.turn_id == cur_turn and not e.heard]
 
     def reset(self, session: str) -> None:
         """Forget a session entirely (SESSION_END)."""

@@ -130,3 +130,47 @@ def test_start_turn_keeps_prior_entries_unlike_reset():
     h.reset("s")                               # SESSION_END semantics: forget everything
     assert h.last_message("s") == []
     assert h.record("s", "prose", "fresh").turn_id == 0       # reset cleared _turn_id
+
+
+def test_message_ids_scoped_to_current_turn():
+    h = SessionHistory()
+    h.record("s", "prose", "t0a"); h.end_message("s")        # turn 0, msg group
+    h.record("s", "prose", "t0b"); h.end_message("s")        # turn 0, msg group
+    h.start_turn("s")                                        # -> turn 1
+    h.record("s", "prose", "t1a")                            # turn 1, msg group
+    ids = h.message_ids("s")
+    assert len(ids) == 1                                     # only the current (turn 1) group
+    # the current-turn id resolves to the turn-1 entry, not a turn-0 one:
+    assert [e.text for e in h.entries_for_message("s", ids[0])] == ["t1a"]
+
+
+def test_entries_for_message_still_reaches_prior_turns():
+    # Stage 5 replays past turns via explicit msg_id -> entries_for_message must NOT
+    # be turn-scoped (only message_ids/unheard are).
+    h = SessionHistory()
+    h.record("s", "prose", "old"); h.end_message("s")
+    old_id = h.message_ids("s")[0]                           # captured while turn 0 is current
+    h.start_turn("s")
+    h.record("s", "prose", "new")
+    assert [e.text for e in h.entries_for_message("s", old_id)] == ["old"]   # still reachable
+
+
+def test_unheard_bounded_to_current_turn():
+    # §7: unheard stays bounded to the live turn even though the transcript persists.
+    h = SessionHistory()
+    h.record("s", "prose", "t0")                            # turn 0, never heard
+    h.start_turn("s")
+    h.record("s", "prose", "t1")                            # turn 1, never heard
+    assert [e.text for e in h.unheard("s")] == ["t1"]       # the prior-turn unheard is excluded
+
+
+def test_empty_current_turn_has_no_nav_or_unheard_but_persists():
+    # snap-to-live-edge: after opening a turn with no entries yet, the current-turn
+    # views are empty (nothing to navigate / nothing unheard), but the prior turn
+    # is retained (persistence).
+    h = SessionHistory()
+    h.record("s", "prose", "kept")
+    h.start_turn("s")                                       # turn 1 is empty
+    assert h.message_ids("s") == []
+    assert h.unheard("s") == []
+    assert [e.text for e in h.last_message("s")] == ["kept"]   # not wiped
