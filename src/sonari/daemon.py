@@ -742,8 +742,10 @@ class SpeechDaemon:
     def _nav(self, session: str, to: str) -> None:
         """Move the per-session message cursor and play from there to the end.
 
-        The cursor indexes the current turn's messages (history resets each
-        prompt), oldest..newest; absent == the latest. 'next'/'prev' step one
+        The cursor indexes the current turn's messages (history now persists
+        across turns — Stage 4 — but message_ids bounds this to the current
+        turn; cross-turn nav is Stage 5), oldest..newest; absent == the latest.
+        'next'/'prev' step one
         message and CLAMP at the ends (no wrap; at the newest, 'next' just
         re-reads it); 'first'/'last' jump to the start/end of the turn. Every
         move cuts current speech, clears the queue, and reads the target message
