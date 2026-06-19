@@ -47,5 +47,10 @@ def test_play_spawn_failure_is_logged_not_swallowed(tmp_path, capsys):
     assert "spawn boom" in err
 
 
-def test_default_earcons_six():
-    assert len(WinEarconBackend().default_earcons()) == 6
+def test_default_earcons_seven():
+    assert len(WinEarconBackend().default_earcons()) == 7
+
+
+def test_windows_default_earcons_includes_waiting():
+    names = set(WinEarconBackend().default_earcons().keys())
+    assert "waiting" in names

@@ -103,7 +103,7 @@ def generate_earcon(
 
 
 # ---------------------------------------------------------------------------
-# The 6 canonical Sonari earcons
+# The 7 canonical Sonari earcons
 # ---------------------------------------------------------------------------
 _EARCON_SPECS: "dict[str, tuple]" = {
     # name         freq   dur   wave_type  freq2
@@ -113,11 +113,12 @@ _EARCON_SPECS: "dict[str, tuple]" = {
     "error":      (220.0, 0.25, "dual",    185.0),  # low dissonant pair
     "turn_done":  (880.0, 0.10, "sine",    None ),  # A5 — short, high
     "ready":      (523.0, 0.18, "chirp",   784.0),  # C5→G5 ascending
+    "waiting":    (392.0, 0.09, "sine",    None ),  # G4 — soft, brief background-backlog blip
 }
 
 
 def generate_all_earcons(output_dir: "str | pathlib.Path") -> None:
-    """Write all 6 earcon .wav files into *output_dir*.
+    """Write all 7 earcon .wav files into *output_dir*.
 
     Idempotent — safe to call multiple times; overwrites existing files.
     Typical use: run once from the repo root to regenerate assets::
