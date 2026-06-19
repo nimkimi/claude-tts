@@ -66,6 +66,13 @@ class HotkeyBackend(abc.ABC):
         """The platform's default modifier chord (e.g. ['ctrl','cmd'])."""
         return []
 
+    def extra_default_bindings(self) -> "dict":
+        """Per-platform default bindings for actions whose chord the uniform
+        default_mods() can't express (e.g. response-level nav needs +Shift over the
+        arrows on macOS). Maps action -> {"key", "mods"}. Default: none — the action
+        ships UNBOUND on this platform until the user binds it."""
+        return {}
+
     # --- in-process lifecycle (Windows runs a thread; macOS runs a process) ---
     def start(self, dispatch) -> None:
         """Begin listening for global hotkeys. *dispatch* is callable(message: dict)

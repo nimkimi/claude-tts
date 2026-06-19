@@ -61,17 +61,23 @@ def test_action_messages_faster_has_delta_25():
 
 def test_default_keymap_macos_uses_ctrl_cmd(mac):
     d = keymap.default_keymap()
-    # nav/pause/mute/pin_toggle/jump_waiting are bound by default; every binding carries the chord
     assert set(d.keys()) == {"nav_prev", "nav_next", "nav_first", "nav_last",
-                             "pause", "mute", "pin_toggle", "jump_waiting"}
+                             "pause", "mute", "pin_toggle", "jump_waiting",
+                             "nav_prev_response", "nav_next_response"}
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
-    assert d["pause"]["key"] == "s" and d["mute"]["key"] == "m"   # pause moved off 'p' (pin owns it)
+    assert d["pause"]["key"] == "s" and d["mute"]["key"] == "m"
+    # Stage 5: response-level nav = Ctrl+Cmd+Shift+arrows
+    assert d["nav_prev_response"] == {"key": "left", "mods": ["ctrl", "cmd", "shift"]}
+    assert d["nav_next_response"] == {"key": "right", "mods": ["ctrl", "cmd", "shift"]}
 
 
 def test_default_keymap_windows_uses_ctrl_shift_alt(win):
     d = keymap.default_keymap()
     assert d["nav_next"]["mods"] == ["ctrl", "shift", "alt"]
     assert d["mute"]["key"] == "m"
+    # Stage 5: Windows base chord already includes Shift, so +Shift can't differentiate
+    # response-nav from within-nav -> ships UNBOUND on Windows (rebindable by the user).
+    assert "nav_prev_response" not in d and "nav_next_response" not in d
 
 
 # --- resolve_keymap ---------------------------------------------------------
@@ -100,11 +106,10 @@ def test_resolve_faster_message_is_json_with_delta(mac):
 
 
 def test_default_keymap_binds_only_nav_pause_mute():
-    # The default keymap binds nav/pause/mute/pin_toggle/jump_waiting. faster/slower are valid
-    # actions but ship UNBOUND (blank by default); every default binding is a real action.
+    # The always-bound core is present on every platform; faster/slower ship UNBOUND.
     km = keymap.default_keymap()
-    assert set(km.keys()) == {"nav_prev", "nav_next", "nav_first", "nav_last",
-                              "pause", "mute", "pin_toggle", "jump_waiting"}
+    assert {"nav_prev", "nav_next", "nav_first", "nav_last",
+            "pause", "mute", "pin_toggle", "jump_waiting"} <= set(km.keys())
     assert set(km.keys()) <= set(keymap.ACTION_MESSAGES.keys())
     assert "faster" in keymap.ACTION_MESSAGES and "faster" not in km
     assert "slower" in keymap.ACTION_MESSAGES and "slower" not in km
@@ -218,7 +223,9 @@ def test_write_resolved_emits_array_of_bindings(monkeypatch, tmp_path):
     _patch_keymap_paths(monkeypatch, tmp_path)
     keymap.write_resolved()
     data = json.loads((tmp_path / "hotkeyd.resolved.json").read_text(encoding="utf-8"))
-    assert isinstance(data, list) and len(data) == len(keymap._DEFAULT_KEYS)
+    # len must match the platform's full default_keymap (not just _DEFAULT_KEYS) because
+    # Stage 5 adds extra_default_bindings() on macOS (response-nav Ctrl+Cmd+Shift+arrows).
+    assert isinstance(data, list) and len(data) == len(keymap.default_keymap())
     for entry in data:
         assert isinstance(entry["keyCode"], int)
         assert isinstance(entry["modifiers"], int)
@@ -253,11 +260,12 @@ def test_pin_toggle_default_binding_is_p():
 
 
 def test_no_two_default_actions_share_a_key():
-    # Default bindings share one chord, so each must use a distinct key — else
-    # resolve_keymap emits two entries for the same keyCode and one silently loses.
+    # Default bindings may share a key only when the modifier chord differs
+    # (Stage 5: nav_prev/nav_prev_response both use "left" but differ by +Shift).
+    # The invariant is no two actions resolve to the same *hotkey* (key + mods pair).
     from sonari.keymap import default_keymap
-    keys = [b["key"] for b in default_keymap().values()]
-    assert len(keys) == len(set(keys))
+    chords = [(b["key"], tuple(b["mods"])) for b in default_keymap().values()]
+    assert len(chords) == len(set(chords))
 
 
 def test_pin_toggle_resolves_to_its_message():
@@ -283,3 +291,27 @@ def test_jump_waiting_action_message():
 def test_default_keymap_binds_jump_waiting_to_j():
     km = keymap.default_keymap()
     assert km["jump_waiting"]["key"] == "j"
+
+
+# --- Stage 5: response-nav actions + macOS Ctrl+Cmd+Shift+arrows defaults ----
+
+def test_response_nav_action_messages():
+    assert keymap.ACTION_MESSAGES["nav_prev_response"] == {"type": "nav", "to": "prev_response"}
+    assert keymap.ACTION_MESSAGES["nav_next_response"] == {"type": "nav", "to": "next_response"}
+
+
+def test_response_nav_resolves_with_shift_on_macos(mac):
+    resolved = keymap.resolve_keymap(
+        {"nav_prev_response": {"key": "left", "mods": ["ctrl", "cmd", "shift"]}})
+    row = resolved[0]
+    assert row["action"] == "nav_prev_response"
+    assert row["keyCode"] == 123                                  # left arrow (Carbon)
+    assert row["modifiers"] == (4096 | 256 | 512)                 # ctrl | cmd | shift
+    assert json.loads(row["message"]) == {"type": "nav", "to": "prev_response"}
+
+
+def test_unbind_response_nav_on_macos_writes_unbound_override(mac, monkeypatch, tmp_path):
+    km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
+    keymap.unbind_action("nav_prev_response")    # mac-defaulted -> explicit null override
+    user = json.loads(km.read_text(encoding="utf-8"))
+    assert user["nav_prev_response"]["key"] is None
