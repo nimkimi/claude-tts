@@ -1,5 +1,5 @@
 from sonari.protocol import MsgType, PROTOCOL_VERSION
-from tests.daemon_helpers import make_daemon
+from tests.daemon_helpers import make_daemon, stream_queue
 
 
 def _msg(mtype, session=None, **extra):
@@ -242,12 +242,11 @@ def test_immediate_warning_independent_per_session():
     daemon.handle_message(_two_option_choice("fg"))
     item = queue.pop_next()
     assert WARN in item.text
-    # Drain the item so voice_owner is released before fg2 speaks.
     daemon.note_spoken(item, True)
-    # a different foreground session gets its own first-time warning
+    # a different foreground session gets its own first-time warning, in its own stream
     sessions.set_foreground("fg2")
     daemon.handle_message(_two_option_choice("fg2"))
-    assert WARN in queue.pop_next().text
+    assert WARN in stream_queue(daemon, "fg2").pop_next().text
 
 
 def test_multiselect_note_present_in_any_mode():
@@ -316,4 +315,5 @@ def test_session_end_resets_immediate_warning():
     assert st is None or not st.warned_immediate
     sessions.set_foreground("fg")
     daemon.handle_message(_two_option_choice("fg"))
-    assert WARN in queue.pop_next().text
+    # SESSION_END destroyed fg's stream; re-fetch the fresh one for the new cue.
+    assert WARN in stream_queue(daemon, "fg").pop_next().text

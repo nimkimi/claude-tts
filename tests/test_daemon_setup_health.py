@@ -1,5 +1,5 @@
 
-from tests.daemon_helpers import make_daemon
+from tests.daemon_helpers import make_daemon, stream_queue
 
 
 def _write_install_json(tmp_path, plugin_version="0.4.0"):
@@ -96,8 +96,10 @@ def test_session_start_enqueues_one_cue_when_not_installed(monkeypatch):
     monkeypatch.setattr(daemon, "_setup_health",
                         lambda v: ("not_installed", "RUN slash sonari install"))
     daemon.handle_message(_ss("s1"))
-    assert len(queue) == 1
-    item = queue.pop_next()
+    # SESSION_START sets s1 foreground; the cue lands in s1's own stream.
+    q = stream_queue(daemon, "s1")
+    assert len(q) == 1
+    item = q.pop_next()
     assert item.kind == "prose"
     assert "slash sonari install" in item.text.lower()
 
@@ -115,7 +117,7 @@ def test_session_start_cue_throttled_per_session(monkeypatch):
                         lambda v: ("not_installed", "RUN slash sonari install"))
     daemon.handle_message(_ss("s1"))
     daemon.handle_message(_ss("s1"))  # same session again
-    assert len(queue) == 1  # only ONE cue
+    assert len(stream_queue(daemon, "s1")) == 1  # only ONE cue (in s1's stream)
 
 
 def test_session_end_clears_throttle_so_cue_can_fire_again(monkeypatch):
@@ -123,11 +125,12 @@ def test_session_end_clears_throttle_so_cue_can_fire_again(monkeypatch):
     monkeypatch.setattr(daemon, "_setup_health",
                         lambda v: ("not_installed", "RUN slash sonari install"))
     daemon.handle_message(_ss("s1"))
-    assert len(queue) == 1
-    queue.pop_next()
-    daemon.handle_message(_se("s1"))
+    assert len(stream_queue(daemon, "s1")) == 1
+    stream_queue(daemon, "s1").pop_next()
+    daemon.handle_message(_se("s1"))     # drops s1's stream + throttle
     daemon.handle_message(_ss("s1"))  # new session lifecycle, same id
-    assert len(queue) == 1
+    # SESSION_END destroyed the old stream; the cue fires again into the fresh one.
+    assert len(stream_queue(daemon, "s1")) == 1
 
 
 def test_setup_health_exception_never_breaks_session(monkeypatch):

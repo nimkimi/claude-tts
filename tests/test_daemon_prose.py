@@ -1,6 +1,6 @@
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 from sonari.queue import SpeechItem
-from tests.daemon_helpers import make_daemon
+from tests.daemon_helpers import make_daemon, stream_queue
 
 
 def _flush(session):
@@ -18,11 +18,15 @@ def _prose(session, delta, index, final):
     }
 
 
-def test_prose_from_non_foreground_session_is_dropped():
+def test_prose_from_non_foreground_session_accumulates_in_its_own_stream():
+    # The flip (this task's whole point): background prose is no longer DROPPED — it
+    # accumulates in its own stream. It just does not land in the foreground stream
+    # (the one the voice plays).
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     out = daemon.handle_message(_prose("other", "Hello there. ", 0, False))
     assert out is None
-    assert len(queue) == 0
+    assert len(queue) == 0                                   # not in the foreground stream
+    assert [i.text for i in stream_queue(daemon, "other")._items] == ["Hello there."]
 
 
 def test_prose_from_foreground_enqueues_one_item_per_chunk():
@@ -58,10 +62,11 @@ def test_prose_uses_per_session_assembler():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     # Same index reused across sessions must NOT be deduped across sessions.
     daemon.handle_message(_prose("fg", "Foreground sentence here. ", 0, False))
-    # background session at index 0 is dropped (not foreground) but must not crash
+    # background session at index 0 accumulates in bg's own stream (not foreground's)
     daemon.handle_message(_prose("bg", "Background sentence here. ", 0, False))
     assert len(queue) == 1
     assert queue.pop_next().text == "Foreground sentence here."
+    assert stream_queue(daemon, "bg").pop_next().text == "Background sentence here."
 
 
 def test_prose_enqueued_at_verbosity_everything():
@@ -82,44 +87,28 @@ def test_prose_dropped_at_verbosity_quiet():
     assert len(queue) == 0
 
 
-def _earcon(session, kind):
-    return {"v": PROTOCOL_VERSION, "type": MsgType.EARCON, "session": session, "kind": kind}
-
-
 def test_owner_keeps_voice_across_interchunk_drain_when_other_session_flips_foreground():
-    """H1: between streamed chunks of ONE reply the queue drains to 0. If another
-    session flips foreground in that gap, the original owner must KEEP the voice and
-    its remaining deltas must still be enqueued (not captured to history and lost)."""
+    """A's remaining deltas accumulate in A's own stream (not lost). Between streamed
+    chunks of ONE reply A's stream drains to 0; if another session flips foreground in
+    that gap, A's next delta still enqueues into A's own stream — the reply is held,
+    not dropped. (`queue` is A's stream — the foreground at construction.)"""
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
-    # A streams its first sentence -> A acquires the voice, message is 'open'.
+    # A streams its first sentence -> lands in A's stream, message is 'open'.
     daemon.handle_message(_prose("A", "First sentence here. ", 0, False))
     assert len(queue) == 1
-    assert daemon._voice_owner == "A"
-    # The speak loop drains A's only queued item: queue hits 0 mid-message.
+    # The speak loop drains A's only queued item: A's stream hits 0 mid-message.
     daemon._speak_loop_once()
     assert len(queue) == 0
-    # A still owns the voice because its message is still open (no final yet).
-    assert daemon._voice_owner == "A"
     # Now a SECOND session flips foreground (new tab / other window submits).
     daemon.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SET_FOREGROUND, "session": "B"})
-    # A's next delta must STILL be enqueued — the reply does not go silent.
+    # A's next delta must STILL be enqueued into A's stream — the reply does not go silent.
     daemon.handle_message(_prose("A", "Second sentence here. ", 1, False))
     assert len(queue) == 1
     assert queue.pop_next().text == "Second sentence here."
 
 
-def test_open_message_released_at_turn_boundary():
-    """Ownership is held during an open message but released once the turn ends
-    (PROSE final or the Stop turn_done earcon), so a new foreground session can
-    then acquire a free voice."""
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
-    daemon.handle_message(_prose("A", "Hello there. ", 0, False))
-    daemon._speak_loop_once()                      # drain; A keeps voice (open msg)
-    assert daemon._voice_owner == "A"
-    # Turn ends via the Stop turn_done earcon (carries the session).
-    daemon.handle_message(_earcon("A", "turn_done"))
-    daemon._speak_loop_once()                       # empty branch now releases owner
-    assert daemon._voice_owner is None
+# Removed test_open_message_released_at_turn_boundary: the voice-ownership lifecycle
+# is retired in the Stage 2 flip; there is no owner to release at the turn boundary.
 
 
 def test_flush_resets_assembler_so_next_turn_is_clean():

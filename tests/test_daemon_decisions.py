@@ -1,5 +1,5 @@
 from sonari.protocol import MsgType, PROTOCOL_VERSION
-from tests.daemon_helpers import make_daemon
+from tests.daemon_helpers import make_daemon, stream_queue
 
 
 def _msg(mtype, session, **extra):
@@ -119,31 +119,27 @@ def test_decision_enqueued_at_quiet():
         assert queue.pop_next().kind == kind
 
 
-def test_decision_for_foreground_claims_voice_from_background_owner():
-    """M4: a question/permission for the FOREGROUND session must be spoken even when
-    a different (background) session currently owns the voice — otherwise the earcon
-    fires but the options are never read."""
+def test_decision_for_foreground_enqueues_to_its_stream():
+    """The flip: a question/permission for the FOREGROUND session always enqueues
+    into its own stream (no voice-claim arbitration). Was
+    test_decision_for_foreground_claims_voice_from_background_owner."""
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
-    # Background session B holds the voice (it was mid-reply, now backgrounded).
-    daemon._voice_owner = "B"
-    # A question arrives for A, the foreground session.
     daemon.handle_message(_msg(MsgType.CHOICE, "A", questions=[
         {"question": "Pick", "options": [{"label": "Red"}]},
     ]))
-    assert len(queue) == 1
+    assert len(queue) == 1                      # queue == A's (foreground) stream
     item = queue.pop_next()
     assert item.kind == "choice" and item.session == "A"
-    assert daemon._voice_owner == "A"          # foreground reclaimed the voice
 
 
-def test_decision_for_current_owner_still_enqueues_even_if_backgrounded():
-    """A decision for the session that already owns the voice is still enqueued,
-    even if it is no longer foreground (no regression vs the old _may_speak path)."""
+def test_decision_for_background_session_enqueues_to_its_own_stream():
+    """The flip: a decision for a background session enqueues into THAT session's
+    own stream (not the foreground's), instead of being dropped. Was
+    test_decision_for_current_owner_still_enqueues_even_if_backgrounded."""
     daemon, queue, speaker, sessions, config = make_daemon(foreground="B")
-    daemon._voice_owner = "A"                   # A owns the voice; B is foreground
     daemon.handle_message(_msg(MsgType.PERMISSION, "A", action="run X"))
-    assert len(queue) == 1
-    assert queue.pop_next().session == "A"
+    assert len(stream_queue(daemon, "A")) == 1
+    assert stream_queue(daemon, "A").pop_next().session == "A"
 
 
 def test_jump_decision_drops_pending_and_marks_current_heard():
