@@ -56,6 +56,11 @@ class SpeechQueue:
             dropped.append(self._items.popleft())
         return dropped
 
+    def has_decision(self) -> bool:
+        """True if any queued item is a decision (choice|plan|permission). Used to
+        rank a waiting session ahead of prose-only ones for jump-to-waiting."""
+        return any(item.is_decision for item in self._items)
+
     def clear(self) -> "list[SpeechItem]":
         dropped = list(self._items)
         self._items.clear()

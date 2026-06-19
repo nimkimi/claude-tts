@@ -61,9 +61,9 @@ def test_action_messages_faster_has_delta_25():
 
 def test_default_keymap_macos_uses_ctrl_cmd(mac):
     d = keymap.default_keymap()
-    # only nav/pause/mute/pin_toggle are bound by default; every binding carries the chord
+    # nav/pause/mute/pin_toggle/jump_waiting are bound by default; every binding carries the chord
     assert set(d.keys()) == {"nav_prev", "nav_next", "nav_first", "nav_last",
-                             "pause", "mute", "pin_toggle"}
+                             "pause", "mute", "pin_toggle", "jump_waiting"}
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
     assert d["pause"]["key"] == "s" and d["mute"]["key"] == "m"   # pause moved off 'p' (pin owns it)
 
@@ -100,11 +100,11 @@ def test_resolve_faster_message_is_json_with_delta(mac):
 
 
 def test_default_keymap_binds_only_nav_pause_mute():
-    # The default keymap binds only nav/pause/mute/pin_toggle. faster/slower are valid actions
-    # but ship UNBOUND (blank by default); every default binding is a real action.
+    # The default keymap binds nav/pause/mute/pin_toggle/jump_waiting. faster/slower are valid
+    # actions but ship UNBOUND (blank by default); every default binding is a real action.
     km = keymap.default_keymap()
     assert set(km.keys()) == {"nav_prev", "nav_next", "nav_first", "nav_last",
-                              "pause", "mute", "pin_toggle"}
+                              "pause", "mute", "pin_toggle", "jump_waiting"}
     assert set(km.keys()) <= set(keymap.ACTION_MESSAGES.keys())
     assert "faster" in keymap.ACTION_MESSAGES and "faster" not in km
     assert "slower" in keymap.ACTION_MESSAGES and "slower" not in km
@@ -274,3 +274,12 @@ def test_pin_toggle_is_clearable():
     from sonari.platform import get_platform
     mods = list(get_platform().hotkey.default_mods())
     resolve_keymap({"pin_toggle": {"key": "", "mods": mods}})   # cleared -> no raise
+
+
+def test_jump_waiting_action_message():
+    assert keymap.ACTION_MESSAGES["jump_waiting"] == {"type": "jump_waiting"}
+
+
+def test_default_keymap_binds_jump_waiting_to_j():
+    km = keymap.default_keymap()
+    assert km["jump_waiting"]["key"] == "j"

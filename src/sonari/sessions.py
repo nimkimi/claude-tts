@@ -60,6 +60,14 @@ class SessionManager:
     def folder(self, session: str) -> "str | None":
         return self._sessions.get(session)
 
+    def focus(self, session: str, cwd=None) -> None:
+        """Explicitly move the voice to *session* (the jump-to-waiting hotkey):
+        clear any pin — an explicit jump overrides a pin — and set it foreground.
+        Does NOT re-pin."""
+        self._record(session, cwd)
+        self._pinned = None
+        self._foreground = session
+
     def pin_toggle(self) -> "tuple[str, str | None]":
         """Toggle the pin against the RAW last-prompt foreground.
 

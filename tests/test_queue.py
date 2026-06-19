@@ -100,4 +100,17 @@ def test_clear_returns_dropped_items():
     assert len(q) == 0
 
 
+def test_has_decision_is_false_for_prose_only():
+    q = SpeechQueue()
+    q.enqueue(SpeechItem(id=1, session="s", kind="prose", text="a", is_decision=False))
+    assert q.has_decision() is False
+
+
+def test_has_decision_true_when_a_decision_is_queued():
+    q = SpeechQueue()
+    q.enqueue(SpeechItem(id=1, session="s", kind="prose", text="a", is_decision=False))
+    q.enqueue(SpeechItem(id=2, session="s", kind="choice", text="q", is_decision=True))
+    assert q.has_decision() is True
+
+
 
