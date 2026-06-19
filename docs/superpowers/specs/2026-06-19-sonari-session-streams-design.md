@@ -115,14 +115,36 @@ which **eliminates the FLUSH-vs-SESSION_END divergence** (the confirmed `_assemb
 - **History is no longer wiped on `FLUSH`.** A new prompt resets *live playback* (queue,
   assembler, pause, and snaps the nav cursor to the fresh response) but **keeps the
   transcript**. `SESSION_END` still clears it.
-- **Turn grouping.** Each user prompt opens a new turn. Within a turn, message groups
-  (`msg_id`) work as today. Navigation is **two-level**:
-  - *within-response* — existing `nav_next/prev/first/last` over the anchored response.
-  - *response-to-response* — new `nav_prev_response` / `nav_next_response` hotkeys jump a
-    whole turn at a time.
+- **Turn grouping** (Stage 4: DONE). Each user prompt opens a new turn (`turn_id`).
+  Within a turn, message groups (`msg_id`) work as today. Navigation is **two-level**:
+  - *within-response* — existing `nav_next/prev/first/last` (`Ctrl+Cmd`+`←/→/↑/↓`) over
+    the **anchored** response.
+  - *response-to-response* — new `nav_prev_response` / `nav_next_response`, bound to
+    **`Ctrl+Cmd+Shift+←/→`** (Stage 5, Nima). These jump a whole turn at a time. They are
+    two new `to` values (`prev_response` / `next_response`) on the existing `NAV` message —
+    no new protocol message type.
+- **The anchor model (Stage 5).** A session gains a `nav_turn` (the anchored turn; `None`
+  == the live turn) alongside `nav_cursor` (the anchored message within `nav_turn`). The
+  within-response keys operate on `nav_turn`; a response jump moves `nav_turn` and **reads
+  the whole target response from its start** (seek-and-play, like `nav first`), after which
+  the within-response keys walk *that* response. A new prompt (`FLUSH`) snaps `nav_turn`
+  (and `nav_cursor`) back to live; streaming new prose records to history but **never moves
+  the anchor** (same invariant as within-turn nav today). Response jumps **clamp**: past
+  the oldest retained turn re-reads the oldest; forward past the latest returns to live.
+- **Orientation on a response jump (Stage 5, Nima).** A short **relative** spoken cue
+  precedes the replayed answer — *"N response(s) back."* (computed from the live edge) —
+  with distinct boundary cues *"Oldest response."* (clamped at the oldest) and *"Back to
+  the latest."* (returned to live). The boundary/position cues are `mute_exempt`
+  navigation feedback; the replayed content follows.
 - **Replaying a past response only reads stored text** — it never re-triggers the agent.
 - **Capped, in-memory.** Oldest turns drop past the cap (mirrors history's current
   rolling `deque(maxlen=cap)`); `nav first` lands on the oldest *retained* response.
+- **New history accessors (Stage 5)** resolve the second half of the §7 seam:
+  `turn_ids(session)` (navigable turns, oldest→newest — same truncated-head exclusion as
+  `message_ids`, applied per turn) and turn-addressed message access
+  (`message_ids_in_turn(session, turn_id)`; the current `message_ids(session)` is that for
+  the live turn). `entries_for_message` (left un-turn-scoped in Stage 4) supplies a turn's
+  replay text.
 
 ## 6. Behavior / policy decisions
 
@@ -135,9 +157,12 @@ which **eliminates the FLUSH-vs-SESSION_END divergence** (the confirmed `_assemb
 | Controls (STOP/PAUSE/SKIP/NAV/MUTE) | Act on the **foreground stream** (fixes global-STOP clobber 2a) | recommendation |
 | Session attribution ("who's speaking?") | The voice prepends the **folder name** the first time it speaks from a session different from the one last spoken (any foreground switch). Self-naming switch cues — jump's "Jumping to `<folder>`.", pin's "Pinned `<folder>`." — set the last-spoken session so they suppress the generic prefix (no double-announce). The prefix attaches to the **first actually-spoken item** from the new session, so switching to a muted/silent session never leaves an orphan label. A single ongoing session is never re-announced. | recommendation |
 | `catch_up` / `REPEAT` | **Retired entirely** (handlers + CLI removed) — single-queue-era replay workarounds the per-stream model subsumes: backlog accumulates + plays on switch, pause/resume continues, nav-from-start (`Ctrl+Cmd+↑`) re-reads. The default keymap already drops them as hotkeys. | Nima |
-| Hotkey surface (current default, `Ctrl+Cmd`+key) | `nav_prev/next`=←/→, `nav_first`=↑ (read response from start), `nav_last`=↓, `pause`=s (play / resume-from-stopped), `mute`=m, `pin_toggle`=p; Stage 3 adds **`jump_waiting`=j** (Ctrl+Cmd+J) | reference |
+| Hotkey surface (current default, `Ctrl+Cmd`+key) | `nav_prev/next`=←/→, `nav_first`=↑ (read response from start), `nav_last`=↓, `pause`=s (play / resume-from-stopped), `mute`=m, `pin_toggle`=p; Stage 3 adds **`jump_waiting`=j** (Ctrl+Cmd+J); Stage 5 adds **`nav_prev/next_response`=Ctrl+Cmd+Shift+←/→** | reference |
 | Backlog bound | Per-stream queue capped like history; switching reads what remains, oldest-first | recommendation, adjustable |
 | Navigation granularity | **Two-level** (response + within) | Nima |
+| Response-jump binding (Stage 5) | **`Ctrl+Cmd+Shift+←/→`** — stays in the arrow cluster (←/→ step items, Shift+←/→ step responses), easiest to find eyes-free; two new `to` values on `NAV`; rebindable | Nima |
+| Response-jump behavior (Stage 5) | Anchors `nav_turn` to the target response, reads the whole answer from its start (seek-and-play); ←/→/↑/↓ then operate within it; new prompt snaps back to live; streaming never moves the anchor; **read-only**; clamps at oldest/latest | recommendation |
+| Response-jump orientation (Stage 5) | Relative spoken cue **"N response(s) back."** then read; boundary cues **"Oldest response."** / **"Back to the latest."** (`mute_exempt` nav feedback) | Nima |
 | Durable on-disk transcript | Out of scope for now | recommendation |
 
 ## 7. Known seam to resolve during implementation
@@ -196,9 +221,15 @@ design.
    *Dissolves symptoms 2a + 3b.*
 4. **Persistent transcript.** Stop reset-on-FLUSH; add turn grouping; snap cursor to
    live edge on a new prompt; keep `SESSION_END` clearing. Resolve the §7 seam.
-5. **Two-level navigation.** `nav_prev_response` / `nav_next_response` + within-response
-   nav over persisted turns. (No `repeat`/`catch_up` reconciliation — both retired in
-   Stage 3.)
+5. **Two-level navigation.** Add `nav_prev_response` / `nav_next_response` as two new `to`
+   values (`prev_response` / `next_response`) on the existing `NAV` message, bound to
+   **`Ctrl+Cmd+Shift+←/→`**. Add the `nav_turn` anchor to `SessionStream` (snapped to live
+   by `reset_for_new_prompt`), the history accessors `turn_ids` + `message_ids_in_turn`,
+   and a relative orientation cue (*"N response(s) back."* / *"Oldest response."* / *"Back
+   to the latest."*). Generalize the within-response nav to operate on the anchored turn;
+   a response jump reads the whole target response from its start (seek-and-play) and
+   clamps at the oldest/latest. Read-only; streaming never moves the anchor. (No
+   `repeat`/`catch_up` reconciliation — both retired in Stage 3.)
 6. **Speaker cancel verification (symptom 2b).** Audit and harden the cancel-epoch /
    synth-gap path with the real `Speaker` + a slow fake `say_runner`; fix only a
    demonstrated defect, otherwise document it as solid.
@@ -247,6 +278,11 @@ each carries its own tests, including the spike scenarios promoted to regression
   Subtle, distinct from the decision alerts (Funk/Ping/Submarine); a one-line earcons-map
   default, re-tunable by feel.
 - **✅ Jump-to-waiting hotkey binding — RESOLVED: `Ctrl+Cmd+J`** (`jump_waiting` action).
+- **✅ Response-level nav binding — RESOLVED: `Ctrl+Cmd+Shift+←/→`** (`nav_prev/next_response`).
+- **✅ Response-jump orientation — RESOLVED: relative "N response(s) back." + boundary cues**
+  ("Oldest response." / "Back to the latest.").
+- Backlog cap value now spans the whole-session transcript (Stage 4 changed it from
+  effectively-per-turn); start at the current `history_cap` (200), tune by feel after dogfood.
 - Durable on-disk transcript (non-goal now; revisit if restarts lose useful history).
 
 **Roadmap (own brainstorm + spec; deferred out of this campaign):**
