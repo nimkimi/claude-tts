@@ -64,12 +64,28 @@ def test_stop_leaves_entries_unheard():
     assert [e.text for e in daemon.history.unheard("fg")] == ["A.", "B."]
 
 
-def test_user_prompt_flush_resets_history():
+def test_user_prompt_flush_persists_prior_turn_and_snaps_to_live():
+    # Stage 4 (was test_user_prompt_flush_resets_history): a new prompt (FLUSH) no
+    # longer WIPES history. The prior turn's transcript PERSISTS (navigable later in
+    # Stage 5); FLUSH opens a fresh turn, so the current-turn views are empty
+    # (snapped to the live edge) but the prior turn is retained.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     _prose(daemon, "fg", "Old stuff. ")
     daemon.handle_message(_msg(MsgType.FLUSH, "fg"))
+    # current turn is empty -> nothing to navigate yet, nothing unheard (live edge)
+    assert daemon.history.message_ids("fg") == []
     assert daemon.history.unheard("fg") == []
+    # but the prior turn PERSISTS (Stage 3 wiped it here; Stage 4 keeps it)
+    assert [e.text for e in daemon.history.last_message("fg")] == ["Old stuff."]
+
+
+def test_session_end_still_clears_history():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    _prose(daemon, "fg", "Some text. ")
+    daemon.handle_message(_msg(MsgType.SESSION_END, "fg"))
     assert daemon.history.last_message("fg") == []
+    assert daemon.history.unheard("fg") == []
+    assert daemon.history.message_ids("fg") == []
 
 
 def test_history_cap_comes_from_config():
