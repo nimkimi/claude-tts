@@ -200,3 +200,13 @@ each carries its own tests, including the spike scenarios promoted to regression
 - Backlog cap value (start ≈ history cap; tune by feel).
 - Waiting-earcon sound design (must be subtle, distinct from the decision alert).
 - Durable on-disk transcript (non-goal now; revisit if restarts lose useful history).
+- **⚠️ ORDERING TRIPWIRE (from the Stage 2 final review):** the Stage 5/6 `catch_up`
+  cross-session dedup MUST land **before or together with** the Stage 3 switch-&-read
+  hotkey. Stage 2 made `catch_up` route a cross-session replay into the foreground
+  stream but stopped flushing the *other* session's own queued copy, so that copy
+  would be re-spoken on a later switch to it. This is **latent-unreachable in Stage 2**
+  only because every foreground switch today goes through `FLUSH` (UserPromptSubmit) or
+  is a brand-new `SessionStart` id — both of which clear the stale state. The switch-&-
+  read hotkey is the first *non-FLUSH* switch to an existing background session; adding
+  it without the dedup makes the double-speak live. (One-line stopgap if Stage 3 ships
+  first: on `catch_up`'s cross-session branch, also clear the other stream's queue.)
