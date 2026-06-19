@@ -284,7 +284,12 @@ each carries its own tests, including the spike scenarios promoted to regression
   is stable.
 
 ## 11. Open / deferred
-- Backlog cap value (start ≈ history cap; tune by feel).
+- **✅ Backlog cap — RESOLVED (Stage 7): per-stream `SpeechQueue` capped at 200** (config
+  `DEFAULTS["backlog_cap"]`, matches `history_cap`; tune by feel). On overflow, `enqueue`
+  evicts and RETURNS the oldest **non-decision** item so the daemon drops its
+  `_pending_heard` entry (no leak); `is_decision` items (plan/choice/permission) are
+  EXEMPT from eviction so a waiting prompt is never silently lost (jump-to-waiting keeps
+  flagging it). Evicted prose remains in the 200-entry history for navigation.
 - **✅ Waiting-earcon sound — RESOLVED: `Pop`** (`/System/Library/Sounds/Pop.aiff`).
   Subtle, distinct from the decision alerts (Funk/Ping/Submarine); a one-line earcons-map
   default, re-tunable by feel.
