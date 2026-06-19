@@ -189,4 +189,6 @@ def test_background_session_is_earcon_only():
     drain_queue(daemon, speaker)
 
     # Earcon fired (alerts are cross-session), but no text was spoken.
-    assert log == [("earcon", "choice")]
+    # Stage 3: a "waiting" earcon now also fires when background prose first
+    # reaches its queue, followed by the "choice" decision earcon.
+    assert log == [("earcon", "waiting"), ("earcon", "choice")]

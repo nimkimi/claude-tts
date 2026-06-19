@@ -160,3 +160,30 @@ def test_jump_waiting_clears_an_active_pin():
     daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
     assert sessions.pinned() is None
     assert sessions.foreground() == "b"
+
+
+# --- waiting earcon (Task 3) --------------------------------------------------
+
+def test_background_prose_fires_one_waiting_earcon():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    _prose(daemon, "b", "first. second. third. ")       # b is background
+    assert speaker.earcons.count("waiting") == 1         # once per turn, not per sentence
+
+def test_foreground_prose_does_not_fire_waiting():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    _prose(daemon, "a", "hello. world. ")
+    assert "waiting" not in speaker.earcons
+
+def test_muted_background_does_not_fire_waiting():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon._stream("b").muted = True
+    _prose(daemon, "b", "x. y. ")
+    assert "waiting" not in speaker.earcons
+
+def test_waiting_rearms_after_new_prompt():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    _prose(daemon, "b", "turn one. ")
+    assert speaker.earcons.count("waiting") == 1
+    daemon.handle_message(_msg(MsgType.FLUSH, "b"))      # new prompt to b (still background)
+    _prose(daemon, "b", "turn two. ")
+    assert speaker.earcons.count("waiting") == 2
