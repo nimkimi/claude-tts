@@ -8,8 +8,8 @@ import threading
 
 from sonari.protocol import MsgType, encode, decode
 from sonari.queue import SpeechItem
-from sonari.assembler import ProseAssembler
 from sonari.config import save_config, load_config
+from sonari.session_stream import SessionStream
 from sonari.paths import (
     LOCK_PATH, SINGLETON_PATH, ensure_sonari_dir, socket_connectable,
     INSTALL_RECORD_PATH,
@@ -40,7 +40,7 @@ class SpeechDaemon:
         self.speaker = speaker
         self.sessions = sessions
         self.config = config
-        self._assemblers = {}
+        self._streams: "dict[str, SessionStream]" = {}
         self._next_id = 0
         self._running = threading.Event()
         self._wake = threading.Event()
@@ -50,26 +50,10 @@ class SpeechDaemon:
         self._poll_interval = 0.1
         from sonari.history import SessionHistory
         self.history = SessionHistory(cap=int(config.get("history_cap", 200)))
-        self._options: "dict[str, str]" = {}
         self._voice_owner: "str | None" = None
-        self._captured_msg: "set[str]" = set()
-        # Min-queue batching: per-session prose held back until it reaches the
-        # configured threshold, then flushed to the speech queue all at once
-        # (see _buffer_prose). session -> list of (text, history-entry).
-        self._prose_buffer: "dict[str, list]" = {}
-        # Sessions with an assistant PROSE message currently streaming (between the
-        # first non-final delta and the turn boundary). While the owner has an open
-        # message we DON'T release the voice on a transient queue drain — between
-        # chunks of one reply the deque routinely hits 0, and releasing there let a
-        # second session steal the voice and silence the rest of the reply (H1).
-        self._open_msg: "set[str]" = set()
         self._pending_heard: dict = {}            # SpeechItem.id -> HistoryEntry
-        self._nav_cursor: dict = {}               # session -> anchored message id (absent = latest)
         self._paused = threading.Event()          # play/pause: set == speech halted
-        self._muted_sessions: set = set()         # sessions whose speech is muted
         self._current_item = None                 # item being spoken right now
-        self._warned_immediate: set = set()
-        self._guided_sessions: set = set()
         self._conn_sem = threading.BoundedSemaphore(_MAX_CONN_THREADS)
         self._reload_lock = threading.Lock()      # serializes off-lock hotkey reloads
 
@@ -77,12 +61,21 @@ class SpeechDaemon:
         self._next_id += 1
         return self._next_id
 
-    def _assembler(self, session: str) -> ProseAssembler:
-        a = self._assemblers.get(session)
-        if a is None:
-            a = ProseAssembler()
-            self._assemblers[session] = a
-        return a
+    def _stream(self, session: str) -> SessionStream:
+        s = self._streams.get(session)
+        if s is None:
+            s = SessionStream()
+            self._streams[session] = s
+        return s
+
+    def _owner_open(self) -> bool:
+        """True if the current voice owner still has a streaming (open) message.
+        Replaces the former `self._voice_owner not in self._open_msg` checks
+        (open_msg only — NOT prose_buffer, unlike `_owner_mid_reply`)."""
+        if self._voice_owner is None:
+            return False
+        st = self._streams.get(self._voice_owner)
+        return st is not None and st.open_msg
 
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
                  entry=None, mute_exempt: bool = False,
@@ -114,17 +107,19 @@ class SpeechDaemon:
         """Hold prose until the per-session buffer reaches the minqueue threshold,
         then flush it all to the speech queue at once (drain-all, then re-gate).
         With minqueue == 1 this flushes on every item — today's behaviour."""
-        buf = self._prose_buffer.setdefault(session, [])
-        buf.append((text, entry))
-        if len(buf) >= self._minqueue():
+        st = self._stream(session)
+        st.prose_buffer.append((text, entry))
+        if len(st.prose_buffer) >= self._minqueue():
             self._flush_prose_buffer(session)
 
     def _flush_prose_buffer(self, session: str) -> None:
         """Enqueue everything buffered for *session* (e.g. at the turn boundary, so
         a message that ended below the threshold is still read)."""
-        buf = self._prose_buffer.pop(session, None)
+        st = self._stream(session)
+        buf = st.prose_buffer
         if not buf:
             return
+        st.prose_buffer = []
         for text, entry in buf:
             self._enqueue(session, "prose", text, False, entry=entry)
 
@@ -135,13 +130,13 @@ class SpeechDaemon:
         Silent when healthy. The check is a few file stats + a version compare
         (no launchctl) and never raises.
         """
-        if session in self._guided_sessions:
+        if self._stream(session).guided:
             return
         try:
             state, cue = self._setup_health(plugin_version or "")
         except Exception:  # noqa: BLE001 - guidance must never break a session
             return
-        self._guided_sessions.add(session)
+        self._stream(session).guided = True
         if state != "ok" and cue:
             self._enqueue(session, "prose", cue, False)
 
@@ -169,7 +164,12 @@ class SpeechDaemon:
         streaming) message OR prose held in the minqueue buffer. Keeps the voice
         with its owner across the whole reply, including the gaps between batched
         blocks (without this, batching would let the voice drop mid-reply)."""
-        return session in self._open_msg or bool(self._prose_buffer.get(session))
+        if session is None:
+            return False
+        st = self._streams.get(session)
+        if st is None:
+            return False
+        return st.open_msg or bool(st.prose_buffer)
 
     def _may_speak(self, session: str) -> bool:
         """Voice continuity: a busy voice stays with its owner to the end; a
@@ -179,7 +179,7 @@ class SpeechDaemon:
             return True
         if (self._voice_owner is None
                 and self.sessions.is_foreground(session)
-                and session not in self._captured_msg):
+                and not self._stream(session).captured):
             self._voice_owner = session
             return True
         return False
@@ -196,10 +196,9 @@ class SpeechDaemon:
         current owner is always honored. Superset of _may_speak."""
         if self._voice_owner == session:
             return True
-        if (self.sessions.is_foreground(session)
-                and self._voice_owner not in self._open_msg):
+        if self.sessions.is_foreground(session) and not self._owner_open():
             self._voice_owner = session
-            self._captured_msg.discard(session)
+            self._stream(session).captured = False
             return True
         return False
 
@@ -258,8 +257,9 @@ class SpeechDaemon:
         if verbosity != "everything":
             return ""
         cue = "Press the option's number to choose, or Escape to cancel."
-        if session not in self._warned_immediate:
-            self._warned_immediate.add(session)
+        st = self._stream(session)
+        if not st.warned_immediate:
+            st.warned_immediate = True
             cue += " Selecting is immediate."
         return cue
 
@@ -328,9 +328,9 @@ class SpeechDaemon:
             final = msg.get("final", False)
             if not final:
                 # A message is now streaming for this session: hold its voice
-                # across inter-chunk drains until the turn boundary (see _open_msg).
-                self._open_msg.add(session)
-            a = self._assembler(session)
+                # across inter-chunk drains until the turn boundary (see open_msg).
+                self._stream(session).open_msg = True
+            a = self._stream(session).assembler
             chunks = a.feed(msg.get("delta", ""), msg.get("index", 0), final)
             if chunks:
                 from sonari.assembler import PARAGRAPH_BREAK
@@ -345,7 +345,7 @@ class SpeechDaemon:
                     if speak:
                         self._buffer_prose(session, chunk, entry)
                     else:
-                        self._captured_msg.add(session)
+                        self._stream(session).captured = True
             if final:
                 # NOTE: `final` marks the end of ONE assistant text block, not the
                 # whole turn — Claude Code emits many per reply (the prose between
@@ -354,9 +354,9 @@ class SpeechDaemon:
                 # real turn boundary (the turn_done earcon) and when the threshold
                 # is hit; so it is deliberately NOT flushed on `final`.
                 self.history.end_message(session)
-                self._captured_msg.discard(session)
-                self._open_msg.discard(session)   # turn boundary: voice may release
-                self._options.pop(session, None)
+                self._stream(session).captured = False
+                self._stream(session).open_msg = False   # turn boundary: voice may release
+                self._stream(session).options = None
             return None
 
         # Decision CONTENT is enqueued (and gated by foreground). The ALERT
@@ -372,7 +372,7 @@ class SpeechDaemon:
             ) if e]
             if extras:
                 text = "{0} {1}".format(text, " ".join(extras))
-            self._options[session] = text
+            self._stream(session).options = text
             entry = self.history.record(session, "choice", text)
             self.history.end_message(session)
             if self._claim_for_decision(session):
@@ -385,7 +385,7 @@ class SpeechDaemon:
             cue = self._selection_cue(session, verbosity)
             if cue:
                 text = "{0} {1}".format(text, cue)
-            self._options[session] = text
+            self._stream(session).options = text
             entry = self.history.record(session, "plan", text)
             self.history.end_message(session)
             if self._claim_for_decision(session):
@@ -398,7 +398,7 @@ class SpeechDaemon:
             cue = self._selection_cue(session, verbosity)
             if cue:
                 text = "{0} {1}".format(text, cue)
-            self._options[session] = text
+            self._stream(session).options = text
             entry = self.history.record(session, "permission", text)
             self.history.end_message(session)
             if self._claim_for_decision(session):
@@ -428,7 +428,7 @@ class SpeechDaemon:
                 # if the final PROSE flag never arrived (H1 safety net). Flush any
                 # sub-threshold buffered prose here too, for the same reason.
                 self._flush_prose_buffer(session)
-                self._open_msg.discard(session)
+                self._stream(session).open_msg = False
             return None
 
         if t == MsgType.FLUSH:
@@ -438,16 +438,11 @@ class SpeechDaemon:
                 self.speaker.cancel()
             if self._voice_owner == session:
                 self._voice_owner = None
-            self._assemblers.pop(session, None)
-            self._prose_buffer.pop(session, None)   # drop unsent buffered prose
+            self._stream(session).reset_for_new_prompt()
             self.history.reset(session)
-            self._nav_cursor.pop(session, None)   # new prompt -> fresh navigation
             # A new prompt is a user action -> auto-resume from pause (temp pause).
             self._paused.clear()
             self._wake.set()
-            self._captured_msg.discard(session)
-            self._open_msg.discard(session)
-            self._options.pop(session, None)
             return None
 
         if t in (MsgType.SET_FOREGROUND, MsgType.SESSION_START):
@@ -460,15 +455,10 @@ class SpeechDaemon:
         if t == MsgType.SESSION_END:
             self.sessions.unregister(session)
             self._drop_pending(self.queue.flush_session(session))
-            self._prose_buffer.pop(session, None)
             if self._voice_owner == session:
                 self._voice_owner = None
             self.history.reset(session)
-            self._captured_msg.discard(session)
-            self._open_msg.discard(session)
-            self._options.pop(session, None)
-            self._warned_immediate.discard(session)
-            self._guided_sessions.discard(session)
+            self._streams.pop(session, None)
             return None
 
         if t == MsgType.STOP:
@@ -527,11 +517,12 @@ class SpeechDaemon:
             fg = self.sessions.foreground()
             if fg is None:
                 return None
-            if fg in self._muted_sessions:
-                self._muted_sessions.discard(fg)
+            st = self._stream(fg)
+            if st.muted:
+                st.muted = False
                 self._enqueue(fg, "prose", "Session unmuted.", False)
             else:
-                self._muted_sessions.add(fg)
+                st.muted = True
                 self._drop_pending(self.queue.flush_session(fg))
                 cur = self._current_item
                 if cur is not None and cur.session == fg:
@@ -574,7 +565,7 @@ class SpeechDaemon:
             fg = self.sessions.foreground()
             if fg is None:
                 return None
-            self._nav_cursor.pop(fg, None)   # repeat returns to the latest message
+            self._stream(fg).nav_cursor = None   # repeat returns to the latest message
             entries = self.history.last_message(fg)
             if not entries:
                 self._enqueue(fg, "prose", "Nothing to repeat.", False)
@@ -587,7 +578,8 @@ class SpeechDaemon:
             fg = self.sessions.foreground()
             if fg is None:
                 return None
-            text = self._options.get(fg)
+            st = self._streams.get(fg)
+            text = st.options if st is not None else None
             if text:
                 self._enqueue(fg, "choice", text, False)
             else:
@@ -788,14 +780,14 @@ class SpeechDaemon:
         # stale-lock voice, or one we already own — never SEIZE it from a different
         # session still streaming a reply (owner in _open_msg), which would strand
         # that in-progress response (the very thing H1 prevents).
-        if self._voice_owner == session or self._voice_owner not in self._open_msg:
+        if self._voice_owner == session or not self._owner_open():
             self._voice_owner = session
-            self._captured_msg.discard(session)
+            self._stream(session).captured = False
         n = len(ids)
         # Anchor on a STABLE message id, not a position: new paragraphs streaming
         # in append ids without shifting where the cursor points. Unset/stale ->
         # the latest. The cursor only clears on a new prompt (FLUSH).
-        cur_id = self._nav_cursor.get(session)
+        cur_id = self._stream(session).nav_cursor
         cur = ids.index(cur_id) if cur_id in ids else n - 1
         if to == "next":
             new = min(cur + 1, n - 1)
@@ -811,9 +803,9 @@ class SpeechDaemon:
             # Reached the latest message: clear the cursor so it tracks the live
             # edge again (absent == latest), and so a following 'prev' steps back
             # from the newest rather than a stale anchor.
-            self._nav_cursor.pop(session, None)
+            self._stream(session).nav_cursor = None
         else:
-            self._nav_cursor[session] = ids[new]   # parked on a past message
+            self._stream(session).nav_cursor = ids[new]   # parked on a past message
         self.speaker.cancel()
         self._drop_pending(self.queue.flush_session(session))
         # Seek-and-play: enqueue the target item AND every later item, so nav reads
@@ -912,8 +904,9 @@ class SpeechDaemon:
             # runs) bumps the epoch past this baseline, so the cancelled utterance is
             # detected instead of playing in full (M2 — the pop->speak gap).
             cancel_epoch = self.speaker.cancel_epoch()
+            st = self._streams.get(item.session) if item is not None else None
             muted = (item is not None
-                     and item.session in self._muted_sessions
+                     and st is not None and st.muted
                      and not item.mute_exempt)
             if muted:
                 # Muted session: drop without speaking; release the claim.

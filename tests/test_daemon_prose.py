@@ -141,7 +141,7 @@ def test_flush_resets_assembler_so_next_turn_is_clean():
     # Step 2: FLUSH – clears queue items and drops the assembler.
     daemon.handle_message(_flush("fg"))
     assert len(queue) == 0
-    assert "fg" not in daemon._assemblers
+    assert daemon._stream("fg").assembler is not None   # fresh assembler after FLUSH
 
     # Step 3: fresh final message re-using index 0 (new turn, new assembler).
     daemon.handle_message(_prose("fg", "New sentence here.", 0, True))

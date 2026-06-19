@@ -139,7 +139,7 @@ def test_choice_for_nonowner_is_captured_and_options_stored():
         {"question": "Pick one?", "options": [{"label": "X"}, {"label": "Y"}]}
     ]))
     assert len(queue) == 1                                  # only a's prose queued
-    assert "Pick one?" in daemon._options["b"]              # reread works on return
+    assert "Pick one?" in daemon._stream("b").options       # reread works on return
     assert daemon.history.unheard("b")                      # captured for catch_up
 
 
