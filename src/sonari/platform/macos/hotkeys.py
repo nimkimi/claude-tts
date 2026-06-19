@@ -113,6 +113,15 @@ class MacHotkeyBackend(HotkeyBackend):
         from sonari.platform.macos import keytables
         return list(keytables.DEFAULT_MODS)
 
+    def extra_default_bindings(self) -> dict:
+        # Stage 5: response-level nav = Ctrl+Cmd+Shift+arrows (the base Ctrl+Cmd chord
+        # has room for +Shift, which differentiates it from within-response ←/→).
+        mods = list(self.default_mods()) + ["shift"]
+        return {
+            "nav_prev_response": {"key": "left", "mods": mods},
+            "nav_next_response": {"key": "right", "mods": mods},
+        }
+
     def reload(self, dispatch=None) -> None:
         """Apply a keymap change live on macOS. The hotkeyd is a SEPARATE process
         (start/stop are no-ops here), so 'live' means: rewrite the resolved keymap

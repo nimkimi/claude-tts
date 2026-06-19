@@ -29,6 +29,10 @@ ACTION_MESSAGES = {
     "nav_prev": {"type": "nav", "to": "prev"},
     "nav_first": {"type": "nav", "to": "first"},
     "nav_last": {"type": "nav", "to": "last"},
+    # Response-to-response navigation (Stage 5): jump a whole turn at a time. Two new
+    # `to` values on the existing NAV message (no new protocol type).
+    "nav_prev_response": {"type": "nav", "to": "prev_response"},
+    "nav_next_response": {"type": "nav", "to": "next_response"},
     "pause": {"type": "pause"},     # play/pause toggle
     "mute": {"type": "mute"},       # sticky per-session mute toggle
     "pin_toggle": {"type": "pin_toggle"},   # pin/unpin the voice to the current session (#31)
@@ -56,11 +60,19 @@ def _keytables():
 
 
 def default_keymap() -> dict:
-    """The default action->binding map for the active platform (per-OS chord)."""
+    """The default action->binding map for the active platform (per-OS chord).
+
+    The `_DEFAULT_KEYS` actions all share the platform's `default_mods()` chord.
+    `extra_default_bindings()` adds any per-platform binding that the uniform chord
+    can't express (Stage 5: response-nav needs +Shift over the arrows on macOS; on
+    platforms whose base chord already includes Shift it returns {} -> unbound)."""
     from sonari.platform import get_platform
-    mods = get_platform().hotkey.default_mods()
-    return {action: {"key": key, "mods": list(mods)}
-            for action, key in _DEFAULT_KEYS.items()}
+    hk = get_platform().hotkey
+    mods = hk.default_mods()
+    out = {action: {"key": key, "mods": list(mods)}
+           for action, key in _DEFAULT_KEYS.items()}
+    out.update(hk.extra_default_bindings())
+    return out
 
 
 def _copy_keymap(km: dict) -> dict:
@@ -158,14 +170,14 @@ def _write_user_keymap(user: dict) -> None:
 
 
 def unbind_action(action: str) -> None:
-    """Persist 'no hotkey' for *action* in the user's keymap.json. If the action
-    has a default binding, write an explicit unbound override ({"key": null}) so it
-    overrides that default; if it has no default, just drop any user binding (the
-    default is already unbound). Raises ValueError for an unknown action."""
+    """Persist 'no hotkey' for *action* in the user's keymap.json. If the action has a
+    default binding ON THIS PLATFORM, write an explicit unbound override ({"key": null})
+    so it overrides that default; if it has no default, just drop any user binding.
+    Raises ValueError for an unknown action."""
     if action not in ACTION_MESSAGES:
         raise ValueError("unknown action: {0}".format(action))
     user = _read_user_keymap()
-    if action in _DEFAULT_KEYS:
+    if action in default_keymap():
         user[action] = {"key": None, "mods": []}
     else:
         user.pop(action, None)
