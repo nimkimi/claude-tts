@@ -42,3 +42,25 @@ def test_reset_for_new_prompt_clears_playback_keeps_sticky():
     assert s.muted is True
     assert s.warned_immediate is True
     assert s.guided is True
+
+
+def test_new_stream_has_its_own_empty_speech_queue():
+    from sonari.queue import SpeechQueue
+    from sonari.session_stream import SessionStream
+    st = SessionStream()
+    assert isinstance(st.queue, SpeechQueue)
+    assert len(st.queue) == 0
+
+
+def test_reset_for_new_prompt_keeps_the_queue_object_and_items():
+    # The FLUSH handler clears the queue explicitly (so it can drop heard-markers);
+    # reset_for_new_prompt must NOT clear it, or those markers would leak.
+    from sonari.queue import SpeechItem
+    from sonari.session_stream import SessionStream
+    st = SessionStream()
+    q = st.queue
+    st.queue.enqueue(SpeechItem(id=1, session="s", kind="prose",
+                                text="x", is_decision=False))
+    st.reset_for_new_prompt()
+    assert st.queue is q
+    assert len(st.queue) == 1
