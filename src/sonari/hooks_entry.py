@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 
+from sonari import ttyutil
 from sonari.protocol import PROTOCOL_VERSION, MsgType
 
 
@@ -28,7 +29,7 @@ def _tool_summary(tool: str, ti: dict) -> str:
 def handle_event(event: str, payload: dict) -> list[dict]:
     """Map (event name, parsed stdin payload) to a list of protocol messages.
 
-    PURE: no I/O. Returns [] for any event it does not handle.
+    PURE except a best-effort tty probe in SessionStart. Returns [] for any event it does not handle.
     """
     session = payload.get("session_id", "")
 
@@ -107,6 +108,11 @@ def handle_event(event: str, payload: dict) -> list[dict]:
                 cwd=payload.get("cwd", ""),
                 plugin_version=os.environ.get("CLAUDE_PLUGIN_VERSION", ""),
                 plugin_root=os.environ.get("CLAUDE_PLUGIN_ROOT", ""),
+                # Terminal identity for OS keyboard-focus-follow (best-effort; the
+                # daemon runs under launchd and cannot derive these itself).
+                term_program=os.environ.get("TERM_PROGRAM", ""),
+                iterm_session_id=os.environ.get("ITERM_SESSION_ID", ""),
+                tty=ttyutil.controlling_tty(),
             ),
         ]
 
