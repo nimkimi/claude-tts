@@ -449,9 +449,12 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.STOP:
-            # Global stop clears EVERY stream's queue (behavior-preserving;
-            # rescoping to foreground is a later stage).
-            for st in self._streams.values():
+            # Stop acts on the FOREGROUND stream only — clearing every stream would
+            # wipe a background session's backlog the user hasn't heard yet (the 2a
+            # global-STOP clobber). Background streams accumulate untouched.
+            fg = self.sessions.foreground()
+            st = self._streams.get(fg)
+            if st is not None:
                 self._drop_pending(st.queue.clear())
             self.speaker.cancel()
             return None
