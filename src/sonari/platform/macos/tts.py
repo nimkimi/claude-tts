@@ -188,7 +188,10 @@ class MacTtsBackend(TtsBackend):
         cmd = ["say"]
         if voice:
             cmd += ["-v", voice]
-        cmd += ["-r", str(rate), text]
+        # `--` ends option parsing so narration that begins with '-'/'--' (a flag
+        # reference, a code line) is spoken as a message instead of `say` rejecting
+        # it as an unknown option (a silent drop for an eyes-free user).
+        cmd += ["-r", str(rate), "--", text]
         return subprocess.Popen(cmd)
 
     def list_voices(self) -> "List[str]":

@@ -22,7 +22,20 @@ def test_run_builds_say_command_with_voice_and_rate(monkeypatch):
         def __init__(self, cmd): calls["cmd"] = cmd
     monkeypatch.setattr(mod.subprocess, "Popen", _P)
     MacTtsBackend().run("Hi", "Ava", 220)
-    assert calls["cmd"] == ["say", "-v", "Ava", "-r", "220", "Hi"]
+    assert calls["cmd"] == ["say", "-v", "Ava", "-r", "220", "--", "Hi"]
+
+
+def test_run_terminates_options_so_leading_hyphen_text_is_spoken(monkeypatch):
+    """Narration text can begin with '-'/'--' (a flag reference, a code line);
+    `say` would parse that as an option and drop the chunk (silent for an
+    eyes-free user). The cmd must end options with `--` immediately before the
+    text so the message is spoken verbatim."""
+    calls = {}
+    class _P:  # fake Popen
+        def __init__(self, cmd): calls["cmd"] = cmd
+    monkeypatch.setattr(mod.subprocess, "Popen", _P)
+    MacTtsBackend().run("--help is a flag", None, 200)
+    assert calls["cmd"][-2:] == ["--", "--help is a flag"]
 
 
 def test_best_voice_prefers_premium_en(monkeypatch):
