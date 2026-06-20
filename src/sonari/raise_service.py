@@ -28,10 +28,6 @@ class RaiseService:
             self._generation += 1
             return self._generation
 
-    def current_generation(self) -> int:
-        with self._lock:
-            return self._generation
-
     def _is_current(self, generation: int) -> bool:
         with self._lock:
             return generation == self._generation
