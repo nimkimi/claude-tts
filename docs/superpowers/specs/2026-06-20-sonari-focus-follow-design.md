@@ -281,10 +281,11 @@ it can, via the `RaiseBackend` seam. TDD applies to all of the latter.
   proactive-prompt decision, with the helper exec faked.
 - **Config:** `focus_follow` default present (exact key-set test updated); toggling
   it suppresses attempts.
-- **Empirical, build-time (documented, not CI):** the proven Terminal.app recipe is
-  re-confirmed once via the helper; the iTerm2 reveal-URL gets its one-press Tahoe
-  confirmation. These are verification steps in the plan, executed by the author
-  (self-verifying, not Nima-as-harness where avoidable).
+- **Empirical, build-time (documented, not CI) — DONE, see §8:** the Terminal.app
+  recipe was re-confirmed via the shipped helper; the iTerm2 reveal-URL was tested and
+  found broken on Tahoe (wrong session) and replaced by the verified `--iterm`
+  AppleScript path (confirmed against a real captured `ITERM_SESSION_ID`). All
+  self-verifying via osascript readback (not Nima-as-harness).
 
 ## 7. Decisions (resolved in brainstorm)
 
