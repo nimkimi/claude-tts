@@ -98,7 +98,7 @@ def test_run_routes_native_voice_to_say_command(monkeypatch):
     monkeypatch.setattr(b, "_get_kokoro",
                         lambda: pytest.fail("Kokoro used for a native voice"))
     b.run("Hi", "Samantha", 200)
-    assert captured["argv"] == ["say", "-v", "Samantha", "-r", "200", "Hi"]
+    assert captured["argv"] == ["say", "-v", "Samantha", "-r", "200", "--", "Hi"]
 
 
 def test_run_routes_kokoro_voice_to_engine_and_afplay(monkeypatch):
