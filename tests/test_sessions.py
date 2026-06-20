@@ -15,6 +15,34 @@ def test_identity_absent_is_none():
     assert SessionManager().identity("nope") is None
 
 
+def test_set_identity_empty_does_not_clobber_populated():
+    # FIX 2: a re-fired SESSION_START (resume/clear/compact) can carry an empty,
+    # best-effort identity. Overwriting unconditionally would wipe a good identity
+    # and silently kill focus-follow for the session. An all-empty incoming
+    # identity must leave the existing one untouched.
+    sm = SessionManager()
+    sm.set_identity("s1", Identity(term_program="Apple_Terminal", tty="/dev/ttys5"))
+    sm.set_identity("s1", Identity())          # all-empty re-fire
+    ident = sm.identity("s1")
+    assert ident.term_program == "Apple_Terminal"
+    assert ident.tty == "/dev/ttys5"
+
+
+def test_set_identity_merges_per_field_keeping_empties_out():
+    # Per-field merge: an EMPTY incoming field keeps the existing value; a NON-empty
+    # incoming field updates it. A legit terminal switch (all fields non-empty) still
+    # fully updates; only empties are ignored.
+    sm = SessionManager()
+    sm.set_identity("s1", Identity(term_program="Apple_Terminal",
+                                   tty="/dev/ttys5", iterm_session_id=""))
+    sm.set_identity("s1", Identity(term_program="Apple_Terminal",
+                                   tty="", iterm_session_id="w0:ID"))
+    ident = sm.identity("s1")
+    assert ident.tty == "/dev/ttys5"           # kept (incoming tty was empty)
+    assert ident.iterm_session_id == "w0:ID"   # updated (incoming was non-empty)
+    assert ident.term_program == "Apple_Terminal"
+
+
 def test_unregister_clears_identity():
     sm = SessionManager()
     sm.register("s1")
