@@ -73,7 +73,24 @@ class SessionManager:
         return self._sessions.get(session)
 
     def set_identity(self, session: str, identity: "Identity") -> None:
-        self._identities[session] = identity
+        """Store the terminal identity for *session*.
+
+        Don't-clobber-with-empties rule (same as the folder map in `_record`):
+        SESSION_START re-fires on resume/clear/compact for the same session_id, and
+        tty derivation is best-effort and can intermittently return "". If an
+        identity already exists, each incoming EMPTY field keeps the existing value
+        and each non-empty field updates it. A real terminal switch (all fields
+        non-empty) still fully updates; only empties are ignored. First set on an
+        absent session stores it as-is."""
+        existing = self._identities.get(session)
+        if existing is None:
+            self._identities[session] = identity
+            return
+        self._identities[session] = Identity(
+            term_program=identity.term_program or existing.term_program,
+            tty=identity.tty or existing.tty,
+            iterm_session_id=identity.iterm_session_id or existing.iterm_session_id,
+        )
 
     def identity(self, session: str) -> "Identity | None":
         return self._identities.get(session)
