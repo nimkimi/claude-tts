@@ -7,6 +7,14 @@
 //                        3 Automation denied (-1743), 4 other AppleScript error.
 //   sonari-raise --check send one harmless controlling Apple Event to surface /
 //                        test the Automation grant. Exit: 0 granted, 3 denied, 4 other.
+//   sonari-raise --iterm <id>   raise the iTerm2 session whose bare GUID matches
+//                        <id> (the captured ITERM_SESSION_ID, "wNtNpN:GUID"; the
+//                        bare GUID is the part after the last ':'). The shipped
+//                        iterm2:///reveal URL lands on the WRONG session on macOS
+//                        Tahoe; this AppleScript recipe is empirically validated.
+//                        Exit: 0 raised, 1 not-found/missed, 3 denied, 4 other.
+//   sonari-raise --check-iterm  same as --check but for iTerm2's grant (separate
+//                        from Terminal's). Exit: 0 granted, 3 denied, 4 other.
 //
 // AppleScript recipe is the empirically proven one (spec §3): match by tty,
 // `set selected` + `set index ... to 1` + `activate`. NEVER `set frontmost of
@@ -36,9 +44,72 @@ if args.count >= 2 && args[1] == "--check" {
     exit(code)
 }
 
+if args.count >= 2 && args[1] == "--check-iterm" {
+    let (_, code) = runAppleScript("tell application \"iTerm2\" to count windows")
+    exit(code)
+}
+
+// --iterm <id>: raise the iTerm2 session matching the bare GUID of <id>. Dispatched
+// before the generic <tty> path so the id isn't treated as a Terminal tty.
+if args.count >= 2 && args[1] == "--iterm" {
+    guard args.count >= 3 else {
+        FileHandle.standardError.write(
+            "usage: sonari-raise --iterm <session-id>\n".data(using: .utf8)!)
+        exit(2)
+    }
+    // iTerm2's `id of session` is the BARE GUID: strip up to and including the
+    // last ':' of "wNtNpN:GUID". If there's no ':', use the whole arg.
+    let rawID = args[2]
+    let bareID: String
+    if let colon = rawID.lastIndex(of: ":") {
+        bareID = String(rawID[rawID.index(after: colon)...])
+    } else {
+        bareID = rawID
+    }
+    let itermRecipe = """
+    try
+        tell application "iTerm2"
+            set pickedW to missing value
+            set pickedT to missing value
+            set pickedS to missing value
+            repeat with w in windows
+                try
+                    repeat with t in tabs of w
+                        repeat with s in sessions of t
+                            if (id of s) is "\(bareID)" then
+                                set pickedW to w
+                                set pickedT to t
+                                set pickedS to s
+                            end if
+                        end repeat
+                    end repeat
+                end try
+            end repeat
+            if pickedW is missing value then return "NOTFOUND"
+            tell pickedS to select
+            tell pickedT to select
+            set index of pickedW to 1
+            activate
+            delay 0.8
+            if (id of current session of current tab of current window) is "\(bareID)" then
+                return "OK"
+            else
+                return "MISS"
+            end if
+        end tell
+    on error e number n
+        return "ERR" & n
+    end try
+    """
+    let (itermResult, itermCode) = runAppleScript(itermRecipe)
+    if itermCode != 0 { exit(itermCode) }
+    exit(itermResult == "OK" ? 0 : 1)
+}
+
 guard args.count >= 2 else {
     FileHandle.standardError.write(
-        "usage: sonari-raise <tty> | --check\n".data(using: .utf8)!)
+        "usage: sonari-raise <tty> | --check | --iterm <session-id> | --check-iterm\n"
+            .data(using: .utf8)!)
     exit(2)
 }
 

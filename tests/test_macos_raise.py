@@ -62,12 +62,26 @@ def test_raise_missing_helper_is_false():
         Identity("Apple_Terminal", tty="/dev/ttys5")) is False
 
 
-def test_raise_iterm_opens_reveal_url():
+def test_raise_iterm_execs_helper_with_iterm_flag():
+    # iTerm2's reveal-URL path lands on the wrong session on macOS Tahoe; the
+    # iTerm branch now execs sonari-raise --iterm <full session id> (the helper
+    # strips to the bare GUID itself), mirroring the Terminal branch.
     rec = []
     be = _backend(rc=0, recorder=rec)
-    assert be.raise_session(Identity("iTerm.app", iterm_session_id="w0t0p0:ID")) is True
-    assert rec[0][0] == "open"
-    assert rec[0][1] == "iterm2:///reveal?sessionid=w0t0p0:ID"
+    assert be.raise_session(Identity("iTerm.app", iterm_session_id="w0t0p0:GUID")) is True
+    assert rec[0][0].endswith("sonari-raise")
+    assert rec[0][1] == "--iterm"
+    assert rec[0][2] == "w0t0p0:GUID"  # full id passed; Swift does the bare-GUID strip
+
+
+def test_raise_iterm_nonzero_is_false():
+    assert _backend(rc=1).raise_session(
+        Identity("iTerm.app", iterm_session_id="w0t0p0:GUID")) is False
+
+
+def test_raise_iterm_missing_helper_is_false():
+    assert _backend(exists=False).raise_session(
+        Identity("iTerm.app", iterm_session_id="w0t0p0:GUID")) is False
 
 
 def test_check_grant_maps_exit_codes():

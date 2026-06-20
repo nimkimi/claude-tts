@@ -14,6 +14,14 @@ def test_swift_source_exists():
     assert os.path.exists(SWIFT_SRC)
 
 
+def test_swift_source_has_iterm_modes():
+    with open(SWIFT_SRC, "r", encoding="utf-8") as fh:
+        src = fh.read()
+    assert "--iterm" in src
+    assert "--check-iterm" in src
+    assert "iTerm2" in src
+
+
 @pytest.mark.skipif(shutil.which("swiftc") is None, reason="swiftc not available")
 def test_swift_source_compiles(tmp_path):
     out = tmp_path / "sonari-raise"
