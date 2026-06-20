@@ -1,11 +1,14 @@
 # tests/test_macos_raise.py
+import os
 import sys
+from unittest import mock
 
 import pytest
 
 if sys.platform != "darwin":
     pytest.skip("macOS raise backend", allow_module_level=True)
 
+from sonari import paths
 from sonari.platform.macos.raiser import MacRaiseBackend
 from sonari.sessions import Identity
 
@@ -77,3 +80,71 @@ def test_check_grant_maps_exit_codes():
 def test_doctor_rows_shape():
     rows = _backend(rc=0).doctor_rows()
     assert all(len(r) == 3 for r in rows)
+
+
+# --- build() grant-preserving hash-skip ----------------------------------
+# build() mirrors MacHotkeyBackend.build(): it must NOT recompile when the swift
+# source is unchanged, because a rebuild changes the binary's cdhash and silently
+# drops the Automation grant. These tests mock swiftc + the filesystem (tmp paths)
+# so no real compile runs and the real ~/.sonari is never touched.
+
+def test_build_raise_missing_swiftc_returns_false():
+    with mock.patch("shutil.which", return_value=None):
+        ok, detail = MacRaiseBackend().build()
+    assert ok is False and "swiftc" in detail.lower()
+
+
+def test_build_raise_first_build_writes_srchash_and_returns_bin_path(tmp_path, monkeypatch):
+    binp = tmp_path / "sonari-raise"
+    monkeypatch.setattr(paths, "RAISE_BIN_PATH", binp)
+    monkeypatch.setattr(paths, "SONARI_DIR", tmp_path)
+    with mock.patch("shutil.which", return_value="/usr/bin/swiftc"), \
+         mock.patch("subprocess.call", return_value=0) as call:
+        ok, detail = MacRaiseBackend().build()
+    assert ok is True and detail == str(binp)
+    assert call.call_count == 1
+    args = call.call_args.args[0]
+    assert args[0] == "swiftc"
+    assert args[1].endswith(os.path.join("hotkeyd", "sonari-raise.swift"))
+    assert args[-1] == str(binp)
+    # the source hash is recorded so the next build can skip-rebuild
+    assert (tmp_path / ".raise.srchash").exists()
+
+
+def test_build_raise_nonzero_returncode_is_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "RAISE_BIN_PATH", tmp_path / "sonari-raise")
+    monkeypatch.setattr(paths, "SONARI_DIR", tmp_path)
+    with mock.patch("shutil.which", return_value="/usr/bin/swiftc"), \
+         mock.patch("subprocess.call", return_value=1):
+        ok, _ = MacRaiseBackend().build()
+    assert ok is False
+
+
+def test_build_raise_skips_recompile_when_source_unchanged(tmp_path, monkeypatch):
+    binp = tmp_path / "sonari-raise"
+    binp.write_text("pretend-built binary")        # binary already present
+    monkeypatch.setattr(paths, "RAISE_BIN_PATH", binp)
+    monkeypatch.setattr(paths, "SONARI_DIR", tmp_path)
+    with mock.patch("shutil.which", return_value="/usr/bin/swiftc"), \
+         mock.patch("subprocess.call", return_value=0) as call1:
+        ok1, _ = MacRaiseBackend().build()         # first build records the hash
+    assert ok1 is True and call1.call_count == 1
+    with mock.patch("shutil.which", return_value="/usr/bin/swiftc"), \
+         mock.patch("subprocess.call", return_value=0) as call2:
+        ok2, detail2 = MacRaiseBackend().build()   # unchanged source -> skip swiftc
+    assert ok2 is True and call2.call_count == 0
+    assert "unchanged" in detail2.lower()
+    assert "automation grant" in detail2.lower()   # the load-bearing reason
+
+
+def test_build_raise_recompiles_when_source_changes(tmp_path, monkeypatch):
+    binp = tmp_path / "sonari-raise"
+    binp.write_text("pretend-built binary")
+    # a stale hash from old source -> the current source no longer matches -> rebuild
+    (tmp_path / ".raise.srchash").write_text("a-stale-hash-from-old-source")
+    monkeypatch.setattr(paths, "RAISE_BIN_PATH", binp)
+    monkeypatch.setattr(paths, "SONARI_DIR", tmp_path)
+    with mock.patch("shutil.which", return_value="/usr/bin/swiftc"), \
+         mock.patch("subprocess.call", return_value=0) as call:
+        ok, _ = MacRaiseBackend().build()
+    assert ok is True and call.call_count == 1
