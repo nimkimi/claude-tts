@@ -1,0 +1,139 @@
+{
+  "hotspots": [
+    {
+      "file": "src/sonari/daemon.py",
+      "commits": 47
+    },
+    {
+      "file": "src/sonari/cli.py",
+      "commits": 40
+    },
+    {
+      "file": "src/sonari/paths.py",
+      "commits": 14
+    },
+    {
+      "file": "src/sonari/keymap.py",
+      "commits": 11
+    },
+    {
+      "file": "src/sonari/queue.py",
+      "commits": 10
+    },
+    {
+      "file": "src/sonari/protocol.py",
+      "commits": 10
+    },
+    {
+      "file": "src/sonari/speaker.py",
+      "commits": 8
+    },
+    {
+      "file": "src/sonari/kokoro_provision.py",
+      "commits": 8
+    },
+    {
+      "file": "src/sonari/history.py",
+      "commits": 8
+    },
+    {
+      "file": "src/sonari/platform/base.py",
+      "commits": 7
+    },
+    {
+      "file": "src/sonari/hooks_entry.py",
+      "commits": 7
+    },
+    {
+      "file": "src/sonari/config.py",
+      "commits": 7
+    },
+    {
+      "file": "src/sonari/sessions.py",
+      "commits": 6
+    },
+    {
+      "file": "src/sonari/session_stream.py",
+      "commits": 6
+    },
+    {
+      "file": "src/sonari/platform/macos/hotkeys.py",
+      "commits": 6
+    }
+  ],
+  "coChange": [
+    {
+      "files": "daemon.py + queue.py",
+      "count": 9
+    },
+    {
+      "files": "cli.py + daemon.py",
+      "count": 8
+    },
+    {
+      "files": "daemon.py + protocol.py",
+      "count": 8
+    },
+    {
+      "files": "config.py + daemon.py",
+      "count": 6
+    },
+    {
+      "files": "cli.py + protocol.py",
+      "count": 5
+    },
+    {
+      "files": "keymap.py + platform/macos/keytables.py",
+      "count": 5
+    },
+    {
+      "files": "cli.py + platform/macos/supervisor.py",
+      "count": 5
+    },
+    {
+      "files": "daemon.py + paths.py",
+      "count": 5
+    },
+    {
+      "files": "cli.py + platform/base.py",
+      "count": 4
+    },
+    {
+      "files": "config.py + queue.py",
+      "count": 4
+    },
+    {
+      "files": "daemon.py + session_stream.py",
+      "count": 4
+    },
+    {
+      "files": "keymap.py + platform/macos/hotkeys.py",
+      "count": 4
+    },
+    {
+      "files": "protocol.py + queue.py",
+      "count": 4
+    },
+    {
+      "files": "daemon.py + hooks_entry.py",
+      "count": 4
+    },
+    {
+      "files": "daemon.py + speaker.py",
+      "count": 4
+    },
+    {
+      "files": "hooks_entry.py + protocol.py",
+      "count": 4
+    },
+    {
+      "files": "cli.py + paths.py",
+      "count": 4
+    },
+    {
+      "files": "paths.py + protocol.py",
+      "count": 4
+    }
+  ],
+  "notes": "METHOD/SCOPE: Repo is young and dense \u2014 332 total commits, all within 2026-06-04..2026-06-20 (~16 days); 136 of them touch a src/sonari/*.py file. Counts are full-history `git log --name-only` aggregated by path; tests/, docs/, .venv excluded. Verified clean: `git log --diff-filter=R -- src/sonari/` returns ZERO renames, so per-path counts are not split/undercounted. Co-change = files appearing in the same commit. 84 src-touching commits are single-file, 52 are multi-file. The hotspot ranking and the top co-change pairs are nearly identical whether or not the now-deleted Windows files are included (all top-15 hotspots are currently-tracked live files; Windows files peaked at 5 commits, below the cut).\n\nVOLATILE vs STABLE (by commit count + file size at HEAD): daemon.py is the overwhelming churn hub \u2014 47/136 src commits (35%) and 1236 lines, by far the largest file; cli.py is second at 40 commits / 568 lines. These two dwarf everything: third place (paths.py) is 14. Most recently active files (last touched 2026-06-20) are daemon.py, cli.py, paths.py, config.py, hooks_entry.py, sessions.py, kokoro_provision.py \u2014 so the hot files are still hot, not historically-hot-then-settled. By contrast the small leaf modules \u2014 ttyutil.py (2), cleaner.py (2), kokoro.py (2), assembler.py (3), client.py (3), raise_service.py (3) \u2014 are observably stable.\n\nCOUPLING \u2014 raw co-change overstates daemon because it is ubiquitous (in 35% of commits it pairs with almost everything). Computing the directional ratio (pair-count / the smaller file's total commits) separates genuine binding from coincidental co-activity:\n- TIGHTLY BOUND to daemon (the smaller file rarely changes WITHOUT daemon): queue.py 9/10 = 0.90, config.py 6/7 = 0.86, protocol.py 8/10 = 0.80, session_stream.py 4/6 = 0.67. This is a real cluster: daemon \u2194 {queue, protocol, config, session_stream, paths, speaker, hooks_entry, history} all co-move with the daemon.\n- NOT bound, just both busy: cli.py + daemon.py is rank-2 by raw count (8) but only 8/40 = 0.20 of cli's commits \u2014 cli and daemon are individually the two busiest files and overlap by chance, not by dependency.\n- A SECOND, SELF-CONTAINED cluster that routes AROUND daemon: the hotkey/keymap area \u2014 keymap.py + platform/macos/keytables.py 5/5 = 1.00 (keytables NEVER changed without keymap), keymap.py + platform/macos/hotkeys.py 4/6. daemon.py does not appear in keymap's top pairs at all; keymap clusters with the macos hotkey/keytable files instead.\n- The install/lifecycle surface clusters on cli: cli.py + platform/macos/supervisor.py 5/5 = 1.00 (supervisor only ever changed alongside cli), cli.py + platform/base.py 4/7, cli.py + paths.py 4.\n\nPLATFORM ABSTRACTION VOLATILITY: the platform/ layer shows the repo's single most dramatic change-pattern fact \u2014 an entire platform/windows/* subtree (tts/keytables/hotkeys/supervisor/supervisor_loop/earcons, each 2\u20135 commits) was ADDED 2026-06-18 (\"Land the Windows port\", #37) and fully DELETED 2026-06-20 (\"delete the Windows backend subpackage\"), 0 Windows files tracked today \u2014 built and removed inside a 2-day window. During that span platform/base.py (7), platform/transport.py (5) and platform/__init__.py (4) churned, and keytables/hotkeys logic existed in mirrored macos/ + windows/ copies that co-changed (keymap \u2194 both keytables variants). The cross-platform abstraction was the most actively reshaped-then-collapsed area in the repo's history.\n\nDESCRIPTIVE SUMMARY (no target proposed): change history shows one dominant hub (daemon.py) that the protocol/queue/config/session/paths runtime cluster co-moves with; a separate, daemon-independent hotkey cluster (keymap + macos keytables/hotkeys); an install/lifecycle cluster anchored on cli.py (supervisor, base, paths); and a platform/ abstraction layer that was the site of the largest add-then-remove churn event."
+}
