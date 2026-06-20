@@ -58,26 +58,6 @@ class MacRaiseBackend(RaiseBackend):
             return False
         return False
 
-    # --- permission ---
-    def check_grant(self, term_program="Apple_Terminal") -> str:
-        # The iTerm2 AppleScript path needs its own Automation grant (separate
-        # from Terminal's), so probe the terminal the user is actually in: an
-        # iTerm user must not be prompted for Terminal, and vice-versa. The
-        # default keeps existing no-arg callers probing Terminal.
-        if not self._helper_exists():
-            return "unknown"
-        flag = "--check-iterm" if term_program == "iTerm.app" else "--check"
-        try:
-            rc = self._run([str(paths.RAISE_BIN_PATH), flag],
-                           timeout=_HELPER_TIMEOUT).returncode
-        except Exception:  # noqa: BLE001
-            return "unknown"
-        if rc == 0:
-            return "granted"
-        if rc == 3:
-            return "denied"
-        return "unknown"
-
     # --- build (mirror MacHotkeyBackend.build: skip if source unchanged to keep
     #     the Automation grant, which is keyed to the binary's cdhash) ---
     def build(self):
@@ -109,26 +89,8 @@ class MacRaiseBackend(RaiseBackend):
         return (False, "swiftc exited {0}".format(rc))
 
     # --- diagnostics ---
-    def doctor_rows(self, term_program=None) -> "list":
-        # When the caller knows the terminal (TERM_PROGRAM), probe and describe
-        # that terminal's grant; otherwise keep the Terminal default so existing
-        # no-arg callers are unchanged.
-        rows = []
+    def doctor_rows(self) -> "list":
         built = self._helper_exists()
-        rows.append(("focus-follow helper", built,
-                     str(paths.RAISE_BIN_PATH) if built
-                     else "not built; run 'sonari install'"))
-        if built:
-            app = "iTerm2" if term_program == "iTerm.app" else "Terminal"
-            grant = self.check_grant(term_program)  # None -> Terminal default
-            ok = grant == "granted"
-            detail = {
-                "granted": "Automation granted",
-                "denied": "Automation denied — allow 'sonari-raise' to control "
-                          "{0} in System Settings > Privacy & Security > "
-                          "Automation".format(app),
-                "unknown": "grant unknown ({0} not running, or not yet "
-                           "granted)".format(app),
-            }.get(grant, grant)
-            rows.append(("focus-follow permission", ok, detail))
-        return rows
+        return [("focus-follow helper", built,
+                 str(paths.RAISE_BIN_PATH) if built
+                 else "not built; run 'sonari install'")]

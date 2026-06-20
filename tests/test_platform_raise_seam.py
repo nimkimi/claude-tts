@@ -15,5 +15,4 @@ def test_noop_backend_is_inert():
     nb = NoopRaiseBackend()
     assert nb.supports(None) is False
     assert nb.raise_session(None) is False
-    assert nb.check_grant() == "unsupported"
     assert nb.doctor_rows() == []

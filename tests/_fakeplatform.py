@@ -77,10 +77,7 @@ class FakeRaiseBackend:
     def build(self):
         return (True, "/tmp/sonari-raise")
 
-    def check_grant(self, term_program="Apple_Terminal"):
-        return "granted"
-
-    def doctor_rows(self, term_program=None):
+    def doctor_rows(self):
         return [("focus-follow helper", True, "ok")]
 
 

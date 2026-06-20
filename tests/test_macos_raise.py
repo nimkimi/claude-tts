@@ -84,46 +84,14 @@ def test_raise_iterm_missing_helper_is_false():
         Identity("iTerm.app", iterm_session_id="w0t0p0:GUID")) is False
 
 
-def test_check_grant_maps_exit_codes():
-    assert _backend(rc=0).check_grant() == "granted"
-    assert _backend(rc=3).check_grant() == "denied"
-    assert _backend(rc=4).check_grant() == "unknown"
-    assert _backend(exists=False).check_grant() == "unknown"
-
-
-def test_check_grant_default_targets_terminal():
-    # no-arg (existing callers) keeps probing Terminal via --check.
-    rec = []
-    assert _backend(rc=0, recorder=rec).check_grant() == "granted"
-    assert rec[0][1] == "--check"
-
-
-def test_check_grant_iterm_execs_check_iterm_flag():
-    # an iTerm user's grant probe targets iTerm2, not Terminal (--check-iterm),
-    # with the same exit-code -> string mapping.
-    rec = []
-    assert _backend(rc=0, recorder=rec).check_grant("iTerm.app") == "granted"
-    assert rec[0][0].endswith("sonari-raise")
-    assert rec[0][1] == "--check-iterm"
-    assert _backend(rc=3).check_grant("iTerm.app") == "denied"
-    assert _backend(rc=4).check_grant("iTerm.app") == "unknown"
-
-
 def test_doctor_rows_shape():
+    # single helper-built row; no grant row (macOS dialog is one-time per app)
     rows = _backend(rc=0).doctor_rows()
-    assert all(len(r) == 3 for r in rows)
-
-
-def test_doctor_rows_iterm_targets_iterm_grant():
-    # when told the user is in iTerm, the permission row probes iTerm2's grant
-    # (--check-iterm) and the denied detail names iTerm2, not Terminal.
-    rec = []
-    be = _backend(rc=3, recorder=rec)
-    rows = be.doctor_rows(term_program="iTerm.app")
-    assert all(len(r) == 3 for r in rows)
-    assert any(args[1] == "--check-iterm" for args in rec)
-    perm = [r for r in rows if r[0] == "focus-follow permission"][0]
-    assert "iTerm" in perm[2]
+    assert len(rows) == 1
+    name, ok, detail = rows[0]
+    assert name == "focus-follow helper"
+    assert ok is True
+    assert isinstance(detail, str)
 
 
 # --- build() grant-preserving hash-skip ----------------------------------
