@@ -53,15 +53,21 @@ def _speak_once(text: str) -> None:
         pass
 
 
-def _focus_follow_setup(raise_backend, focus_follow: bool) -> None:
+def _focus_follow_setup(raise_backend, focus_follow: bool,
+                        term_program=None) -> None:
     """Build the sonari-raise helper and, when focus-follow is on and the
     Automation grant isn't in place, speak guidance and surface the consent
-    dialog (eyes-free users can't discover a silent dialog on first jump)."""
+    dialog (eyes-free users can't discover a silent dialog on first jump).
+
+    term_program (TERM_PROGRAM) targets the grant probe at the terminal the user
+    is actually in, so a Terminal user isn't prompted for iTerm2's grant and
+    vice-versa. None keeps the Terminal default (existing callers/tests)."""
     ok, detail = raise_backend.build()
     print("focus-follow helper: {0}".format(detail))
     if not ok or not focus_follow:
         return
-    grant = raise_backend.check_grant()
+    # None -> Terminal default (the backend treats it as non-iTerm).
+    grant = raise_backend.check_grant(term_program)
     if grant == "granted":
         return
     try:
@@ -70,7 +76,8 @@ def _focus_follow_setup(raise_backend, focus_follow: bool) -> None:
         pass
     _speak_once("Focus follow needs permission. A dialog will appear. "
                 "Click Allow to let Sonari raise your terminal window.")
-    raise_backend.check_grant()  # second call surfaces the dialog at this moment
+    # second call surfaces the dialog at this moment — same target as the probe.
+    raise_backend.check_grant(term_program)
     print("focus-follow: if window-raise doesn't work, grant Automation to "
           "'sonari-raise' in System Settings > Privacy & Security > Automation.")
 
@@ -219,7 +226,8 @@ def doctor() -> list:
     results.extend(_platform().supervisor.doctor_rows())
     # Hotkey diagnostics (Windows: collisions + UIPI/elevation; macOS: none here).
     results.extend(_platform().hotkey.doctor_rows())
-    results.extend(_platform().raise_backend.doctor_rows())
+    results.extend(_platform().raise_backend.doctor_rows(
+        os.environ.get("TERM_PROGRAM")))
 
     # Neutral rows (portable, keep inline).
     try:
@@ -436,7 +444,8 @@ def install() -> int:
         from sonari.config import load_config
         cfg = load_config()
         _focus_follow_setup(_platform().raise_backend,
-                            bool(cfg.get("focus_follow", True)))
+                            bool(cfg.get("focus_follow", True)),
+                            os.environ.get("TERM_PROGRAM"))
     except Exception:  # noqa: BLE001 - focus-follow setup must never break install
         pass
 
