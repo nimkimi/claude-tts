@@ -13,7 +13,6 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 from typing import Optional
 
@@ -41,45 +40,16 @@ def _send(msg: dict, expect_reply: bool = False):
     return client.send(msg, expect_reply=expect_reply)
 
 
-def _speak_once(text: str) -> None:
-    """Best-effort synchronous speech via the platform TTS backend (used by the
-    install grant flow; the daemon isn't a reliable speaker mid-install)."""
-    try:
-        tts = _platform().tts
-        proc = tts.run(text, tts.best_voice(), 200)
-        if proc is not None:
-            proc.wait(timeout=15)
-    except Exception:  # noqa: BLE001 - guidance speech must never break install
-        pass
-
-
-def _focus_follow_setup(raise_backend, focus_follow: bool,
-                        term_program=None) -> None:
-    """Build the sonari-raise helper and, when focus-follow is on and the
-    Automation grant isn't in place, speak guidance and surface the consent
-    dialog (eyes-free users can't discover a silent dialog on first jump).
-
-    term_program (TERM_PROGRAM) targets the grant probe at the terminal the user
-    is actually in, so a Terminal user isn't prompted for iTerm2's grant and
-    vice-versa. None keeps the Terminal default (existing callers/tests)."""
+def _build_raise_helper(raise_backend) -> None:
+    """Build the sonari-raise helper. macOS asks for Automation permission the
+    first time the daemon raises a window — a one-time, per-terminal dialog with
+    a safe voice fallback — so we just note it rather than trying to pre-empt it."""
     ok, detail = raise_backend.build()
     print("focus-follow helper: {0}".format(detail))
-    if not ok or not focus_follow:
-        return
-    # None -> Terminal default (the backend treats it as non-iTerm).
-    grant = raise_backend.check_grant(term_program)
-    if grant == "granted":
-        return
-    try:
-        subprocess.call(["afplay", "/System/Library/Sounds/Glass.aiff"])
-    except Exception:  # noqa: BLE001
-        pass
-    _speak_once("Focus follow needs permission. A dialog will appear. "
-                "Click Allow to let Sonari raise your terminal window.")
-    # second call surfaces the dialog at this moment — same target as the probe.
-    raise_backend.check_grant(term_program)
-    print("focus-follow: if window-raise doesn't work, grant Automation to "
-          "'sonari-raise' in System Settings > Privacy & Security > Automation.")
+    if ok:
+        print("focus-follow: the first time you jump into a Terminal or iTerm2 "
+              "window, macOS will ask to allow 'sonari-raise' to control it — "
+              "click Allow. One-time, per app.")
 
 
 def _daemon_not_running_message() -> str:
@@ -226,8 +196,7 @@ def doctor() -> list:
     results.extend(_platform().supervisor.doctor_rows())
     # Hotkey diagnostics (Windows: collisions + UIPI/elevation; macOS: none here).
     results.extend(_platform().hotkey.doctor_rows())
-    results.extend(_platform().raise_backend.doctor_rows(
-        os.environ.get("TERM_PROGRAM")))
+    results.extend(_platform().raise_backend.doctor_rows())
 
     # Neutral rows (portable, keep inline).
     try:
@@ -439,13 +408,10 @@ def install() -> int:
     _platform().hotkey.install(
         log_path=hk_log, agent_path=None, launchctl_fn=launchctl_fn)
 
-    # 6b. Focus-follow: build the sonari-raise helper + proactive Automation grant.
+    # 6b. Focus-follow: build the sonari-raise helper (macOS Automation dialog is
+    #     one-time per app, with a safe voice fallback — no proactive grant needed).
     try:
-        from sonari.config import load_config
-        cfg = load_config()
-        _focus_follow_setup(_platform().raise_backend,
-                            bool(cfg.get("focus_follow", True)),
-                            os.environ.get("TERM_PROGRAM"))
+        _build_raise_helper(_platform().raise_backend)
     except Exception:  # noqa: BLE001 - focus-follow setup must never break install
         pass
 

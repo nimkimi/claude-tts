@@ -112,17 +112,8 @@ class RaiseBackend(abc.ABC):
         + the needed handle present). Default: no."""
         return False
 
-    def check_grant(self, term_program="Apple_Terminal") -> str:
-        """OS permission state for the raise mechanism: 'granted' | 'denied' |
-        'unknown' | 'unsupported'. term_program targets the probe at the user's
-        terminal where that matters (macOS); ignored otherwise. Default:
-        'unsupported'."""
-        return "unsupported"
-
-    def doctor_rows(self, term_program=None) -> "list":
-        """Diagnostic [(name, ok, detail), ...] rows. term_program (TERM_PROGRAM)
-        lets a backend target its grant row at the user's terminal. Default:
-        none."""
+    def doctor_rows(self) -> "list":
+        """Diagnostic [(name, ok, detail), ...] rows. Default: none."""
         return []
 
 
