@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sonari"
 version = "0.5.0"
-description = "Eyes-free text-to-speech layer for Claude Code (macOS + Windows)"
+description = "Eyes-free text-to-speech layer for Claude Code (macOS)"
 requires-python = ">=3.9"
 authors = [{ name = "Nima Hakimi", email = "hakimi.nima1@gmail.com" }]
 license = { text = "MIT" }
@@ -15,13 +15,6 @@ sonari = "sonari.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
-# Windows TTS runtime. OneCore speech is reached via PyWinRT; without these the
-# daemon cannot synthesize and Windows users get silent no-speech (#7).
-windows = [
-    "winrt-runtime; sys_platform == 'win32'",
-    "winrt-Windows.Media.SpeechSynthesis; sys_platform == 'win32'",
-    "winrt-Windows.Storage.Streams; sys_platform == 'win32'",
-]
 # Kokoro-82M neural voices (optional, cross-platform). One ~310 MB model + a 6 MB
 # voices file (auto-downloaded on first use) provide all 28 voices. Imported lazily
 # only when a Kokoro voice is selected, so base Sonari runs without these.
@@ -33,6 +26,3 @@ kokoro = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-sonari = ["platform/windows/earcons/*.wav"]
