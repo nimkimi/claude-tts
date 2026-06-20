@@ -89,7 +89,8 @@ JUMP_WAITING (Ctrl+Cmd+J)
    └─► RaiseService.raise_async(identity)   (NEW, off the speak thread)
             │ dispatch by terminal type
             ├─ Apple_Terminal → exec ~/.sonari/sonari-raise <tty>   (helper; AppleScript; needs grant)
-            ├─ iTerm.app      → open "iterm2:///reveal?sessionid=<id>"  (no grant)
+            ├─ iTerm.app      → exec ~/.sonari/sonari-raise --iterm <id>  (helper; AppleScript; needs grant)
+            │                    [was: open "iterm2:///reveal?…" — broken on Tahoe, replaced; see §8]
             └─ other/none     → return False  → spoken "bring it forward" cue
 ```
 
@@ -131,12 +132,13 @@ JUMP_WAITING (Ctrl+Cmd+J)
   - `raise_session(identity) -> bool` — perform the raise; return True on a
     confirmed raise, False otherwise (unsupported terminal, missing identity,
     helper failure, permission denied). Must be safe to call off the main thread.
-  - `doctor_rows() -> list` — Automation-grant / helper-built status rows.
+  - `doctor_rows() -> list` — ~~Automation-grant /~~ helper-built status row. *(As of b0b6655 the grant-state row + `check_grant` were dropped — see §4.7.)*
 - **macOS `MacRaiseBackend`:**
   - `Apple_Terminal` → exec the `sonari-raise` helper (4.4) with the tty; success =
     exit code 0.
-  - `iTerm.app` → `subprocess` `open "iterm2:///reveal?sessionid=<iterm_session_id>"`;
-    success = `open` exit 0 (with the build-time caveat in §3).
+  - `iTerm.app` → ~~`subprocess` `open "iterm2:///reveal?sessionid=<iterm_session_id>"`~~
+    **REVISED (§8): the reveal URL is broken on Tahoe** (wrong session); ships as
+    `exec sonari-raise --iterm <iterm_session_id>` (AppleScript, needs grant); success = exit 0.
   - anything else, or empty identity → `False`.
 - **No-op default backend** (Linux/Windows/tests): `raise_session` returns `False`
   (→ fallback cue), `doctor_rows` empty. Keeps the core import-clean and the
@@ -162,10 +164,11 @@ System-Settings entry read as Sonari's, and the grant is narrow.
   - `sonari-raise --check` — send **one harmless controlling Apple Event** to
     Terminal (e.g. read `count of windows`) purely to exercise the Automation gate.
     Exit `0` = grant in place; a distinct non-zero code = denied/not-yet-granted
-    (`-1743`); other non-zero = Terminal-not-running/other. This is how `doctor`
-    detects the grant indirectly (TCC is unreadable from outside) **and** how the
-    proactive first-run flow (§4.7) triggers the consent dialog at a controlled
-    moment.
+    (`-1743`); other non-zero = Terminal-not-running/other. *(A sibling `--check-iterm`
+    mode for iTerm2 was added at build time. **As of b0b6655 neither `--check` mode is
+    invoked by `doctor`/`install` anymore** — the proactive grant flow that used them
+    was removed (§4.7); the subcommands remain in the binary only so its cdhash, and
+    the user's existing grant, stay stable.)*
   - Errors are swallowed into a non-zero exit (never hangs; the daemon also caps
     every invocation with a subprocess timeout).
 - Built and its existence/permission surfaced by `sonari install` / `doctor`,
@@ -213,7 +216,9 @@ Add:
   there** (this exact-set test broke in Stage 5 and Stage 7 for the same reason;
   the plan must include it).
 
-### 4.7 Permission / doctor UX (proactive — the grant cannot wait for first jump)
+### 4.7 Permission / doctor UX
+
+> **SUPERSEDED 2026-06-20 (commit b0b6655) — the proactive grant flow below was BUILT, then REMOVED.** Build-time + live testing showed the premise was weaker than feared and the mechanism didn't deliver: the macOS Automation grant is **one-time per terminal app** with a **safe voice fallback** (jump still works by voice + a spoken "bring it forward to type." cue if focus can't follow), and the prompt is a standard, screen-reader-accessible dialog — not the silent trap assumed here. Worse, the live smoke test proved the install-time `--check` grants the **CLI/responsible-process TCC context**, while the real raise runs from the **launchd daemon context** — so the proactive flow did **not** pre-empt the one first-jump dialog anyway (see §8). Given a one-time, accessible, safe-degrading dialog, the elaborate pre-emption (speak-guidance during install, `afplay` cue, second `--check` probe, `TERM_PROGRAM` targeting, the `check_grant` method, and the grant-state `doctor` row that false-greened from the wrong context) did not earn its place. **What ships now:** `install` builds the helper and prints a one-line note ("the first time you jump into a Terminal or iTerm2 window, macOS will ask to allow 'sonari-raise' to control it — click Allow. One-time, per app."); `doctor` reports only `focus-follow helper: built`. The `sonari-raise --check` / `--check-iterm` subcommands remain in the binary (uncalled) so its cdhash — and the user's existing grant — stays stable. The original proactive design is retained below as the historical record.
 
 The naive "first jump triggers the prompt" flow **fails for an eyes-free user**: a
 TCC dialog pops silently over some window, the user never sees it, and the daemon's
@@ -276,9 +281,10 @@ it can, via the `RaiseBackend` seam. TDD applies to all of the latter.
   a second `JUMP_WAITING` before the first raise applies → the first raise no-ops
   (focus/cue land only for the latest generation). Drive it deterministically; this
   is the concurrency-critical test and gets opus review.
-- **Grant detection:** `RaiseService`/doctor maps `sonari-raise --check` exit codes
+- ~~**Grant detection:** `RaiseService`/doctor maps `sonari-raise --check` exit codes
   (granted / denied / terminal-absent) to the right doctor row and the right
-  proactive-prompt decision, with the helper exec faked.
+  proactive-prompt decision, with the helper exec faked.~~ *(REMOVED in b0b6655 with the
+  proactive grant flow — §4.7. `doctor` now only tests the helper-built row.)*
 - **Config:** `focus_follow` default present (exact key-set test updated); toggling
   it suppresses attempts.
 - **Empirical, build-time (documented, not CI) — DONE, see §8:** the Terminal.app
