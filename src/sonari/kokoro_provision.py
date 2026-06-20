@@ -43,7 +43,7 @@ def ensure_uv(which=shutil.which, run=subprocess.check_call,
         return found
     py = base_python or sys.executable
     run([py, "-m", "pip", "install", "--user", "--quiet", "uv"])
-    exe = "uv.exe" if sys.platform == "win32" else "uv"
+    exe = "uv"
     cand = os.path.join(user_scripts(py), exe)
     if os.path.exists(cand):
         return cand
