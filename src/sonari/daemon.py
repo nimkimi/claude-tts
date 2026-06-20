@@ -624,6 +624,14 @@ class SpeechDaemon:
             folder = self.sessions.folder(target)
             identity = self.sessions.identity(target)
             will_raise = self._raise().will_attempt(identity)
+            # Bump the jump generation on EVERY jump, not only raising ones. A jump to
+            # a non-followable target must still advance the generation so a prior
+            # in-flight raise sees itself superseded (its _is_current(genOld) check
+            # returns False -> no-ops). If this lived inside `if will_raise:`, a
+            # non-raising jump B would leave the generation pinned at A's value, and a
+            # slow raise(A) would yank focus back to A while the voice is on B (spec
+            # §4.5 lines 191-201).
+            gen = self._raise().bump_generation()
             base = ("Jumping to {0}.".format(folder) if folder
                     else "Jumping to another session.")
             if not will_raise:
@@ -631,7 +639,6 @@ class SpeechDaemon:
             self._enqueue(target, "prose", base, False,
                           mute_exempt=True, at_front=True, names_session=True)
             if will_raise:
-                gen = self._raise().bump_generation()
                 self._raise().raise_async(
                     identity, gen,
                     on_failure=lambda s=target, f=folder: self._raise_failed(s, f))
