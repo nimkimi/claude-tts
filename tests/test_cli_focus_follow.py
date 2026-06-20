@@ -8,16 +8,18 @@ class FakeRaise:
         self._grant = grant
         self.built = False
         self.checked = 0
+        self.checked_terms = []  # records the term_program each check targeted
 
     def build(self):
         self.built = True
         return (True, "/tmp/sonari-raise")
 
-    def check_grant(self):
+    def check_grant(self, term_program="Apple_Terminal"):
         self.checked += 1
+        self.checked_terms.append(term_program)
         return self._grant
 
-    def doctor_rows(self):
+    def doctor_rows(self, term_program=None):
         return [("focus-follow helper", True, "ok")]
 
 
@@ -75,3 +77,14 @@ def test_install_grant_step_skipped_when_focus_follow_off(monkeypatch):
     cli._focus_follow_setup(fake, focus_follow=False)
     assert fake.built is True   # still build the helper
     assert spoken == []         # but never prompt when the feature is off
+
+
+def test_install_grant_step_targets_iterm_when_in_iterm(monkeypatch):
+    # an iTerm user's grant probe must target iTerm2, not Terminal, so the
+    # consent dialog that surfaces is iTerm2's.
+    fake = FakeRaise(grant="denied")
+    monkeypatch.setattr(cli.subprocess, "call", lambda *a, **k: 0)
+    monkeypatch.setattr(cli, "_speak_once", lambda text: None)
+    cli._focus_follow_setup(fake, focus_follow=True, term_program="iTerm.app")
+    assert fake.checked_terms  # at least one grant check ran
+    assert all(t == "iTerm.app" for t in fake.checked_terms)
