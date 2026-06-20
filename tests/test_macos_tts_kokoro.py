@@ -357,11 +357,3 @@ def test_sweep_stale_wavs_deletes_old_keeps_fresh_and_foreign(monkeypatch, tmp_p
     assert not old.exists()       # stale ours -> removed
     assert fresh.exists()         # recent ours -> kept (may still be playing)
     assert foreign.exists()       # not our prefix -> never touched
-
-
-def test_tmp_prefix_matches_windows_for_cross_sweep():
-    # Byte-identical to the Windows prefix so either backend's startup sweep
-    # reclaims the other's crash-leaked WAVs (#26). Pin against the Windows value
-    # itself (not just a literal) so drift in EITHER backend fails this test.
-    from sonari.platform.windows import tts as wtts  # imports cleanly on macOS (lazy winrt)
-    assert mod._TMP_PREFIX == wtts._TMP_PREFIX == "sonari-tts-"

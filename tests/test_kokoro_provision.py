@@ -1,5 +1,4 @@
 import os
-import sys
 import pytest
 from sonari import paths, kokoro_provision as kp
 
@@ -7,10 +6,7 @@ from sonari import paths, kokoro_provision as kp
 def test_kokoro_venv_python_path_is_platform_correct(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "KOKORO_VENV", tmp_path / "venv")
     p = paths.kokoro_venv_python()
-    if sys.platform == "win32":
-        assert p.endswith(os.path.join("venv", "Scripts", "python.exe"))
-    else:
-        assert p.endswith(os.path.join("venv", "bin", "python"))
+    assert p.endswith(os.path.join("venv", "bin", "python"))
 
 
 def test_neural_enabled_reflects_venv_python_existence(monkeypatch, tmp_path):
@@ -18,9 +14,9 @@ def test_neural_enabled_reflects_venv_python_existence(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "KOKORO_VENV", venv)
     assert kp.neural_enabled() is False
     # Create the venv python file.
-    pybin = tmp_path / "venv" / ("Scripts" if sys.platform == "win32" else "bin")
+    pybin = tmp_path / "venv" / "bin"
     pybin.mkdir(parents=True)
-    (pybin / ("python.exe" if sys.platform == "win32" else "python")).write_text("")
+    (pybin / "python").write_text("")
     assert kp.neural_enabled() is True
 
 
@@ -58,18 +54,6 @@ def test_ensure_uv_raises_actionable_when_unfindable(tmp_path):
                      base_python="/usr/bin/python3",
                      user_scripts=lambda py: str(tmp_path))  # no uv ever appears
     assert "uv" in str(ei.value).lower()
-
-
-def test_ensure_uv_windows_uses_scripts_uv_exe(monkeypatch, tmp_path):
-    monkeypatch.setattr(kp.sys, "platform", "win32")
-    (tmp_path / "uv.exe").write_text("")
-    got = kp.ensure_uv(
-        which=lambda n: None,
-        run=lambda *a, **k: None,
-        base_python="py",
-        user_scripts=lambda py: str(tmp_path),
-    )
-    assert got == str(tmp_path / "uv.exe")
 
 
 # ---------------------------------------------------------------------------

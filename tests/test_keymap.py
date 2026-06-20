@@ -18,13 +18,6 @@ def mac(monkeypatch):
     platform._CACHE = None
 
 
-@pytest.fixture
-def win(monkeypatch):
-    _force(monkeypatch, "win32")
-    yield
-    platform._CACHE = None
-
-
 def _patch_keymap_paths(monkeypatch, tmp_path):
     km = tmp_path / "keymap.json"
     resolved = tmp_path / "hotkeyd.resolved.json"
@@ -46,12 +39,6 @@ def test_macos_keytables_via_backend(mac):
     assert mm["cmd"] == 256 and mm["shift"] == 512 and mm["ctrl"] == 4096
 
 
-def test_windows_keytables_via_backend(win):
-    kc, mm = keymap._keytables()
-    assert kc["s"] == 0x53 and kc["."] == 0xBE
-    assert mm["ctrl"] == 0x0002 and mm["shift"] == 0x0004 and mm["alt"] == 0x0001
-
-
 def test_action_messages_faster_has_delta_25():
     assert keymap.ACTION_MESSAGES["faster"] == {"type": "set_rate", "delta": 25}
     assert keymap.ACTION_MESSAGES["slower"] == {"type": "set_rate", "delta": -25}
@@ -71,34 +58,6 @@ def test_default_keymap_macos_uses_ctrl_cmd(mac):
     assert d["nav_next_response"] == {"key": "right", "mods": ["ctrl", "cmd", "shift"]}
 
 
-def test_default_keymap_windows_uses_ctrl_shift_alt(win):
-    d = keymap.default_keymap()
-    assert d["nav_next"]["mods"] == ["ctrl", "shift", "alt"]
-    assert d["mute"]["key"] == "m"
-    # Windows base chord already includes Shift, so response-nav can't be "arrows + Shift"
-    # the way it is on macOS (that chord IS within-response nav). It gets distinct KEYS
-    # under the SAME chord instead: Ctrl+Shift+Alt+[ / ] (mirrors macOS's override).
-    assert d["nav_prev_response"] == {"key": "[", "mods": ["ctrl", "shift", "alt"]}
-    assert d["nav_next_response"] == {"key": "]", "mods": ["ctrl", "shift", "alt"]}
-
-
-def test_windows_default_bindings_are_collision_free(win):
-    # Every Windows default rides the same Ctrl+Shift+Alt chord, so each action MUST use a
-    # distinct key. Response-nav's [ / ] must not collide with the arrows or letters.
-    chords = [(b["key"], tuple(b["mods"])) for b in keymap.default_keymap().values()]
-    assert len(chords) == len(set(chords))
-
-
-def test_response_nav_resolves_on_windows(win):
-    resolved = keymap.resolve_keymap(
-        {"nav_next_response": {"key": "]", "mods": ["ctrl", "shift", "alt"]}})
-    row = resolved[0]
-    assert row["action"] == "nav_next_response"
-    assert row["keyCode"] == 0xDD                            # VK_OEM_6 (])
-    assert row["modifiers"] == (0x0002 | 0x0004 | 0x0001)    # ctrl|shift|alt
-    assert json.loads(row["message"]) == {"type": "nav", "to": "next_response"}
-
-
 # --- resolve_keymap ---------------------------------------------------------
 
 def test_resolve_macos_carbon_codes(mac):
@@ -106,15 +65,6 @@ def test_resolve_macos_carbon_codes(mac):
     assert resolved == [{
         "action": "pause", "keyCode": 35, "modifiers": 4352,  # 4096 | 256
         "message": '{"type": "pause"}'}]
-
-
-def test_resolve_windows_vk_codes(win):
-    resolved = keymap.resolve_keymap(
-        {"pause": {"key": "p", "mods": ["ctrl", "shift", "alt"]}})
-    row = resolved[0]
-    assert row["keyCode"] == 0x50                            # VK 'P'
-    assert row["modifiers"] == (0x0002 | 0x0004 | 0x0001)    # ctrl|shift|alt
-    assert row["action"] == "pause"
 
 
 def test_resolve_faster_message_is_json_with_delta(mac):
@@ -255,12 +205,6 @@ def test_write_resolved_no_tmp_leftover(monkeypatch, tmp_path):
     _patch_keymap_paths(monkeypatch, tmp_path)
     keymap.write_resolved()
     assert list(tmp_path.glob("*.tmp")) == []
-
-
-def test_resolve_nav_action_message(win):
-    resolved = keymap.resolve_keymap({"nav_next": {"key": "right", "mods": ["alt"]}})
-    assert resolved[0]["action"] == "nav_next"
-    assert json.loads(resolved[0]["message"]) == {"type": "nav", "to": "next"}
 
 
 def test_pin_toggle_action_message():

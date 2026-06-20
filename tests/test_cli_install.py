@@ -19,7 +19,7 @@ def _no_neural_venv(monkeypatch):
 # --- install() dispatch contract (OS mechanics live in the backend tests) ---
 
 def test_install_dispatches_through_platform(tmp_path, monkeypatch, capsys):
-    sup = FakeSupervisor(python="/PY/pythonw.exe")
+    sup = FakeSupervisor(python="/PY/python3")
     hk = FakeHotkey(ok=False, detail="M3")
     pb = fake_platform(supervisor=sup, hotkey=hk, tts=FakeTts("Aria"))
     monkeypatch.setattr(cli, "_platform", lambda: pb)
@@ -33,13 +33,13 @@ def test_install_dispatches_through_platform(tmp_path, monkeypatch, capsys):
     rc = cli.install()
     assert rc == 0
     # Supervisor got install(python, app_dir) then post_install_notes().
-    assert ("install", "/PY/pythonw.exe", str(tmp_path / "app")) in sup.calls
+    assert ("install", "/PY/python3", str(tmp_path / "app")) in sup.calls
     assert ("notes",) in sup.calls
     assert hk.calls and hk.calls[0][0] == "install"
     out = capsys.readouterr().out
     assert "Aria" in out                       # voice name (not an object repr)
-    # Hotkey outcome messaging is owned by the backend (Windows: M3 note lives in
-    # post_install_notes); cli prints no hotkey line itself.
+    # Hotkey outcome messaging is owned by the backend's post_install_notes;
+    # cli prints no hotkey line itself.
     assert "sonari doctor" in out              # post_install_notes ran
 
 
@@ -55,7 +55,7 @@ def test_install_fatal_when_no_python_found(monkeypatch, capsys):
 
 
 def test_install_copy_failure_is_fatal(monkeypatch, capsys):
-    sup = FakeSupervisor(python="/PY/pythonw.exe")
+    sup = FakeSupervisor(python="/PY/python3")
     monkeypatch.setattr(cli, "_platform", lambda: fake_platform(supervisor=sup))
     monkeypatch.setattr(cli, "_copy_app", mock.Mock(side_effect=OSError("read-only")))
     monkeypatch.setattr("sonari.paths.ensure_sonari_dir", lambda: None)
