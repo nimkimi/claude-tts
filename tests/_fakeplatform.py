@@ -67,10 +67,28 @@ class FakeTts:
         return self._voice
 
 
-def fake_platform(supervisor=None, hotkey=None, tts=None):
+class FakeRaiseBackend:
+    """Minimal raise-backend double for cli dispatch tests.
+
+    Returns a successful build result and a "granted" grant state so tests that
+    don't care about focus-follow behaviour see no prompts or side effects.
+    """
+
+    def build(self):
+        return (True, "/tmp/sonari-raise")
+
+    def check_grant(self):
+        return "granted"
+
+    def doctor_rows(self):
+        return [("focus-follow helper", True, "ok")]
+
+
+def fake_platform(supervisor=None, hotkey=None, tts=None, raise_backend=None):
     return types.SimpleNamespace(
         supervisor=supervisor or FakeSupervisor(),
         hotkey=hotkey or FakeHotkey(),
         tts=tts or FakeTts(),
+        raise_backend=raise_backend or FakeRaiseBackend(),
         earcon=None,
     )
