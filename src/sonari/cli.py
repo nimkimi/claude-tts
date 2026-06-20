@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from typing import Optional
 
@@ -38,6 +39,40 @@ VERBOSITY_CHOICES = ("everything", "medium", "quiet")
 def _send(msg: dict, expect_reply: bool = False):
     from . import client  # local import so tests can patch sonari.client.send
     return client.send(msg, expect_reply=expect_reply)
+
+
+def _speak_once(text: str) -> None:
+    """Best-effort synchronous speech via the platform TTS backend (used by the
+    install grant flow; the daemon isn't a reliable speaker mid-install)."""
+    try:
+        tts = _platform().tts
+        proc = tts.run(text, tts.best_voice(), 200)
+        if proc is not None:
+            proc.wait(timeout=15)
+    except Exception:  # noqa: BLE001 - guidance speech must never break install
+        pass
+
+
+def _focus_follow_setup(raise_backend, focus_follow: bool) -> None:
+    """Build the sonari-raise helper and, when focus-follow is on and the
+    Automation grant isn't in place, speak guidance and surface the consent
+    dialog (eyes-free users can't discover a silent dialog on first jump)."""
+    ok, detail = raise_backend.build()
+    print("focus-follow helper: {0}".format(detail))
+    if not ok or not focus_follow:
+        return
+    grant = raise_backend.check_grant()
+    if grant == "granted":
+        return
+    try:
+        subprocess.call(["afplay", "/System/Library/Sounds/Glass.aiff"])
+    except Exception:  # noqa: BLE001
+        pass
+    _speak_once("Focus follow needs permission. A dialog will appear. "
+                "Click Allow to let Sonari raise your terminal window.")
+    raise_backend.check_grant()  # second call surfaces the dialog at this moment
+    print("focus-follow: if window-raise doesn't work, grant Automation to "
+          "'sonari-raise' in System Settings > Privacy & Security > Automation.")
 
 
 def _daemon_not_running_message() -> str:
@@ -184,6 +219,7 @@ def doctor() -> list:
     results.extend(_platform().supervisor.doctor_rows())
     # Hotkey diagnostics (Windows: collisions + UIPI/elevation; macOS: none here).
     results.extend(_platform().hotkey.doctor_rows())
+    results.extend(_platform().raise_backend.doctor_rows())
 
     # Neutral rows (portable, keep inline).
     try:
@@ -394,6 +430,15 @@ def install() -> int:
     launchctl_fn = getattr(sup, "launchctl", None) or (lambda a: 0)
     _platform().hotkey.install(
         log_path=hk_log, agent_path=None, launchctl_fn=launchctl_fn)
+
+    # 6b. Focus-follow: build the sonari-raise helper + proactive Automation grant.
+    try:
+        from sonari.config import load_config
+        cfg = load_config()
+        _focus_follow_setup(_platform().raise_backend,
+                            bool(cfg.get("focus_follow", True)))
+    except Exception:  # noqa: BLE001 - focus-follow setup must never break install
+        pass
 
     # 7. Voice check (best_voice() is a display-name str on every platform).
     try:
