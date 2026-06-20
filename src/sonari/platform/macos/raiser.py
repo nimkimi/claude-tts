@@ -45,8 +45,14 @@ class MacRaiseBackend(RaiseBackend):
                                timeout=_HELPER_TIMEOUT).returncode
                 return rc == 0
             if identity.term_program == "iTerm.app":
-                url = "iterm2:///reveal?sessionid=" + identity.iterm_session_id
-                rc = self._run(["open", url], timeout=_HELPER_TIMEOUT).returncode
+                # The iterm2:///reveal URL lands on the wrong session on macOS
+                # Tahoe; route through the helper's validated AppleScript recipe
+                # (--iterm), like Terminal. The helper strips to the bare GUID.
+                if not self._helper_exists():
+                    return False
+                rc = self._run([str(paths.RAISE_BIN_PATH), "--iterm",
+                                identity.iterm_session_id],
+                               timeout=_HELPER_TIMEOUT).returncode
                 return rc == 0
         except Exception:  # noqa: BLE001 - never raise/hang the raise thread
             return False
