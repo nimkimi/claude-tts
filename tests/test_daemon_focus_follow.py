@@ -73,6 +73,39 @@ def test_jump_adds_cue_when_no_raise_will_happen():
         "Jumping to backend. Bring it forward to type."
 
 
+def test_non_raising_jump_still_bumps_generation_so_it_supersedes():
+    # FIX 1: the generation must advance on EVERY jump, not only raising ones.
+    # Trace a double-jump A->B where B is non-followable (no identity). If the bump
+    # lives inside `if will_raise:`, B does NOT advance the generation, so an
+    # in-flight raise(A) tagged with A's generation stays "current" and wrongly
+    # yanks focus back to A while the voice is on B. The bump must run on every jump.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    sessions.register("a", cwd="/work/alpha")
+    sessions.set_identity("a", _ident())          # A is followable -> will raise
+    sessions.register("b", cwd="/work/bravo")     # B has NO identity -> non-followable
+    rs = RecordingRaiseService(will=True)          # will=True, but will_attempt gates on identity
+    daemon.raise_service = rs
+
+    # Jump 1: foreground excludes "fg", A has backlog -> target A (raising).
+    daemon.handle_message(_msg(MsgType.PROSE, "a", delta="ay. ", index=0, final=True))
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, "fg"))
+    assert sessions.foreground() == "a"
+
+    # Jump 2: now fg=A is excluded, B has backlog -> target B (NON-raising).
+    daemon.handle_message(_msg(MsgType.PROSE, "b", delta="be. ", index=0, final=True))
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
+    assert sessions.foreground() == "b"
+
+    # The load-bearing assertion (mutation-meaningful): B's non-raising jump bumped
+    # the generation, so the counter advanced TWICE. If the bump is moved back inside
+    # `if will_raise:`, B does not bump and this is 1 -> the test FAILS.
+    assert rs._gen == 2
+    # raise_async fired exactly once (only for A), tagged with A's now-STALE gen 1.
+    assert len(rs.attempts) == 1
+    ident, gen = rs.attempts[0]
+    assert ident.tty == "/dev/ttys9" and gen == 1
+
+
 def test_raise_failure_callback_enqueues_cue():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     sessions.register("b", cwd="/work/backend")
