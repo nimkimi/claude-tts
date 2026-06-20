@@ -293,20 +293,39 @@ it can, via the `RaiseBackend` seam. TDD applies to all of the latter.
 - **Switch:** `focus_follow` config, default ON.
 - **AppleScript execution:** dedicated `sonari-raise` Swift helper for a clean,
   recognizable, narrow Automation grant (not shared `osascript`).
-- **iTerm2 mechanism:** `iterm2:///reveal` URL (no grant) primary; helper-AppleScript
-  fallback if Tahoe fights the URL (build-time decision).
+- **iTerm2 mechanism:** ~~`iterm2:///reveal` URL (no grant) primary~~ — **REVISED at build
+  time (Task 11):** the reveal URL is BROKEN on Tahoe (activates iTerm2 but lands on the
+  wrong session). Shipped path is the **helper-AppleScript fallback** (`sonari-raise --iterm
+  <id>`: strip `wNtNpN:` → match bare GUID → select session/tab + `set index of window to 1`
+  + `activate`, never window-select/`set frontmost`, `delay 0.8`). Needs an Automation grant
+  like Terminal (surfaced via `--check-iterm`, targeted by `TERM_PROGRAM`).
 - **Fallback:** always keep the voice jump; add a spoken "bring it forward" cue
   when focus can't/ won't follow.
 - **Join key:** tty for Terminal.app; `ITERM_SESSION_ID` for iTerm2.
 - **Raiser location:** speechd (relay-safe; proven keypress-independent).
 
-## 8. Open / deferred
+## 8. Build-time verification results (Task 11 — RESOLVED 2026-06-20 on Nima's Tahoe box)
 
-- **iTerm2 reveal-URL on Tahoe** — confirm at build time (§3 caveat).
-- **Grant-identity name** — the *path* is proven (probe5: python-LaunchAgent → a
-  transient child → Apple Events grant works, a close analog of speechd →
-  `sonari-raise`); only the consent dialog's displayed *name* is unconfirmed. A
-  one-observation build-time check; adjust doctor copy to match what it shows.
+Verified end-to-end through the **shipped `sonari-raise` binary** (built from this branch into
+`~/.sonari/sonari-raise`), each self-verified via independent osascript readback:
+
+- **Terminal.app `<tty>` raise — ✅ PASS.** Raised a background window forward from among 6 open
+  Terminal windows; correct front tty after; bogus tty → NOTFOUND (exit 1). The proven recipe
+  holds through the shipped helper.
+- **iTerm2 `iterm2:///reveal?sessionid=` URL — ❌ BROKEN on Tahoe.** Brings iTerm2 to the front
+  but stays on the *previously-active* session (would land an eyes-free user in the wrong
+  session). Abandoned.
+- **iTerm2 `--iterm <id>` AppleScript fallback — ✅ PASS (shipped path).** All 3 sessions raised
+  correctly (cross-window, cross-tab, and back); `wNtNpN:` prefix-stripping confirmed; unknown
+  id → NOTFOUND (exit 1). Recipe = select session/tab + `set index of window to 1` + `activate`
+  (no window-select/`set frontmost`; `delay 0.8` required — 0.3 gave a false MISS).
+- **Automation grants — ✅ confirmed.** `sonari-raise --check` (Terminal) and `--check-iterm`
+  (iTerm2) both returned granted (exit 0); the consent flow works for the unsigned helper. The
+  grant is per target-app; install/doctor target it by `TERM_PROGRAM`. (Exact displayed consent
+  string not separately transcribed; doctor copy points users to System Settings → Privacy &
+  Security → Automation → `sonari-raise`.)
+
+### Still deferred
 - **Other terminals / tmux / Windows** — extension points; not built.
 - **Multi-window-per-session / tab disambiguation beyond tty** — tty already
   resolves the tab; no further work needed for the supported terminals.
