@@ -8,32 +8,38 @@ from tests.daemon_helpers import make_daemon
 def test_dispatch_under_lock_handle_message_guarded():
     """Dispatch runs while the transaction lock is held (socket path)."""
     daemon, _queue, _speaker, _sessions, _config = make_daemon()
+    from sonari.daemon import registry
     recorded = []
+    original = registry.HANDLERS["ping"]
 
-    original = daemon._on_ping
-
-    def recording_ping(msg):
+    def recording_ping(ctx, msg):
         recorded.append(daemon._lock.locked())
-        return original(msg)
+        return original(ctx, msg)
 
-    daemon._on_ping = recording_ping
-    daemon._handle_message_guarded({"type": "ping"})
+    registry.HANDLERS["ping"] = recording_ping
+    try:
+        daemon._handle_message_guarded({"type": "ping"})
+    finally:
+        registry.HANDLERS["ping"] = original
     assert recorded == [True], "expected lock held during dispatch, got: {0}".format(recorded)
 
 
 def test_dispatch_under_lock_dispatch_hotkey():
     """Dispatch runs while the transaction lock is held (hotkey path)."""
     daemon, _queue, _speaker, _sessions, _config = make_daemon()
+    from sonari.daemon import registry
     recorded = []
+    original = registry.HANDLERS["ping"]
 
-    original = daemon._on_ping
-
-    def recording_ping(msg):
+    def recording_ping(ctx, msg):
         recorded.append(daemon._lock.locked())
-        return original(msg)
+        return original(ctx, msg)
 
-    daemon._on_ping = recording_ping
-    daemon._dispatch_hotkey({"type": "ping"})
+    registry.HANDLERS["ping"] = recording_ping
+    try:
+        daemon._dispatch_hotkey({"type": "ping"})
+    finally:
+        registry.HANDLERS["ping"] = original
     assert recorded == [True], "expected lock held during hotkey dispatch, got: {0}".format(recorded)
 
 

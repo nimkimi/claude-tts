@@ -37,10 +37,29 @@ def test_new_package_modules_declare_future_annotations():
     # not reach daemon/ submodules. Pin the Python-3.9 convention for the package
     # here: every module's first code line must be the future-annotations import.
     for name in ("host.py", "bootstrap.py", "__init__.py", "__main__.py",
-                 "registry.py", "context.py", "state.py", "server.py"):
+                 "registry.py", "context.py", "state.py", "server.py",
+                 "limits.py",
+                 "features/__init__.py", "features/control.py"):
         text = (_SRC / name).read_text(encoding="utf-8")
         first = next(
             line.strip() for line in text.splitlines()
             if line.strip() and not line.strip().startswith("#")
         )
         assert first == _FUTURE, f"{name}: first code line must be {_FUTURE!r}"
+
+
+def test_control_handlers_registered_in_features_control():
+    # Each lifted handler must resolve to a function defined in
+    # features.control, not the old host thunk — proves @handler decorators
+    # in features/control.py actually ran and replaced the thunks.
+    from sonari.daemon import registry
+    from sonari.protocol import MsgType
+
+    expected_module = "sonari.daemon.features.control"
+    for key in (MsgType.SET_RATE, MsgType.SET_VOICE, MsgType.SET_VERBOSITY,
+                MsgType.SET_MINQUEUE, MsgType.CYCLE_VERBOSITY,
+                MsgType.STATUS, MsgType.PING):
+        fn = registry.HANDLERS[key]
+        assert fn.__module__ == expected_module, (
+            f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"
+        )

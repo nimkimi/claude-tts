@@ -6,7 +6,6 @@ import threading
 
 from sonari.protocol import MsgType
 from sonari.queue import SpeechItem
-from sonari.config import save_config
 from sonari.session_stream import SessionStream
 from sonari.paths import (
     LOCK_PATH, ensure_sonari_dir,
@@ -17,15 +16,12 @@ from sonari.daemon.state import SessionState
 from sonari.daemon.context import Ctx
 from sonari.daemon.registry import handler, dispatch
 from sonari.daemon.server import Server
-
-
-RATE_MIN = 100
-RATE_MAX = 400
-
-# Min-queue batching: how many prose items must accumulate before they are read.
-# 1 == read each item as it arrives (the default, unchanged behaviour).
-MINQUEUE_MIN = 1
-MINQUEUE_MAX = 10
+from sonari.daemon.limits import RATE_MIN, RATE_MAX, MINQUEUE_MIN, MINQUEUE_MAX
+from sonari.daemon.features import control  # noqa: F401 — registers @handler decorators
+from sonari.daemon.features.control import (
+    on_set_rate, on_set_voice, on_set_verbosity,
+    on_set_minqueue, on_cycle_verbosity, on_status, on_ping,
+)
 
 
 class SpeechDaemon:
@@ -692,78 +688,25 @@ class SpeechDaemon:
     # ------------------------------------------------------------------ #
 
     def _on_set_rate(self, msg):
-        is_delta = "delta" in msg
-        if is_delta:
-            try:
-                cur = int(self.config.get("rate", 200))
-                rate = max(RATE_MIN, min(RATE_MAX, cur + int(msg.get("delta", 0))))
-            except (ValueError, TypeError):
-                return None
-        else:
-            # Validate/clamp the absolute rate just like the delta branch — an
-            # unvalidated value here is persisted to disk and breaks synthesis.
-            try:
-                rate = max(RATE_MIN, min(RATE_MAX, int(msg.get("rate"))))
-            except (TypeError, ValueError):
-                return None
-        self.config["rate"] = rate
-        self.speaker.set_rate(rate)
-        save_config(self.config)
-        if is_delta:
-            fg = self.sessions.foreground()
-            if fg is not None:
-                self._enqueue(fg, "prose", "Rate {0}.".format(rate), False)
-        return None
+        return on_set_rate(self._ctx.bind(msg), msg)
 
     def _on_set_voice(self, msg):
-        voice = msg.get("voice")
-        self.config["voice"] = voice
-        self.speaker.set_voice(voice)
-        save_config(self.config)
-        return None
+        return on_set_voice(self._ctx.bind(msg), msg)
 
     def _on_set_verbosity(self, msg):
-        self.config["verbosity"] = msg.get("verbosity")
-        save_config(self.config)
-        return None
+        return on_set_verbosity(self._ctx.bind(msg), msg)
 
     def _on_set_minqueue(self, msg):
-        # Validate/clamp before persisting — a bad value reaches disk and would
-        # wedge prose buffering on every turn (mirrors the SET_RATE guard).
-        try:
-            n = max(MINQUEUE_MIN, min(MINQUEUE_MAX, int(msg.get("minqueue"))))
-        except (TypeError, ValueError):
-            return None
-        self.config["minqueue"] = n
-        save_config(self.config)
-        return None
+        return on_set_minqueue(self._ctx.bind(msg), msg)
 
     def _on_cycle_verbosity(self, msg):
-        order = ["everything", "medium", "quiet"]
-        cur = self.config.get("verbosity", "everything")
-        if cur in order:
-            nxt = order[(order.index(cur) + 1) % len(order)]
-        else:
-            nxt = order[0]
-        self.config["verbosity"] = nxt
-        save_config(self.config)
-        fg = self.sessions.foreground()
-        if fg is not None:
-            self._enqueue(fg, "prose", "Verbosity {0}.".format(nxt), False)
-        return None
+        return on_cycle_verbosity(self._ctx.bind(msg), msg)
 
     def _on_status(self, msg):
-        return {
-            "verbosity": self.config.get("verbosity"),
-            "rate": self.config.get("rate"),
-            "voice": self.config.get("voice"),
-            "foreground": self.sessions.foreground(),
-            "queue_len": sum(len(st.queue) for st in self._streams.values()),
-            "minqueue": self.config.get("minqueue"),
-        }
+        return on_status(self._ctx.bind(msg), msg)
 
     def _on_ping(self, msg):
-        return {"ok": True}
+        return on_ping(self._ctx.bind(msg), msg)
 
     def stop(self) -> None:
         self._running.clear()
@@ -1217,42 +1160,4 @@ def _h_reload_keymap(ctx, msg):
     return ctx.host._on_reload_keymap(msg)
 
 
-# ------------------------------------------------------------------ #
-# Registry thunks — control family (Task 3.5)                         #
-# Grouped for the Step-5 lift into features/control.py                #
-# ------------------------------------------------------------------ #
-
-@handler(MsgType.SET_RATE)
-def _h_set_rate(ctx, msg):
-    return ctx.host._on_set_rate(msg)
-
-
-@handler(MsgType.SET_VOICE)
-def _h_set_voice(ctx, msg):
-    return ctx.host._on_set_voice(msg)
-
-
-@handler(MsgType.SET_VERBOSITY)
-def _h_set_verbosity(ctx, msg):
-    return ctx.host._on_set_verbosity(msg)
-
-
-@handler(MsgType.SET_MINQUEUE)
-def _h_set_minqueue(ctx, msg):
-    return ctx.host._on_set_minqueue(msg)
-
-
-@handler(MsgType.CYCLE_VERBOSITY)
-def _h_cycle_verbosity(ctx, msg):
-    return ctx.host._on_cycle_verbosity(msg)
-
-
-@handler(MsgType.STATUS)
-def _h_status(ctx, msg):
-    return ctx.host._on_status(msg)
-
-
-@handler(MsgType.PING)
-def _h_ping(ctx, msg):
-    return ctx.host._on_ping(msg)
 
