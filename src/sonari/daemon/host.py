@@ -221,21 +221,6 @@ class SpeechDaemon:
         for it in items:
             self._state._pending_heard.pop(it.id, None)
 
-    def _waiting_target(self, exclude):
-        """The background session jump-to-waiting should switch to, or None.
-
-        Considers only streams with a non-empty, non-muted queue (live backlog —
-        Stage 3 keys off the queue, not history). A stream holding an unplayed
-        decision (choice|plan|permission) ranks ahead of prose-only ones; ties break
-        by session insertion order. Excludes *exclude* (the current foreground)."""
-        blocked, prose = [], []
-        for sess, st in self._state._streams.items():          # insertion-ordered
-            if sess == exclude or st.muted or len(st.queue) == 0:
-                continue
-            (blocked if st.queue.has_decision() else prose).append(sess)
-        ordered = blocked + prose
-        return ordered[0] if ordered else None
-
     def _attributed_text(self, item) -> str:
         """item.text, prefixed with the session's folder name when the voice switches
         to a session different from the one last spoken — so the user knows who's
