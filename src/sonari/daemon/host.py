@@ -38,6 +38,8 @@ from sonari.daemon.features import focus  # noqa: F401 — registers @handler de
 from sonari.daemon.features.focus import on_jump_waiting
 from sonari.daemon.features import prose  # noqa: F401 — registers @handler decorators
 from sonari.daemon.features.prose import on_prose, on_tool, on_earcon, on_flush
+from sonari.daemon.features import hotkeys  # noqa: F401 — registers @handler decorators
+from sonari.daemon.features.hotkeys import on_reload_keymap
 
 
 class SpeechDaemon:
@@ -422,17 +424,7 @@ class SpeechDaemon:
     # ------------------------------------------------------------------ #
 
     def _on_reload_keymap(self, msg):
-        # keymap.json changed (e.g. an unbind): re-register hotkeys so it takes
-        # effect without a daemon restart. Run it OFF the daemon lock: this
-        # handler is invoked while holding self._lock, but _reload_hotkeys joins
-        # the Windows hotkey pump thread, which itself needs self._lock to
-        # dispatch a fire. Joining under the lock could stall the daemon up to
-        # the join timeout and, on timeout, leave an orphaned thread that
-        # re-creates the H2 dark-hotkey race. A short-lived thread does the
-        # reload lock-free (and _reload_lock serializes concurrent reloads).
-        threading.Thread(target=self._reload_hotkeys,
-                         name="sonari-keymap-reload", daemon=True).start()
-        return None
+        return on_reload_keymap(self._ctx.bind(msg), msg)
 
     # ------------------------------------------------------------------ #
     # Control family handlers (Task 3.5)                                  #
@@ -785,10 +777,5 @@ class SpeechDaemon:
 # Registry thunks — hotkeys family (Task 3.5)                         #
 # Grouped for the Step-5 lift into features/hotkeys.py                #
 # ------------------------------------------------------------------ #
-
-@handler(MsgType.RELOAD_KEYMAP)
-def _h_reload_keymap(ctx, msg):
-    return ctx.host._on_reload_keymap(msg)
-
 
 

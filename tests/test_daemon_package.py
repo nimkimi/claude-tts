@@ -42,7 +42,8 @@ def test_new_package_modules_declare_future_annotations():
                  "features/__init__.py", "features/control.py",
                  "features/decisions.py", "features/lifecycle.py",
                  "features/navigation.py", "features/playback.py",
-                 "features/focus.py", "features/prose.py"):
+                 "features/focus.py", "features/prose.py",
+                 "features/hotkeys.py"):
         text = (_SRC / name).read_text(encoding="utf-8")
         first = next(
             line.strip() for line in text.splitlines()
@@ -151,3 +152,17 @@ def test_prose_handlers_registered_in_features_prose():
         assert fn.__module__ == expected_module, (
             f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"
         )
+
+
+def test_hotkeys_handlers_registered_in_features_hotkeys():
+    # Proves @handler decorator in features/hotkeys.py ran and RELOAD_KEYMAP
+    # resolves to the feature module, not the old host thunk.
+    from sonari.daemon import registry
+    from sonari.protocol import MsgType
+
+    expected_module = "sonari.daemon.features.hotkeys"
+    fn = registry.HANDLERS[MsgType.RELOAD_KEYMAP]
+    assert fn.__module__ == expected_module, (
+        f"HANDLERS[{MsgType.RELOAD_KEYMAP!r}].__module__ == {fn.__module__!r}, "
+        f"want {expected_module!r}"
+    )
