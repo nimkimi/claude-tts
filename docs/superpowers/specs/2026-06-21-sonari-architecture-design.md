@@ -242,6 +242,16 @@ on the **connection thread**, never between pop and speak. `pop_next` /
 lock. Net: the per-utterance critical section is identical in lock-held time and
 indirection. Gated by a **measured** before/after micro-benchmark (§8), not an ear test.
 
+> **Phase-2 measured correction (2026-06-21).** Relocating the ledger to
+> `SessionState` behind *byte-identical property shims* measured **+10%** on the
+> `enqueue+pop` hot path (884 vs 805 ns) — over the perf constraint. The
+> shipped approach keeps the ledger on `SessionState` but re-sources the host's
+> hot path (speak loop + kernel ops) to `self._state._X` (one attribute load,
+> not a descriptor call); property shims remain only for cold-path callers.
+> Measured perf-neutral (~794 ns). The loop's lock regions are therefore
+> logically identical, not literally byte-identical — verified by the permanent
+> concurrency guards + this measured gate.
+
 ---
 
 ## 6. Platform stance (adjusted)

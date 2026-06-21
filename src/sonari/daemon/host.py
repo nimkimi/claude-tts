@@ -47,10 +47,7 @@ class SpeechDaemon:
         self.speaker = speaker
         self.sessions = sessions
         self.config = config
-        self._streams: "dict[str, SessionStream]" = {}
-        self._next_id = 0
         self._running = threading.Event()
-        self._wake = threading.Event()
         self._lock = threading.Lock()
         self._state = SessionState(self._lock)
         self._ctx = Ctx(self)
@@ -64,12 +61,53 @@ class SpeechDaemon:
         from sonari.history import SessionHistory
         self.history = SessionHistory(cap=int(config.get("history_cap", 200)))
         self._backlog_cap = int(config.get("backlog_cap", 200))
-        self._pending_heard: dict = {}            # SpeechItem.id -> HistoryEntry
-        self._paused = threading.Event()          # play/pause: set == speech halted
-        self._current_item = None                 # item being spoken right now
         self._reload_lock = threading.Lock()      # serializes off-lock hotkey reloads
-        self._last_spoken_session = None          # for folder attribution on switch
         self.raise_service = raise_service        # lazily built on first jump
+
+    # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
+    # (speak loop + kernel ops) goes through self._state._X directly; these
+    # properties bridge the self._X name for cold-path callers (tests, the
+    # concurrency guards, feature modules on the connection thread). 3 are
+    # read/write (rebindable scalars); 4 are read-only (mutated in place). ---
+    @property
+    def _streams(self):
+        return self._state._streams
+
+    @property
+    def _pending_heard(self):
+        return self._state._pending_heard
+
+    @property
+    def _paused(self):
+        return self._state._paused
+
+    @property
+    def _wake(self):
+        return self._state._wake
+
+    @property
+    def _current_item(self):
+        return self._state._current_item
+
+    @_current_item.setter
+    def _current_item(self, value):
+        self._state._current_item = value
+
+    @property
+    def _last_spoken_session(self):
+        return self._state._last_spoken_session
+
+    @_last_spoken_session.setter
+    def _last_spoken_session(self, value):
+        self._state._last_spoken_session = value
+
+    @property
+    def _next_id(self):
+        return self._state._next_id
+
+    @_next_id.setter
+    def _next_id(self, value):
+        self._state._next_id = value
 
     def _raise(self):
         """The RaiseService, built lazily on first use (so tests can inject a fake
@@ -91,14 +129,14 @@ class SpeechDaemon:
                           mute_exempt=True, at_front=True)
 
     def _alloc_id(self) -> int:
-        self._next_id += 1
-        return self._next_id
+        self._state._next_id += 1
+        return self._state._next_id
 
     def _stream(self, session: str) -> SessionStream:
-        s = self._streams.get(session)
+        s = self._state._streams.get(session)
         if s is None:
             s = SessionStream(queue_cap=self._backlog_cap)
-            self._streams[session] = s
+            self._state._streams[session] = s
         return s
 
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
@@ -117,14 +155,14 @@ class SpeechDaemon:
         )
         st = self._stream(session)
         if entry is not None:
-            self._pending_heard[item.id] = entry
+            self._state._pending_heard[item.id] = entry
         if at_front:
             st.queue.enqueue_front(item)
         else:
             evicted = st.queue.enqueue(item)
             if evicted is not None:
                 self._drop_pending([evicted])
-        self._wake.set()
+        self._state._wake.set()
 
     def _minqueue(self) -> int:
         try:
@@ -181,7 +219,7 @@ class SpeechDaemon:
 
     def _drop_pending(self, items) -> None:
         for it in items:
-            self._pending_heard.pop(it.id, None)
+            self._state._pending_heard.pop(it.id, None)
 
     def _waiting_target(self, exclude):
         """The background session jump-to-waiting should switch to, or None.
@@ -191,7 +229,7 @@ class SpeechDaemon:
         decision (choice|plan|permission) ranks ahead of prose-only ones; ties break
         by session insertion order. Excludes *exclude* (the current foreground)."""
         blocked, prose = [], []
-        for sess, st in self._streams.items():          # insertion-ordered
+        for sess, st in self._state._streams.items():          # insertion-ordered
             if sess == exclude or st.muted or len(st.queue) == 0:
                 continue
             (blocked if st.queue.has_decision() else prose).append(sess)
@@ -209,22 +247,22 @@ class SpeechDaemon:
             # Self-naming cue (e.g. "Jumping to backend." / "Pinned backend."):
             # claim this session as last-spoken so the NEXT item from it is
             # NOT prefixed again — suppresses the double-announce.
-            self._last_spoken_session = item.session
+            self._state._last_spoken_session = item.session
         elif not item.mute_exempt:
-            if (self._last_spoken_session is not None
-                    and item.session != self._last_spoken_session):
+            if (self._state._last_spoken_session is not None
+                    and item.session != self._state._last_spoken_session):
                 folder = self.sessions.folder(item.session)
                 if folder:
                     text = "{0}. {1}".format(folder, item.text)
-            self._last_spoken_session = item.session
+            self._state._last_spoken_session = item.session
         return text
 
     def note_spoken(self, item, completed: bool) -> None:
         """Speak-loop bookkeeping: confirm (or decline) the heard-marker for a
         finished utterance, and release the current-item claim."""
         with self._lock:
-            self._current_item = None
-            entry = self._pending_heard.pop(item.id, None)
+            self._state._current_item = None
+            entry = self._state._pending_heard.pop(item.id, None)
             if entry is not None and completed:
                 entry.heard = True
 
@@ -453,7 +491,7 @@ class SpeechDaemon:
 
     def stop(self) -> None:
         self._running.clear()
-        self._wake.set()
+        self._state._wake.set()
         self._stop_hotkeys()
         self._server.stop()
 
@@ -595,8 +633,8 @@ class SpeechDaemon:
         """Clear pause and wake the speak loop. The interrupted utterance was
         already re-queued at the front by the speak loop when its speak() returned
         not-completed during the pause, so resume picks back up where it stopped."""
-        self._paused.clear()
-        self._wake.set()
+        self._state._paused.clear()
+        self._state._wake.set()
 
     def _dispatch_hotkey(self, message: dict) -> None:
         """A hotkey fire is handled exactly like an inbound socket message.
@@ -628,7 +666,7 @@ class SpeechDaemon:
                 import sys
                 import traceback
                 traceback.print_exc(file=sys.stderr)
-                self._wake.wait(0.1)
+                self._state._wake.wait(0.1)
 
     def _signal_speak_failure(self) -> None:
         """An utterance raised (missing TTS extra, synth/playback failure, ...).
@@ -655,19 +693,19 @@ class SpeechDaemon:
         The voice plays the FOREGROUND session's stream: every pop reads the
         foreground stream's own queue. Background streams accumulate untouched
         until they become foreground."""
-        if self._paused.is_set():
+        if self._state._paused.is_set():
             # Play/pause: the loop is held, but a pause-exempt cue ("Paused.") must
             # still be voiced. Scan the foreground stream's queue for one; otherwise
             # hold. Pop+claim under the lock, mirroring the normal branch.
             with self._lock:
                 fg = self.sessions.foreground()
-                st = self._streams.get(fg)
+                st = self._state._streams.get(fg)
                 item = st.queue.pop_pause_exempt() if st is not None else None
-                self._current_item = item
+                self._state._current_item = item
                 cancel_epoch = self.speaker.cancel_epoch()
             if item is None:
-                self._wake.wait(self._poll_interval)
-                self._wake.clear()
+                self._state._wake.wait(self._poll_interval)
+                self._state._wake.clear()
                 return
             try:
                 completed = self.speaker.speak(item.text, cancel_epoch=cancel_epoch)
@@ -682,23 +720,23 @@ class SpeechDaemon:
         # this lock, so they can't slip into the gap between pop and claim.
         with self._lock:
             fg = self.sessions.foreground()
-            st = self._streams.get(fg)
+            st = self._state._streams.get(fg)
             item = st.queue.pop_next() if st is not None else None
-            self._current_item = item
+            self._state._current_item = item
             # Capture the speaker's cancel baseline atomically with the claim, so a
             # cancel() arriving during speak() is detected (M2 — the pop->speak gap).
             cancel_epoch = self.speaker.cancel_epoch()
-            ist = self._streams.get(item.session) if item is not None else None
+            ist = self._state._streams.get(item.session) if item is not None else None
             muted = (item is not None
                      and ist is not None and ist.muted
                      and not item.mute_exempt)
             text = None
             # Snapshot before _attributed_text so we can roll back if pause interrupts.
-            prev = self._last_spoken_session
+            prev = self._state._last_spoken_session
             if muted:
                 # Muted session: drop without speaking; release the claim.
-                self._current_item = None
-                self._pending_heard.pop(item.id, None)
+                self._state._current_item = None
+                self._state._pending_heard.pop(item.id, None)
             elif item is not None:
                 # Compute the attributed text under the lock so _last_spoken_session
                 # is updated atomically with the pop — a concurrent JUMP_WAITING or
@@ -706,8 +744,8 @@ class SpeechDaemon:
                 text = self._attributed_text(item)
         if item is None:
             # Foreground stream empty (or no foreground): wait until woken.
-            self._wake.wait(self._poll_interval)
-            self._wake.clear()
+            self._state._wake.wait(self._poll_interval)
+            self._state._wake.clear()
             return
         if muted:
             return
@@ -721,16 +759,16 @@ class SpeechDaemon:
             # Re-check pause INSIDE the lock (L2). A FLUSH also runs under this lock
             # and clears pause + the stream's queue; checking pause outside let a
             # FLUSH land between check and enqueue_front, resurrecting a flushed item.
-            if not completed and self._paused.is_set():
+            if not completed and self._state._paused.is_set():
                 # A pause interrupted this utterance: re-queue it at the front of ITS
                 # OWN stream so resume picks back up here, and KEEP its _pending_heard
                 # entry (don't note_spoken) so the eventual replay records it as heard.
                 # Roll back the _last_spoken_session commit from _attributed_text so
                 # the re-popped item on resume sees the pre-switch state and re-adds
                 # the folder prefix correctly (pause-attribution-drop regression).
-                self._current_item = None
+                self._state._current_item = None
                 self._stream(item.session).queue.enqueue_front(item)
-                self._last_spoken_session = prev
+                self._state._last_spoken_session = prev
                 requeued = True
         if not requeued:
             self.note_spoken(item, completed)
