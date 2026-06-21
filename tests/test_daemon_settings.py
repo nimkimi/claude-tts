@@ -119,3 +119,60 @@ def test_ping_returns_ok():
 def test_unknown_type_returns_none():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     assert daemon.handle_message(_msg("totally_unknown")) is None
+
+
+# --- SET_VOICE validation ---
+
+def test_set_voice_rejects_none_and_non_string():
+    # None and non-string values must NOT be persisted to config or sent to
+    # the speaker — they would break synthesis until bad config is removed.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    before = config.get("voice")
+    with mock.patch("sonari.daemon.features.control.save_config") as save:
+        daemon.handle_message(_msg(MsgType.SET_VOICE, voice=None))
+        daemon.handle_message(_msg(MsgType.SET_VOICE, voice=123))
+    assert config.get("voice") == before
+    assert speaker.voices == []
+    save.assert_not_called()
+
+
+def test_set_voice_rejects_empty_string():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    before = config.get("voice")
+    with mock.patch("sonari.daemon.features.control.save_config") as save:
+        daemon.handle_message(_msg(MsgType.SET_VOICE, voice=""))
+        daemon.handle_message(_msg(MsgType.SET_VOICE, voice="   "))
+    assert config.get("voice") == before
+    assert speaker.voices == []
+    save.assert_not_called()
+
+
+def test_set_voice_accepts_valid_string():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    with mock.patch("sonari.daemon.features.control.save_config") as save:
+        daemon.handle_message(_msg(MsgType.SET_VOICE, voice="Samantha"))
+    assert config["voice"] == "Samantha"
+    assert speaker.voices == ["Samantha"]
+    save.assert_called_once_with(config)
+
+
+# --- SET_VERBOSITY validation ---
+
+def test_set_verbosity_rejects_unknown_level():
+    # An out-of-set level must NOT be persisted — it would break verbosity
+    # gating on every utterance until the bad config is removed.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    before = config.get("verbosity")
+    with mock.patch("sonari.daemon.features.control.save_config") as save:
+        daemon.handle_message(_msg(MsgType.SET_VERBOSITY, verbosity="loud"))
+    assert config.get("verbosity") == before
+    save.assert_not_called()
+
+
+def test_set_verbosity_accepts_each_known_level():
+    for level in ("everything", "medium", "quiet"):
+        daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+        with mock.patch("sonari.daemon.features.control.save_config") as save:
+            daemon.handle_message(_msg(MsgType.SET_VERBOSITY, verbosity=level))
+        assert config["verbosity"] == level, f"Expected {level!r} to be accepted"
+        save.assert_called_once_with(config)
