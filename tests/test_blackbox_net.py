@@ -9,10 +9,17 @@ pops raw text and skips attribution/mute), drain_once() runs the REAL
 _speak_loop_once once (synchronous, because FakeSpeaker is instant), so the
 net exercises folder attribution, mute-drop, and cut-on-switch cancels too.
 """
+import pytest
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 from sonari.sessions import SessionManager
 from sonari.daemon import SpeechDaemon
+from sonari.daemon.features import lifecycle
 from sonari.config import DEFAULTS
+
+
+@pytest.fixture(autouse=True)
+def _silence_setup_cue(monkeypatch):
+    monkeypatch.setattr(lifecycle, "_setup_health", lambda v: ("ok", None))  # no setup cue in ordering
 
 
 class FakeSpeaker:
@@ -63,7 +70,6 @@ def make_net(verbosity="everything", foreground="fg",
               for k, v in DEFAULTS.items()}
     config["verbosity"] = verbosity
     daemon = SpeechDaemon(speaker, sessions, config)
-    daemon._setup_health = lambda v: ("ok", None)  # no setup cue in ordering
     return daemon, speaker, log, sessions, config
 
 

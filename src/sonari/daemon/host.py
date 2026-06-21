@@ -7,10 +7,7 @@ import threading
 from sonari.protocol import MsgType
 from sonari.queue import SpeechItem
 from sonari.session_stream import SessionStream
-from sonari.paths import (
-    LOCK_PATH, ensure_sonari_dir,
-    INSTALL_RECORD_PATH,
-)
+from sonari.paths import LOCK_PATH, ensure_sonari_dir
 from sonari.platform import transport
 from sonari.daemon.state import SessionState
 from sonari.daemon.context import Ctx
@@ -200,23 +197,6 @@ class SpeechDaemon:
             self.speaker.earcon("waiting")
             st.waiting_signaled = True
 
-    def _maybe_guide_setup(self, session: str, plugin_version: str) -> None:
-        """Speak ONE setup-guidance cue for this session, only when degraded.
-
-        Throttle: at most once per session (recorded whether or not a cue fires).
-        Silent when healthy. The check is a few file stats + a version compare
-        (no launchctl) and never raises.
-        """
-        if self._stream(session).guided:
-            return
-        try:
-            state, cue = self._setup_health(plugin_version or "")
-        except Exception:  # noqa: BLE001 - guidance must never break a session
-            return
-        self._stream(session).guided = True
-        if state != "ok" and cue:
-            self._enqueue(session, "prose", cue, False)
-
     def _drop_pending(self, items) -> None:
         for it in items:
             self._state._pending_heard.pop(it.id, None)
@@ -250,46 +230,6 @@ class SpeechDaemon:
             entry = self._state._pending_heard.pop(item.id, None)
             if entry is not None and completed:
                 entry.heard = True
-
-    @staticmethod
-    def _read_install_record():
-        """Return the install.json dict, or None if unreadable/absent. Never raises."""
-        import json
-        try:
-            with open(str(INSTALL_RECORD_PATH), "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, dict) else None
-        except Exception:  # noqa: BLE001 - health check must never raise
-            return None
-
-    @staticmethod
-    def _launcher_present() -> bool:
-        """Delegating shim — logic lives in the platform supervisor backend."""
-        from sonari.platform import get_platform
-        return get_platform().supervisor.is_installed()
-
-    def _setup_health(self, plugin_version: str):
-        """Return (state, cue) where state is one of:
-        "ok"            -> fully installed, no version drift   -> cue None
-        "not_installed" -> no install.json or launcher (never ran `sonari install`)
-        "version_drift" -> installed but plugin_version differs from this session's
-
-        Cheap: a few file stats + a string compare. No launchctl. Never raises.
-        The hotkeyd binary is deliberately NOT part of this check so a deliberate
-        speech-only user (no swiftc) is never nagged.
-        """
-        rec = self._read_install_record()
-        installed = (rec is not None and self._launcher_present())
-        if not installed:
-            return ("not_installed",
-                    "Sonari is reading aloud. To enable hotkeys and autostart, "
-                    "run, slash sonari install.")
-        recorded = (rec.get("plugin_version") or "")
-        # Only flag drift when BOTH sides are known and differ.
-        if plugin_version and recorded and plugin_version != recorded:
-            return ("version_drift",
-                    "Sonari was updated. Run, slash sonari install, to apply.")
-        return ("ok", None)
 
     def handle_message(self, msg):
         self._ctx.bind(msg)

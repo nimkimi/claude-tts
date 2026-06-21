@@ -8,11 +8,18 @@ Proves the ordering contract from the design spec section 4:
   - a turn_done earcon ends the turn.
 No real audio is ever produced: the Speaker is replaced by a recorder.
 """
+import pytest
 from sonari.hooks_entry import handle_event
 from sonari.protocol import PROTOCOL_VERSION
 from sonari.sessions import SessionManager
 from sonari.daemon import SpeechDaemon
+from sonari.daemon.features import lifecycle
 from sonari.config import DEFAULTS
+
+
+@pytest.fixture(autouse=True)
+def _silence_setup_cue(monkeypatch):
+    monkeypatch.setattr(lifecycle, "_setup_health", lambda v: ("ok", None))  # no setup cue in ordering tests
 
 
 SID = "sess-e2e-1"
@@ -77,7 +84,6 @@ def make_daemon():
     cfg = {k: (dict(v) if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
     cfg["verbosity"] = "everything"
     daemon = SpeechDaemon(speaker, sessions, cfg)
-    daemon._setup_health = lambda v: ("ok", None)  # no setup cue in ordering tests
     return daemon, speaker, log
 
 

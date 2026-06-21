@@ -2,6 +2,7 @@ import threading
 
 from sonari.protocol import MsgType
 from sonari.sessions import Identity
+from sonari.daemon.features import lifecycle
 from tests.daemon_helpers import make_daemon, stream_queue
 
 
@@ -35,9 +36,9 @@ def _ident():
     return Identity(term_program="Apple_Terminal", tty="/dev/ttys9")
 
 
-def test_session_start_stores_identity():
+def test_session_start_stores_identity(monkeypatch):
     daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
-    daemon._setup_health = lambda v: ("ok", None)
+    monkeypatch.setattr(lifecycle, "_setup_health", lambda v: ("ok", None))
     daemon.handle_message(_msg(MsgType.SESSION_START, "s1", cwd="/x",
                                term_program="Apple_Terminal", tty="/dev/ttys9",
                                iterm_session_id=""))
