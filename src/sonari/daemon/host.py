@@ -16,7 +16,7 @@ from sonari.paths import (
 from sonari.platform import transport
 from sonari.daemon.state import SessionState
 from sonari.daemon.context import Ctx
-from sonari.daemon.registry import handler
+from sonari.daemon.registry import handler, dispatch
 
 
 RATE_MIN = 100
@@ -334,173 +334,8 @@ class SpeechDaemon:
         return ("ok", None)
 
     def handle_message(self, msg):
-        t = msg.get("type")
-        session = msg.get("session", "")
-        verbosity = self.config.get("verbosity", "everything")
-
-        if t == MsgType.PROSE:
-            return self._on_prose(msg)
-
-        # Decision CONTENT is enqueued (and gated by foreground). The ALERT
-        # earcon for a decision travels as a SEPARATE EARCON message that
-        # hooks_entry emits BEFORE the content message; it is handled by the
-        # MsgType.EARCON branch below, so the earcon fires instantly and
-        # cross-session WITHOUT being doubled here.
-        if t == MsgType.CHOICE:
-            return self._on_choice(msg)
-
-        if t == MsgType.PLAN:
-            return self._on_plan(msg)
-
-        if t == MsgType.PERMISSION:
-            return self._on_permission(msg)
-
-        if t == MsgType.TOOL:
-            return self._on_tool(msg)
-
-        if t == MsgType.EARCON:
-            return self._on_earcon(msg)
-
-        if t == MsgType.FLUSH:
-            return self._on_flush(msg)
-
-        if t in (MsgType.SET_FOREGROUND, MsgType.SESSION_START):
-            self.sessions.set_foreground(session, cwd=msg.get("cwd"))
-            if t == MsgType.SESSION_START:
-                self.sessions.register(session, cwd=msg.get("cwd"))
-                from sonari.sessions import Identity
-                self.sessions.set_identity(session, Identity(
-                    term_program=msg.get("term_program", ""),
-                    tty=msg.get("tty", ""),
-                    iterm_session_id=msg.get("iterm_session_id", ""),
-                ))
-                self._maybe_guide_setup(session, msg.get("plugin_version", ""))
-            return None
-
-        if t == MsgType.SESSION_END:
-            self.sessions.unregister(session)
-            st = self._streams.get(session)
-            if st is not None:
-                self._drop_pending(st.queue.clear())
-            self.history.reset(session)
-            self._streams.pop(session, None)
-            return None
-
-        if t == MsgType.STOP:
-            return self._on_stop(msg)
-
-        if t == MsgType.SKIP:
-            return self._on_skip(msg)
-
-        if t == MsgType.NAV:
-            return self._on_nav(msg)
-
-        if t == MsgType.PAUSE:
-            return self._on_pause(msg)
-
-        if t == MsgType.MUTE:
-            return self._on_mute(msg)
-
-        if t == MsgType.PIN_TOGGLE:
-            return self._on_pin_toggle(msg)
-
-        if t == MsgType.RELOAD_KEYMAP:
-            # keymap.json changed (e.g. an unbind): re-register hotkeys so it takes
-            # effect without a daemon restart. Run it OFF the daemon lock: this
-            # handler is invoked while holding self._lock, but _reload_hotkeys joins
-            # the Windows hotkey pump thread, which itself needs self._lock to
-            # dispatch a fire. Joining under the lock could stall the daemon up to
-            # the join timeout and, on timeout, leave an orphaned thread that
-            # re-creates the H2 dark-hotkey race. A short-lived thread does the
-            # reload lock-free (and _reload_lock serializes concurrent reloads).
-            threading.Thread(target=self._reload_hotkeys,
-                             name="sonari-keymap-reload", daemon=True).start()
-            return None
-
-        if t == MsgType.REREAD_OPTIONS:
-            return self._on_reread_options(msg)
-
-        if t == MsgType.JUMP_WAITING:
-            return self._on_jump_waiting(msg)
-
-        if t == MsgType.JUMP_DECISION:
-            return self._on_jump_decision(msg)
-
-        if t == MsgType.SET_RATE:
-            is_delta = "delta" in msg
-            if is_delta:
-                try:
-                    cur = int(self.config.get("rate", 200))
-                    rate = max(RATE_MIN, min(RATE_MAX, cur + int(msg.get("delta", 0))))
-                except (ValueError, TypeError):
-                    return None
-            else:
-                # Validate/clamp the absolute rate just like the delta branch — an
-                # unvalidated value here is persisted to disk and breaks synthesis.
-                try:
-                    rate = max(RATE_MIN, min(RATE_MAX, int(msg.get("rate"))))
-                except (TypeError, ValueError):
-                    return None
-            self.config["rate"] = rate
-            self.speaker.set_rate(rate)
-            save_config(self.config)
-            if is_delta:
-                fg = self.sessions.foreground()
-                if fg is not None:
-                    self._enqueue(fg, "prose", "Rate {0}.".format(rate), False)
-            return None
-
-        if t == MsgType.SET_VOICE:
-            voice = msg.get("voice")
-            self.config["voice"] = voice
-            self.speaker.set_voice(voice)
-            save_config(self.config)
-            return None
-
-        if t == MsgType.SET_VERBOSITY:
-            self.config["verbosity"] = msg.get("verbosity")
-            save_config(self.config)
-            return None
-
-        if t == MsgType.SET_MINQUEUE:
-            # Validate/clamp before persisting — a bad value reaches disk and would
-            # wedge prose buffering on every turn (mirrors the SET_RATE guard).
-            try:
-                n = max(MINQUEUE_MIN, min(MINQUEUE_MAX, int(msg.get("minqueue"))))
-            except (TypeError, ValueError):
-                return None
-            self.config["minqueue"] = n
-            save_config(self.config)
-            return None
-
-        if t == MsgType.CYCLE_VERBOSITY:
-            order = ["everything", "medium", "quiet"]
-            cur = self.config.get("verbosity", "everything")
-            if cur in order:
-                nxt = order[(order.index(cur) + 1) % len(order)]
-            else:
-                nxt = order[0]
-            self.config["verbosity"] = nxt
-            save_config(self.config)
-            fg = self.sessions.foreground()
-            if fg is not None:
-                self._enqueue(fg, "prose", "Verbosity {0}.".format(nxt), False)
-            return None
-
-        if t == MsgType.STATUS:
-            return {
-                "verbosity": self.config.get("verbosity"),
-                "rate": self.config.get("rate"),
-                "voice": self.config.get("voice"),
-                "foreground": self.sessions.foreground(),
-                "queue_len": sum(len(st.queue) for st in self._streams.values()),
-                "minqueue": self.config.get("minqueue"),
-            }
-
-        if t == MsgType.PING:
-            return {"ok": True}
-
-        return None
+        self._ctx.bind(msg)
+        return dispatch(self._ctx, msg)
 
     # ------------------------------------------------------------------ #
     # Prose family handlers (Task 3.2)                                     #
@@ -807,6 +642,130 @@ class SpeechDaemon:
             self._drop_pending(st.queue.jump_to_decision())
         self.speaker.cancel()
         return None
+
+    # ------------------------------------------------------------------ #
+    # Lifecycle family handlers (Task 3.5)                                #
+    # ------------------------------------------------------------------ #
+
+    def _on_set_foreground(self, msg):
+        t = msg.get("type")
+        session = msg.get("session", "")
+        self.sessions.set_foreground(session, cwd=msg.get("cwd"))
+        if t == MsgType.SESSION_START:
+            self.sessions.register(session, cwd=msg.get("cwd"))
+            from sonari.sessions import Identity
+            self.sessions.set_identity(session, Identity(
+                term_program=msg.get("term_program", ""),
+                tty=msg.get("tty", ""),
+                iterm_session_id=msg.get("iterm_session_id", ""),
+            ))
+            self._maybe_guide_setup(session, msg.get("plugin_version", ""))
+        return None
+
+    def _on_session_end(self, msg):
+        session = msg.get("session", "")
+        self.sessions.unregister(session)
+        st = self._streams.get(session)
+        if st is not None:
+            self._drop_pending(st.queue.clear())
+        self.history.reset(session)
+        self._streams.pop(session, None)
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Hotkeys family handlers (Task 3.5)                                  #
+    # ------------------------------------------------------------------ #
+
+    def _on_reload_keymap(self, msg):
+        # keymap.json changed (e.g. an unbind): re-register hotkeys so it takes
+        # effect without a daemon restart. Run it OFF the daemon lock: this
+        # handler is invoked while holding self._lock, but _reload_hotkeys joins
+        # the Windows hotkey pump thread, which itself needs self._lock to
+        # dispatch a fire. Joining under the lock could stall the daemon up to
+        # the join timeout and, on timeout, leave an orphaned thread that
+        # re-creates the H2 dark-hotkey race. A short-lived thread does the
+        # reload lock-free (and _reload_lock serializes concurrent reloads).
+        threading.Thread(target=self._reload_hotkeys,
+                         name="sonari-keymap-reload", daemon=True).start()
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Control family handlers (Task 3.5)                                  #
+    # ------------------------------------------------------------------ #
+
+    def _on_set_rate(self, msg):
+        is_delta = "delta" in msg
+        if is_delta:
+            try:
+                cur = int(self.config.get("rate", 200))
+                rate = max(RATE_MIN, min(RATE_MAX, cur + int(msg.get("delta", 0))))
+            except (ValueError, TypeError):
+                return None
+        else:
+            # Validate/clamp the absolute rate just like the delta branch — an
+            # unvalidated value here is persisted to disk and breaks synthesis.
+            try:
+                rate = max(RATE_MIN, min(RATE_MAX, int(msg.get("rate"))))
+            except (TypeError, ValueError):
+                return None
+        self.config["rate"] = rate
+        self.speaker.set_rate(rate)
+        save_config(self.config)
+        if is_delta:
+            fg = self.sessions.foreground()
+            if fg is not None:
+                self._enqueue(fg, "prose", "Rate {0}.".format(rate), False)
+        return None
+
+    def _on_set_voice(self, msg):
+        voice = msg.get("voice")
+        self.config["voice"] = voice
+        self.speaker.set_voice(voice)
+        save_config(self.config)
+        return None
+
+    def _on_set_verbosity(self, msg):
+        self.config["verbosity"] = msg.get("verbosity")
+        save_config(self.config)
+        return None
+
+    def _on_set_minqueue(self, msg):
+        # Validate/clamp before persisting — a bad value reaches disk and would
+        # wedge prose buffering on every turn (mirrors the SET_RATE guard).
+        try:
+            n = max(MINQUEUE_MIN, min(MINQUEUE_MAX, int(msg.get("minqueue"))))
+        except (TypeError, ValueError):
+            return None
+        self.config["minqueue"] = n
+        save_config(self.config)
+        return None
+
+    def _on_cycle_verbosity(self, msg):
+        order = ["everything", "medium", "quiet"]
+        cur = self.config.get("verbosity", "everything")
+        if cur in order:
+            nxt = order[(order.index(cur) + 1) % len(order)]
+        else:
+            nxt = order[0]
+        self.config["verbosity"] = nxt
+        save_config(self.config)
+        fg = self.sessions.foreground()
+        if fg is not None:
+            self._enqueue(fg, "prose", "Verbosity {0}.".format(nxt), False)
+        return None
+
+    def _on_status(self, msg):
+        return {
+            "verbosity": self.config.get("verbosity"),
+            "rate": self.config.get("rate"),
+            "voice": self.config.get("voice"),
+            "foreground": self.sessions.foreground(),
+            "queue_len": sum(len(st.queue) for st in self._streams.values()),
+            "minqueue": self.config.get("minqueue"),
+        }
+
+    def _on_ping(self, msg):
+        return {"ok": True}
 
     def stop(self) -> None:
         self._running.clear()
@@ -1338,4 +1297,70 @@ def _h_jump_decision(ctx, msg):
 @handler(MsgType.JUMP_WAITING)
 def _h_jump_waiting(ctx, msg):
     return ctx.host._on_jump_waiting(msg)
+
+
+# ------------------------------------------------------------------ #
+# Registry thunks — lifecycle family (Task 3.5)                       #
+# Grouped for the Step-5 lift into features/lifecycle.py              #
+# ------------------------------------------------------------------ #
+
+@handler(MsgType.SET_FOREGROUND)
+@handler(MsgType.SESSION_START)
+def _h_set_foreground(ctx, msg):
+    return ctx.host._on_set_foreground(msg)
+
+
+@handler(MsgType.SESSION_END)
+def _h_session_end(ctx, msg):
+    return ctx.host._on_session_end(msg)
+
+
+# ------------------------------------------------------------------ #
+# Registry thunks — hotkeys family (Task 3.5)                         #
+# Grouped for the Step-5 lift into features/hotkeys.py                #
+# ------------------------------------------------------------------ #
+
+@handler(MsgType.RELOAD_KEYMAP)
+def _h_reload_keymap(ctx, msg):
+    return ctx.host._on_reload_keymap(msg)
+
+
+# ------------------------------------------------------------------ #
+# Registry thunks — control family (Task 3.5)                         #
+# Grouped for the Step-5 lift into features/control.py                #
+# ------------------------------------------------------------------ #
+
+@handler(MsgType.SET_RATE)
+def _h_set_rate(ctx, msg):
+    return ctx.host._on_set_rate(msg)
+
+
+@handler(MsgType.SET_VOICE)
+def _h_set_voice(ctx, msg):
+    return ctx.host._on_set_voice(msg)
+
+
+@handler(MsgType.SET_VERBOSITY)
+def _h_set_verbosity(ctx, msg):
+    return ctx.host._on_set_verbosity(msg)
+
+
+@handler(MsgType.SET_MINQUEUE)
+def _h_set_minqueue(ctx, msg):
+    return ctx.host._on_set_minqueue(msg)
+
+
+@handler(MsgType.CYCLE_VERBOSITY)
+def _h_cycle_verbosity(ctx, msg):
+    return ctx.host._on_cycle_verbosity(msg)
+
+
+@handler(MsgType.STATUS)
+def _h_status(ctx, msg):
+    return ctx.host._on_status(msg)
+
+
+@handler(MsgType.PING)
+def _h_ping(ctx, msg):
+    return ctx.host._on_ping(msg)
 
