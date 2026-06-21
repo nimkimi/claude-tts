@@ -41,7 +41,8 @@ def test_new_package_modules_declare_future_annotations():
                  "limits.py",
                  "features/__init__.py", "features/control.py",
                  "features/decisions.py", "features/lifecycle.py",
-                 "features/navigation.py", "features/playback.py"):
+                 "features/navigation.py", "features/playback.py",
+                 "features/focus.py"):
         text = (_SRC / name).read_text(encoding="utf-8")
         first = next(
             line.strip() for line in text.splitlines()
@@ -122,3 +123,17 @@ def test_playback_handlers_registered_in_features_playback():
         assert fn.__module__ == expected_module, (
             f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"
         )
+
+
+def test_focus_handlers_registered_in_features_focus():
+    # Proves @handler decorator in features/focus.py ran and JUMP_WAITING
+    # resolves to the feature module, not the old host thunk.
+    from sonari.daemon import registry
+    from sonari.protocol import MsgType
+
+    expected_module = "sonari.daemon.features.focus"
+    fn = registry.HANDLERS[MsgType.JUMP_WAITING]
+    assert fn.__module__ == expected_module, (
+        f"HANDLERS[{MsgType.JUMP_WAITING!r}].__module__ == {fn.__module__!r}, "
+        f"want {expected_module!r}"
+    )
