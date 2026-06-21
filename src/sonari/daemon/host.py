@@ -643,6 +643,8 @@ class SpeechDaemon:
         except Exception:  # noqa: BLE001 - signaling failure must not wedge the loop
             pass
         try:
+            import sys
+            import traceback
             traceback.print_exc(file=sys.stderr)
         except Exception:  # noqa: BLE001 - logging failure must not wedge the loop
             pass

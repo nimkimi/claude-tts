@@ -113,3 +113,31 @@ def test_error_earcon_failure_is_contained(monkeypatch):
     daemon._enqueue("fg", "prose", "hello", False)
 
     daemon._speak_loop_once()                    # must return normally despite both raising
+
+
+# ---------------------------------------------------------------------------
+# _signal_speak_failure must log the traceback to stderr AND fire the error
+# earcon.  Before the fix, `traceback` and `sys` were not in scope inside
+# _signal_speak_failure (they are imported locally in other methods), causing
+# a NameError that the bare `except` swallowed — stderr was always empty.
+# ---------------------------------------------------------------------------
+
+def test_signal_speak_failure_logs_traceback_to_stderr():
+    import io
+    import contextlib
+
+    daemon, queue, speaker, *_ = make_daemon(foreground="fg")
+    buf = io.StringIO()
+    try:
+        raise RuntimeError("synthetic synth failure")
+    except RuntimeError:
+        with contextlib.redirect_stderr(buf):
+            daemon._signal_speak_failure()
+
+    stderr_output = buf.getvalue()
+    assert "Traceback (most recent call last)" in stderr_output, (
+        f"Expected traceback in stderr but got: {stderr_output!r}"
+    )
+    assert speaker.earcons == ["error"], (
+        f"Expected error earcon but got: {speaker.earcons!r}"
+    )
