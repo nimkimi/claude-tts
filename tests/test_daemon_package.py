@@ -39,13 +39,29 @@ def test_new_package_modules_declare_future_annotations():
     for name in ("host.py", "bootstrap.py", "__init__.py", "__main__.py",
                  "registry.py", "context.py", "state.py", "server.py",
                  "limits.py",
-                 "features/__init__.py", "features/control.py"):
+                 "features/__init__.py", "features/control.py",
+                 "features/decisions.py"):
         text = (_SRC / name).read_text(encoding="utf-8")
         first = next(
             line.strip() for line in text.splitlines()
             if line.strip() and not line.strip().startswith("#")
         )
         assert first == _FUTURE, f"{name}: first code line must be {_FUTURE!r}"
+
+
+def test_decisions_handlers_registered_in_features_decisions():
+    # Proves @handler decorators in features/decisions.py ran and the four
+    # keys resolve to the feature module, not the old host thunks.
+    from sonari.daemon import registry
+    from sonari.protocol import MsgType
+
+    expected_module = "sonari.daemon.features.decisions"
+    for key in (MsgType.CHOICE, MsgType.PLAN, MsgType.PERMISSION,
+                MsgType.REREAD_OPTIONS):
+        fn = registry.HANDLERS[key]
+        assert fn.__module__ == expected_module, (
+            f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"
+        )
 
 
 def test_control_handlers_registered_in_features_control():
