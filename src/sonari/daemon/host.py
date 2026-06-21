@@ -16,6 +16,7 @@ from sonari.paths import (
 from sonari.platform import transport
 from sonari.daemon.state import SessionState
 from sonari.daemon.context import Ctx
+from sonari.daemon.registry import handler
 
 
 RATE_MIN = 100
@@ -338,32 +339,7 @@ class SpeechDaemon:
         verbosity = self.config.get("verbosity", "everything")
 
         if t == MsgType.PROSE:
-            final = msg.get("final", False)
-            a = self._stream(session).assembler
-            chunks = a.feed(msg.get("delta", ""), msg.get("index", 0), final)
-            if chunks:
-                from sonari.assembler import PARAGRAPH_BREAK
-                # The flip: every non-quiet session buffers its OWN prose into its
-                # OWN stream (the speak loop plays only the foreground stream). The
-                # old _may_speak gate + captured-drop are gone — background output
-                # accumulates instead of being lost.
-                speak = verbosity != "quiet"
-                for chunk in chunks:
-                    if chunk is PARAGRAPH_BREAK:
-                        # A blank-line boundary: start a new message group so the
-                        # nav cursor treats each paragraph as its own 'item'.
-                        self.history.end_message(session)
-                        continue
-                    entry = self.history.record(session, "prose", chunk)
-                    if speak:
-                        self._buffer_prose(session, chunk, entry)
-            if final:
-                # `final` marks the end of ONE assistant text block, not the whole
-                # turn — the buffer is flushed at the real turn boundary (turn_done)
-                # and when the threshold is hit, so it is NOT flushed here.
-                self.history.end_message(session)
-                self._stream(session).options = None
-            return None
+            return self._on_prose(msg)
 
         # Decision CONTENT is enqueued (and gated by foreground). The ALERT
         # earcon for a decision travels as a SEPARATE EARCON message that
@@ -414,50 +390,13 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.TOOL:
-            if verbosity == "everything":
-                tool = msg.get("tool", "")
-                summary = (msg.get("summary") or "").strip()
-                text = summary if summary else "Running {0}.".format(tool)
-                # Keep textual order: read prose that preceded this tool call first.
-                self._flush_prose_buffer(session)
-                self._enqueue(session, "tool_announce", text, False)
-            return None
+            return self._on_tool(msg)
 
         if t == MsgType.EARCON:
-            # Instant: the Windows earcon backend plays on a separate audio path
-            # that mixes with the speech, so it no longer cuts the reading.
-            kind = msg.get("kind", "")
-            self.speaker.earcon(kind)
-            if kind == "turn_done":
-                # End-of-turn boundary: flush any sub-threshold buffered prose so
-                # it is not silently dropped when the assistant produces fewer items
-                # than the minqueue threshold.
-                self._flush_prose_buffer(session)
-            return None
+            return self._on_earcon(msg)
 
         if t == MsgType.FLUSH:
-            st = self._stream(session)
-            self._drop_pending(st.queue.clear())
-            cur = self._current_item
-            # Cut the current utterance on a new prompt: same-session (the new prompt
-            # supersedes the old reply) OR a cross-session switch where this prompt's
-            # session is now the foreground (pin-aware) — so the voice moves to it
-            # immediately instead of finishing the old session's sentence (§4.2
-            # cut-on-switch). SESSION_START sends no FLUSH, so a bare new session
-            # never cuts.
-            if cur is not None and (cur.session == session
-                                    or self.sessions.foreground() == session):
-                self.speaker.cancel()
-            st.reset_for_new_prompt()
-            # Stage 4: a new prompt opens a NEW TURN and KEEPS the prior turn's
-            # transcript (persistent, navigable in Stage 5). reset_for_new_prompt()
-            # already cleared live playback (queue, assembler, nav_cursor -> snap to
-            # live edge); history is no longer wiped here. SESSION_END still clears it.
-            self.history.start_turn(session)
-            # A new prompt is a user action -> auto-resume from pause.
-            self._paused.clear()
-            self._wake.set()
-            return None
+            return self._on_flush(msg)
 
         if t in (MsgType.SET_FOREGROUND, MsgType.SESSION_START):
             self.sessions.set_foreground(session, cwd=msg.get("cwd"))
@@ -733,6 +672,90 @@ class SpeechDaemon:
         if t == MsgType.PING:
             return {"ok": True}
 
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Prose family handlers (Task 3.2)                                     #
+    # ------------------------------------------------------------------ #
+
+    def _on_prose(self, msg):
+        session = msg.get("session", "")
+        verbosity = self.config.get("verbosity", "everything")
+        final = msg.get("final", False)
+        a = self._stream(session).assembler
+        chunks = a.feed(msg.get("delta", ""), msg.get("index", 0), final)
+        if chunks:
+            from sonari.assembler import PARAGRAPH_BREAK
+            # The flip: every non-quiet session buffers its OWN prose into its
+            # OWN stream (the speak loop plays only the foreground stream). The
+            # old _may_speak gate + captured-drop are gone — background output
+            # accumulates instead of being lost.
+            speak = verbosity != "quiet"
+            for chunk in chunks:
+                if chunk is PARAGRAPH_BREAK:
+                    # A blank-line boundary: start a new message group so the
+                    # nav cursor treats each paragraph as its own 'item'.
+                    self.history.end_message(session)
+                    continue
+                entry = self.history.record(session, "prose", chunk)
+                if speak:
+                    self._buffer_prose(session, chunk, entry)
+        if final:
+            # `final` marks the end of ONE assistant text block, not the whole
+            # turn — the buffer is flushed at the real turn boundary (turn_done)
+            # and when the threshold is hit, so it is NOT flushed here.
+            self.history.end_message(session)
+            self._stream(session).options = None
+        return None
+
+    def _on_tool(self, msg):
+        session = msg.get("session", "")
+        verbosity = self.config.get("verbosity", "everything")
+        if verbosity == "everything":
+            tool = msg.get("tool", "")
+            summary = (msg.get("summary") or "").strip()
+            text = summary if summary else "Running {0}.".format(tool)
+            # Keep textual order: read prose that preceded this tool call first.
+            self._flush_prose_buffer(session)
+            self._enqueue(session, "tool_announce", text, False)
+        return None
+
+    def _on_earcon(self, msg):
+        session = msg.get("session", "")
+        # Instant: the Windows earcon backend plays on a separate audio path
+        # that mixes with the speech, so it no longer cuts the reading.
+        kind = msg.get("kind", "")
+        self.speaker.earcon(kind)
+        if kind == "turn_done":
+            # End-of-turn boundary: flush any sub-threshold buffered prose so
+            # it is not silently dropped when the assistant produces fewer items
+            # than the minqueue threshold.
+            self._flush_prose_buffer(session)
+        return None
+
+    def _on_flush(self, msg):
+        session = msg.get("session", "")
+        st = self._stream(session)
+        self._drop_pending(st.queue.clear())
+        cur = self._current_item
+        # Cut the current utterance on a new prompt: same-session (the new prompt
+        # supersedes the old reply) OR a cross-session switch where this prompt's
+        # session is now the foreground (pin-aware) — so the voice moves to it
+        # immediately instead of finishing the old session's sentence (§4.2
+        # cut-on-switch). SESSION_START sends no FLUSH, so a bare new session
+        # never cuts.
+        if cur is not None and (cur.session == session
+                                or self.sessions.foreground() == session):
+            self.speaker.cancel()
+        st.reset_for_new_prompt()
+        # Stage 4: a new prompt opens a NEW TURN and KEEPS the prior turn's
+        # transcript (persistent, navigable in Stage 5). reset_for_new_prompt()
+        # already cleared live playback (queue, assembler, nav_cursor -> snap to
+        # live edge); history is no longer wiped here. SESSION_END still clears it.
+        self.history.start_turn(session)
+        # A new prompt is a user action -> auto-resume from pause.
+        self._paused.clear()
+        self._wake.set()
         return None
 
     def stop(self) -> None:
@@ -1160,4 +1183,29 @@ class SpeechDaemon:
                 os.unlink(LOCK_PATH)
             except FileNotFoundError:
                 pass
+
+
+# ------------------------------------------------------------------ #
+# Registry thunks — prose family (Task 3.2)                           #
+# Grouped for the Step-5 lift into features/prose.py                  #
+# ------------------------------------------------------------------ #
+
+@handler(MsgType.PROSE)
+def _h_prose(ctx, msg):
+    return ctx.host._on_prose(msg)
+
+
+@handler(MsgType.TOOL)
+def _h_tool(ctx, msg):
+    return ctx.host._on_tool(msg)
+
+
+@handler(MsgType.EARCON)
+def _h_earcon(ctx, msg):
+    return ctx.host._on_earcon(msg)
+
+
+@handler(MsgType.FLUSH)
+def _h_flush(ctx, msg):
+    return ctx.host._on_flush(msg)
 
