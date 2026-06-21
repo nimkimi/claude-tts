@@ -347,47 +347,13 @@ class SpeechDaemon:
         # MsgType.EARCON branch below, so the earcon fires instantly and
         # cross-session WITHOUT being doubled here.
         if t == MsgType.CHOICE:
-            text = self._choice_text(msg)
-            extras = [e for e in (
-                self._choice_notes(msg),
-                self._selection_cue(session, verbosity),
-            ) if e]
-            if extras:
-                text = "{0} {1}".format(text, " ".join(extras))
-            self._stream(session).options = text
-            entry = self.history.record(session, "choice", text)
-            self.history.end_message(session)
-            # The flip: gating moved to playback. Every session enqueues its own
-            # decision into its own stream; the foreground-driven loop voices it.
-            self._flush_prose_buffer(session)   # prose before the question
-            self._enqueue(session, "choice", text, True, entry=entry)
-            return None
+            return self._on_choice(msg)
 
         if t == MsgType.PLAN:
-            text = self._plan_text(msg)
-            cue = self._selection_cue(session, verbosity)
-            if cue:
-                text = "{0} {1}".format(text, cue)
-            self._stream(session).options = text
-            entry = self.history.record(session, "plan", text)
-            self.history.end_message(session)
-            # The flip: enqueue unconditionally into this session's own stream.
-            self._flush_prose_buffer(session)   # prose before the plan
-            self._enqueue(session, "plan", text, True, entry=entry)
-            return None
+            return self._on_plan(msg)
 
         if t == MsgType.PERMISSION:
-            text = self._permission_text(msg)
-            cue = self._selection_cue(session, verbosity)
-            if cue:
-                text = "{0} {1}".format(text, cue)
-            self._stream(session).options = text
-            entry = self.history.record(session, "permission", text)
-            self.history.end_message(session)
-            # The flip: enqueue unconditionally into this session's own stream.
-            self._flush_prose_buffer(session)   # prose before the permission ask
-            self._enqueue(session, "permission", text, True, entry=entry)
-            return None
+            return self._on_permission(msg)
 
         if t == MsgType.TOOL:
             return self._on_tool(msg)
@@ -441,15 +407,7 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.NAV:
-            fg = self.sessions.foreground()
-            if fg is None:
-                return None
-            to = msg.get("to", "prev")
-            if to in ("prev_response", "next_response"):
-                self._nav_response(fg, to)
-            else:
-                self._nav(fg, to)
-            return None
+            return self._on_nav(msg)
 
         if t == MsgType.PAUSE:
             # Temporary play/pause. Pause stops the current utterance and holds the
@@ -531,16 +489,7 @@ class SpeechDaemon:
             return None
 
         if t == MsgType.REREAD_OPTIONS:
-            fg = self.sessions.foreground()
-            if fg is None:
-                return None
-            st = self._streams.get(fg)
-            text = st.options if st is not None else None
-            if text:
-                self._enqueue(fg, "choice", text, False)
-            else:
-                self._enqueue(fg, "prose", "No options right now.", False)
-            return None
+            return self._on_reread_options(msg)
 
         if t == MsgType.JUMP_WAITING:
             fg = self.sessions.foreground()
@@ -756,6 +705,82 @@ class SpeechDaemon:
         # A new prompt is a user action -> auto-resume from pause.
         self._paused.clear()
         self._wake.set()
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Decisions + navigation family handlers (Task 3.3)                   #
+    # ------------------------------------------------------------------ #
+
+    def _on_choice(self, msg):
+        session = msg.get("session", "")
+        verbosity = self.config.get("verbosity", "everything")
+        text = self._choice_text(msg)
+        extras = [e for e in (
+            self._choice_notes(msg),
+            self._selection_cue(session, verbosity),
+        ) if e]
+        if extras:
+            text = "{0} {1}".format(text, " ".join(extras))
+        self._stream(session).options = text
+        entry = self.history.record(session, "choice", text)
+        self.history.end_message(session)
+        # The flip: gating moved to playback. Every session enqueues its own
+        # decision into its own stream; the foreground-driven loop voices it.
+        self._flush_prose_buffer(session)   # prose before the question
+        self._enqueue(session, "choice", text, True, entry=entry)
+        return None
+
+    def _on_plan(self, msg):
+        session = msg.get("session", "")
+        verbosity = self.config.get("verbosity", "everything")
+        text = self._plan_text(msg)
+        cue = self._selection_cue(session, verbosity)
+        if cue:
+            text = "{0} {1}".format(text, cue)
+        self._stream(session).options = text
+        entry = self.history.record(session, "plan", text)
+        self.history.end_message(session)
+        # The flip: enqueue unconditionally into this session's own stream.
+        self._flush_prose_buffer(session)   # prose before the plan
+        self._enqueue(session, "plan", text, True, entry=entry)
+        return None
+
+    def _on_permission(self, msg):
+        session = msg.get("session", "")
+        verbosity = self.config.get("verbosity", "everything")
+        text = self._permission_text(msg)
+        cue = self._selection_cue(session, verbosity)
+        if cue:
+            text = "{0} {1}".format(text, cue)
+        self._stream(session).options = text
+        entry = self.history.record(session, "permission", text)
+        self.history.end_message(session)
+        # The flip: enqueue unconditionally into this session's own stream.
+        self._flush_prose_buffer(session)   # prose before the permission ask
+        self._enqueue(session, "permission", text, True, entry=entry)
+        return None
+
+    def _on_reread_options(self, msg):
+        fg = self.sessions.foreground()
+        if fg is None:
+            return None
+        st = self._streams.get(fg)
+        text = st.options if st is not None else None
+        if text:
+            self._enqueue(fg, "choice", text, False)
+        else:
+            self._enqueue(fg, "prose", "No options right now.", False)
+        return None
+
+    def _on_nav(self, msg):
+        fg = self.sessions.foreground()
+        if fg is None:
+            return None
+        to = msg.get("to", "prev")
+        if to in ("prev_response", "next_response"):
+            self._nav_response(fg, to)
+        else:
+            self._nav(fg, to)
         return None
 
     def stop(self) -> None:
@@ -1208,4 +1233,39 @@ def _h_earcon(ctx, msg):
 @handler(MsgType.FLUSH)
 def _h_flush(ctx, msg):
     return ctx.host._on_flush(msg)
+
+
+# ------------------------------------------------------------------ #
+# Registry thunks — decisions family (Task 3.3)                       #
+# Grouped for the Step-5 lift into features/decisions.py              #
+# ------------------------------------------------------------------ #
+
+@handler(MsgType.CHOICE)
+def _h_choice(ctx, msg):
+    return ctx.host._on_choice(msg)
+
+
+@handler(MsgType.PLAN)
+def _h_plan(ctx, msg):
+    return ctx.host._on_plan(msg)
+
+
+@handler(MsgType.PERMISSION)
+def _h_permission(ctx, msg):
+    return ctx.host._on_permission(msg)
+
+
+@handler(MsgType.REREAD_OPTIONS)
+def _h_reread_options(ctx, msg):
+    return ctx.host._on_reread_options(msg)
+
+
+# ------------------------------------------------------------------ #
+# Registry thunks — navigation family (Task 3.3)                      #
+# Grouped for the Step-5 lift into features/navigation.py             #
+# ------------------------------------------------------------------ #
+
+@handler(MsgType.NAV)
+def _h_nav(ctx, msg):
+    return ctx.host._on_nav(msg)
 
