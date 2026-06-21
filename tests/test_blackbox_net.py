@@ -85,23 +85,11 @@ def drain_once(daemon):
     the foreground stream had an item to act on. The non-blocking seam that
     replaces drain_queue's reach into _streams: it runs the REAL
     _speak_loop_once (faithful attribution + mute-drop), but guards the call so
-    it never blocks on an empty foreground stream.
-
-    Pause-aware: when the daemon is paused and no pause-exempt items remain,
-    the speak-loop's paused branch would block on _wake.wait(). Bail early
-    instead — the pause-exempt cue ("Paused.") has already been spoken and the
-    remaining items are held until resume."""
+    it never blocks on an empty foreground stream."""
     fg = daemon.sessions.foreground()
     st = daemon._streams.get(fg)
     if st is None or len(st.queue) == 0:
         return False
-    if daemon._paused.is_set():
-        # Only enter _speak_loop_once if there is a pause-exempt item to speak;
-        # otherwise the loop would block on _wake.wait(poll_interval).
-        has_exempt = any(getattr(it, "pause_exempt", False)
-                         for it in st.queue._items)
-        if not has_exempt:
-            return False
     daemon._speak_loop_once()
     return True
 
@@ -264,6 +252,9 @@ def test_foreground_gating_only_fg_session_spoken():
 
 def test_pause_resume_requeues_interrupted_utterance():
     daemon, speaker, log, sessions, config = make_net(foreground="fg")
+    # poll_interval=0 so drain() doesn't block 0.1 s/iter when paused with no
+    # pause-exempt item left; wait(0) on threading.Event returns immediately.
+    daemon._poll_interval = 0
     prose(daemon, "fg", "interrupted. ", final=False)
     daemon.handle_message(msg(MsgType.PAUSE, "fg"))
     drain(daemon)
