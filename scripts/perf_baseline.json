@@ -1,0 +1,9 @@
+{
+  "iterations": 200000,
+  "section": "enqueue+pop_next",
+  "total_seconds": 0.157732,
+  "mean_ns": 788.7,
+  "best_ns": 707.8,
+  "python": "3.13.6",
+  "recorded_at": "2026-06-21T11:46:53"
+}
