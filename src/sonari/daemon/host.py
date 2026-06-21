@@ -14,6 +14,8 @@ from sonari.paths import (
     INSTALL_RECORD_PATH,
 )
 from sonari.platform import transport
+from sonari.daemon.state import SessionState
+from sonari.daemon.context import Ctx
 
 
 RATE_MIN = 100
@@ -40,6 +42,8 @@ class SpeechDaemon:
         self._running = threading.Event()
         self._wake = threading.Event()
         self._lock = threading.Lock()
+        self._state = SessionState(self._lock)
+        self._ctx = Ctx(self)
         self._server = None
         self._token = None
         self._poll_interval = 0.1
@@ -895,7 +899,7 @@ class SpeechDaemon:
         jump_waiting) is likewise safe from losing its item to that race.
         """
         try:
-            with self._lock:
+            with self._state.transaction():
                 self.handle_message(message)
         except Exception:  # noqa: BLE001 - one bad hotkey must not kill the pump
             pass
@@ -1068,7 +1072,7 @@ class SpeechDaemon:
         buggy message logs a traceback instead of silently killing the connection
         thread (mirrors the _dispatch_hotkey guard). Returns the reply or None."""
         try:
-            with self._lock:
+            with self._state.transaction():
                 return self.handle_message(msg)
         except Exception:  # noqa: BLE001 - one bad message must not drop the connection
             import sys
