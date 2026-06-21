@@ -19,9 +19,6 @@ KOKORO_VENV = SONARI_DIR / "venv"   # opt-in uv-managed venv for neural voices
 
 def kokoro_venv_python() -> str:
     """Absolute path to the neural venv's Python interpreter (may not exist)."""
-    import sys
-    if sys.platform == "win32":
-        return str(KOKORO_VENV / "Scripts" / "python.exe")
     return str(KOKORO_VENV / "bin" / "python")
 
 
