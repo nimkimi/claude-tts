@@ -41,7 +41,7 @@ def test_new_package_modules_declare_future_annotations():
                  "limits.py",
                  "features/__init__.py", "features/control.py",
                  "features/decisions.py", "features/lifecycle.py",
-                 "features/navigation.py"):
+                 "features/navigation.py", "features/playback.py"):
         text = (_SRC / name).read_text(encoding="utf-8")
         first = next(
             line.strip() for line in text.splitlines()
@@ -103,6 +103,21 @@ def test_control_handlers_registered_in_features_control():
     for key in (MsgType.SET_RATE, MsgType.SET_VOICE, MsgType.SET_VERBOSITY,
                 MsgType.SET_MINQUEUE, MsgType.CYCLE_VERBOSITY,
                 MsgType.STATUS, MsgType.PING):
+        fn = registry.HANDLERS[key]
+        assert fn.__module__ == expected_module, (
+            f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"
+        )
+
+
+def test_playback_handlers_registered_in_features_playback():
+    # Proves @handler decorators in features/playback.py ran and the six
+    # keys resolve to the feature module, not the old host thunks.
+    from sonari.daemon import registry
+    from sonari.protocol import MsgType
+
+    expected_module = "sonari.daemon.features.playback"
+    for key in (MsgType.STOP, MsgType.SKIP, MsgType.PAUSE,
+                MsgType.MUTE, MsgType.PIN_TOGGLE, MsgType.JUMP_DECISION):
         fn = registry.HANDLERS[key]
         assert fn.__module__ == expected_module, (
             f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"

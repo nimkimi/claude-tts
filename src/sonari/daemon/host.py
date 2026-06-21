@@ -30,6 +30,10 @@ from sonari.daemon.features import lifecycle  # noqa: F401 — registers @handle
 from sonari.daemon.features.lifecycle import on_set_foreground, on_session_end
 from sonari.daemon.features import navigation  # noqa: F401 — registers @handler decorators
 from sonari.daemon.features.navigation import on_nav
+from sonari.daemon.features import playback  # noqa: F401 — registers @handler decorators
+from sonari.daemon.features.playback import (
+    on_stop, on_skip, on_pause, on_mute, on_pin_toggle, on_jump_decision,
+)
 
 
 class SpeechDaemon:
@@ -447,90 +451,19 @@ class SpeechDaemon:
     # ------------------------------------------------------------------ #
 
     def _on_stop(self, msg):
-        # Stop acts on the FOREGROUND stream only — clearing every stream would
-        # wipe a background session's backlog the user hasn't heard yet (the 2a
-        # global-STOP clobber). Background streams accumulate untouched.
-        fg = self.sessions.foreground()
-        st = self._streams.get(fg)
-        if st is not None:
-            self._drop_pending(st.queue.clear())
-        self.speaker.cancel()
-        return None
+        return on_stop(self._ctx.bind(msg), msg)
 
     def _on_skip(self, msg):
-        cur = self._current_item
-        if cur is not None:
-            entry = self._pending_heard.get(cur.id)
-            if entry is not None:
-                entry.heard = True
-        self.speaker.cancel()
-        return None
+        return on_skip(self._ctx.bind(msg), msg)
 
     def _on_pause(self, msg):
-        # Temporary play/pause. Pause stops the current utterance and holds the
-        # loop; resume re-speaks the interrupted item so it picks back up. Also
-        # auto-cleared by a new prompt (see the FLUSH handler).
-        fg = self.sessions.foreground()
-        if self._paused.is_set():
-            # Resuming: voice "Resumed." FIRST (at the front, ahead of the
-            # interrupted utterance that was re-queued there on pause), then
-            # continue. mute_exempt so the control cue is always heard.
-            if fg is not None:
-                self._enqueue(fg, "prose", "Resumed.", False,
-                              mute_exempt=True, at_front=True)
-            self._resume()
-        else:
-            self._paused.set()
-            # cancel() bumps the speaker's epoch, so even an utterance still
-            # mid-synthesis aborts. The speak loop re-queues the interrupted
-            # item (it sees completed=False while paused), so we don't capture
-            # it here — which also avoids replaying an already-finished item.
-            self.speaker.cancel()
-            # The hold silences the queue, so "Paused." is pause_exempt (the
-            # paused branch of the speak loop voices it) and mute_exempt (always
-            # heard). pop_pause_exempt finds it past the re-queued interrupted item.
-            if fg is not None:
-                self._enqueue(fg, "prose", "Paused.", False,
-                              mute_exempt=True, pause_exempt=True)
-        return None
+        return on_pause(self._ctx.bind(msg), msg)
 
     def _on_mute(self, msg):
-        # Toggle a sticky per-session mute. Earcons still fire (alerts), and the
-        # "muted"/"unmuted" confirmation is spoken (the mute-on case is exempt).
-        fg = self.sessions.foreground()
-        if fg is None:
-            return None
-        st = self._stream(fg)
-        if st.muted:
-            st.muted = False
-            self._enqueue(fg, "prose", "Session unmuted.", False)
-        else:
-            st.muted = True
-            self._drop_pending(st.queue.clear())
-            cur = self._current_item
-            if cur is not None and cur.session == fg:
-                self.speaker.cancel()
-            self._enqueue(fg, "prose", "Session muted.", False, mute_exempt=True)
-        return None
+        return on_mute(self._ctx.bind(msg), msg)
 
     def _on_pin_toggle(self, msg):
-        # Pin the voice to the current (last-prompt) session, or unpin it.
-        # The pin overrides "foreground", so a later SET_FOREGROUND from another
-        # session can't steal the voice. Confirmation is mute_exempt so the user
-        # always hears it; the no-session case has nothing to speak through, so
-        # it is an error earcon only.
-        action, folder = self.sessions.pin_toggle()
-        if action == "none":
-            self.speaker.earcon("error")
-            return None
-        fg = self.sessions.foreground()
-        if action == "pinned":
-            text = "Pinned {0}.".format(folder) if folder else "Pinned."
-        else:
-            text = "Auto."
-        self._enqueue(fg, "prose", text, False, mute_exempt=True,
-                      names_session=(action == "pinned"))
-        return None
+        return on_pin_toggle(self._ctx.bind(msg), msg)
 
     def _on_jump_waiting(self, msg):
         fg = self.sessions.foreground()
@@ -574,19 +507,7 @@ class SpeechDaemon:
         return None
 
     def _on_jump_decision(self, msg):
-        # Mark the cancelled current item heard and clear heard-markers of the
-        # skipped prose items so they don't linger in unheard() (M6).
-        cur = self._current_item
-        if cur is not None:
-            entry = self._pending_heard.get(cur.id)
-            if entry is not None:
-                entry.heard = True
-        fg = self.sessions.foreground()
-        st = self._streams.get(fg)
-        if st is not None:
-            self._drop_pending(st.queue.jump_to_decision())
-        self.speaker.cancel()
-        return None
+        return on_jump_decision(self._ctx.bind(msg), msg)
 
     # ------------------------------------------------------------------ #
     # Lifecycle family handlers (Task 3.5)                                #
@@ -984,41 +905,6 @@ def _h_earcon(ctx, msg):
 @handler(MsgType.FLUSH)
 def _h_flush(ctx, msg):
     return ctx.host._on_flush(msg)
-
-
-# ------------------------------------------------------------------ #
-# Registry thunks — playback family (Task 3.4)                        #
-# Grouped for the Step-5 lift into features/playback.py               #
-# ------------------------------------------------------------------ #
-
-@handler(MsgType.STOP)
-def _h_stop(ctx, msg):
-    return ctx.host._on_stop(msg)
-
-
-@handler(MsgType.SKIP)
-def _h_skip(ctx, msg):
-    return ctx.host._on_skip(msg)
-
-
-@handler(MsgType.PAUSE)
-def _h_pause(ctx, msg):
-    return ctx.host._on_pause(msg)
-
-
-@handler(MsgType.MUTE)
-def _h_mute(ctx, msg):
-    return ctx.host._on_mute(msg)
-
-
-@handler(MsgType.PIN_TOGGLE)
-def _h_pin_toggle(ctx, msg):
-    return ctx.host._on_pin_toggle(msg)
-
-
-@handler(MsgType.JUMP_DECISION)
-def _h_jump_decision(ctx, msg):
-    return ctx.host._on_jump_decision(msg)
 
 
 # ------------------------------------------------------------------ #
