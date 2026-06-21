@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import os
 import secrets
-import socket
 import threading
 
-from sonari.protocol import MsgType, encode, decode
+from sonari.protocol import MsgType
 from sonari.queue import SpeechItem
 from sonari.config import save_config
 from sonari.session_stream import SessionStream
@@ -17,6 +16,7 @@ from sonari.platform import transport
 from sonari.daemon.state import SessionState
 from sonari.daemon.context import Ctx
 from sonari.daemon.registry import handler, dispatch
+from sonari.daemon.server import Server
 
 
 RATE_MIN = 100
@@ -26,11 +26,6 @@ RATE_MAX = 400
 # 1 == read each item as it arrives (the default, unchanged behaviour).
 MINQUEUE_MIN = 1
 MINQUEUE_MAX = 10
-
-# Cap on concurrent connection-handler threads. Legitimate clients are short-lived
-# (one request each), so this bound is generous; it just stops a misbehaving or
-# hostile peer from leaking unbounded threads by opening many connections.
-_MAX_CONN_THREADS = 32
 
 
 class SpeechDaemon:
@@ -45,8 +40,12 @@ class SpeechDaemon:
         self._lock = threading.Lock()
         self._state = SessionState(self._lock)
         self._ctx = Ctx(self)
-        self._server = None
         self._token = None
+        self._server = Server(
+            dispatch=self._handle_message_guarded,
+            token_provider=lambda: self._token,
+            running=self._running,
+        )
         self._poll_interval = 0.1
         from sonari.history import SessionHistory
         self.history = SessionHistory(cap=int(config.get("history_cap", 200)))
@@ -54,7 +53,6 @@ class SpeechDaemon:
         self._pending_heard: dict = {}            # SpeechItem.id -> HistoryEntry
         self._paused = threading.Event()          # play/pause: set == speech halted
         self._current_item = None                 # item being spoken right now
-        self._conn_sem = threading.BoundedSemaphore(_MAX_CONN_THREADS)
         self._reload_lock = threading.Lock()      # serializes off-lock hotkey reloads
         self._last_spoken_session = None          # for folder attribution on switch
         self.raise_service = raise_service        # lazily built on first jump
@@ -771,12 +769,7 @@ class SpeechDaemon:
         self._running.clear()
         self._wake.set()
         self._stop_hotkeys()
-        srv = self._server
-        if srv is not None:
-            try:
-                srv.close()
-            except OSError:
-                pass
+        self._server.stop()
 
     def _start_hotkeys(self) -> None:
         """Start the platform's global-hotkey listener. On Windows this spawns an
@@ -1054,51 +1047,6 @@ class SpeechDaemon:
         if not requeued:
             self.note_spoken(item, completed)
 
-    def _handle_conn(self, conn) -> None:
-        try:
-            buf = b""
-            with conn:
-                conn.settimeout(5.0)
-                # --- token handshake: the first newline-terminated line must
-                # equal the daemon's session token, or the peer is dropped. ---
-                while b"\n" not in buf:
-                    try:
-                        data = conn.recv(4096)
-                    except (OSError, socket.timeout):
-                        return
-                    if not data:
-                        return
-                    buf += data
-                token_line, buf = buf.split(b"\n", 1)
-                if token_line.decode("utf-8", "replace") != self._token:
-                    return  # reject unauthenticated peer
-                while self._running.is_set():
-                    # Process any complete messages already buffered (e.g. a
-                    # message that arrived in the same packet as the token).
-                    while b"\n" in buf:
-                        line, buf = buf.split(b"\n", 1)
-                        if not line.strip():
-                            continue
-                        try:
-                            msg = decode(line)
-                        except (ValueError, UnicodeDecodeError):
-                            continue
-                        reply = self._handle_message_guarded(msg)
-                        if reply is not None:
-                            try:
-                                conn.sendall(encode(reply))
-                            except OSError:
-                                return
-                    try:
-                        data = conn.recv(4096)
-                    except (OSError, socket.timeout):
-                        return
-                    if not data:
-                        return
-                    buf += data
-        except OSError:
-            return
-
     def _handle_message_guarded(self, msg):
         """Dispatch one socket message under the lock, contained so a malformed or
         buggy message logs a traceback instead of silently killing the connection
@@ -1112,82 +1060,26 @@ class SpeechDaemon:
             traceback.print_exc(file=sys.stderr)
             return None
 
-    def _handle_conn_guarded(self, conn) -> None:
-        """Run _handle_conn, contain any crash (log it, don't die silently), and
-        always release the concurrency permit so capacity recovers."""
-        try:
-            self._handle_conn(conn)
-        except Exception:  # noqa: BLE001 - a handler crash must be logged, not silent
-            import sys
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-        finally:
-            self._conn_sem.release()
-
-    def _spawn_conn_handler(self, conn) -> bool:
-        """Spawn a handler thread for *conn* if under the concurrency cap; else
-        drop (close) the connection. Returns True iff a handler was spawned."""
-        if not self._conn_sem.acquire(blocking=False):
-            try:
-                conn.close()
-            except OSError:
-                pass
-            return False
-        try:
-            th = threading.Thread(target=self._handle_conn_guarded, args=(conn,), daemon=True)
-            th.start()
-        except Exception:  # noqa: BLE001 - thread creation can fail (resource limits)
-            # The handler that would release the permit never ran: release it here
-            # and drop the connection, else this slot leaks forever (M8).
-            self._conn_sem.release()
-            try:
-                conn.close()
-            except OSError:
-                pass
-            return False
-        return True
-
-    def _accept_loop(self) -> None:
-        srv = self._server
-        while self._running.is_set():
-            try:
-                conn, _ = srv.accept()
-            except OSError:
-                return
-            self._spawn_conn_handler(conn)
-
     def run(self) -> None:
         ensure_sonari_dir()
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind((transport.HOST, 0))
-        srv.listen(16)
-        port = srv.getsockname()[1]
         self._token = secrets.token_hex(32)
+        port = self._server.bind()
         transport.write_lockfile(
             LOCK_PATH, transport.HOST, port, self._token, os.getpid())
-        self._server = srv
         self._running.set()
-
         speak_thread = threading.Thread(target=self._speak_loop, daemon=True)
-        accept_thread = threading.Thread(target=self._accept_loop, daemon=True)
         speak_thread.start()
-        accept_thread.start()
+        self._server.serve()          # accept thread starts after speak (matches original order)
         self._start_hotkeys()
-
         try:
             while self._running.is_set():
-                accept_thread.join(timeout=0.25)
-                if not accept_thread.is_alive():
+                self._server.join(timeout=0.25)
+                if not self._server.is_alive():
                     break
         except KeyboardInterrupt:
             pass
         finally:
             self.stop()
-            try:
-                srv.close()
-            except OSError:
-                pass
             try:
                 os.unlink(LOCK_PATH)
             except FileNotFoundError:

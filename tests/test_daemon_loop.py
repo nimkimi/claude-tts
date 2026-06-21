@@ -109,20 +109,14 @@ def _make_inet_daemon(tmp_path):
     """
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
 
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(4)
-    host, port = srv.getsockname()
-    daemon._server = srv
-    daemon._token = "testtoken"          # daemon checks this as the first line
+    daemon._token = "testtoken"          # token_provider=lambda: self._token reads this
     daemon._running.set()
-
+    port = daemon._server.bind()
     speak_t = threading.Thread(target=daemon._speak_loop, daemon=True)
-    accept_t = threading.Thread(target=daemon._accept_loop, daemon=True)
     speak_t.start()
-    accept_t.start()
+    daemon._server.serve()               # accept thread is Server-owned; not returned
 
-    return daemon, (host, port), [speak_t, accept_t], speaker
+    return daemon, ("127.0.0.1", port), [speak_t], speaker
 
 
 def test_handle_conn_ping_round_trip():

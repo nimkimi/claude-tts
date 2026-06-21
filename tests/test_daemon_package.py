@@ -37,7 +37,7 @@ def test_new_package_modules_declare_future_annotations():
     # not reach daemon/ submodules. Pin the Python-3.9 convention for the package
     # here: every module's first code line must be the future-annotations import.
     for name in ("host.py", "bootstrap.py", "__init__.py", "__main__.py",
-                 "registry.py", "context.py", "state.py"):
+                 "registry.py", "context.py", "state.py", "server.py"):
         text = (_SRC / name).read_text(encoding="utf-8")
         first = next(
             line.strip() for line in text.splitlines()
