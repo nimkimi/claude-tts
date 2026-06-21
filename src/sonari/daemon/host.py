@@ -14,29 +14,16 @@ from sonari.daemon.context import Ctx
 from sonari.daemon.registry import handler, dispatch
 from sonari.daemon.server import Server
 from sonari.daemon.limits import RATE_MIN, RATE_MAX, MINQUEUE_MIN, MINQUEUE_MAX
-from sonari.daemon.features import control  # noqa: F401 — registers @handler decorators
-from sonari.daemon.features.control import (
-    on_set_rate, on_set_voice, on_set_verbosity,
-    on_set_minqueue, on_cycle_verbosity, on_status, on_ping,
-)
-from sonari.daemon.features import decisions  # noqa: F401 — registers @handler decorators
-from sonari.daemon.features.decisions import (
-    on_choice, on_plan, on_permission, on_reread_options,
-)
-from sonari.daemon.features import lifecycle  # noqa: F401 — registers @handler decorators
-from sonari.daemon.features.lifecycle import on_set_foreground, on_session_end
-from sonari.daemon.features import navigation  # noqa: F401 — registers @handler decorators
-from sonari.daemon.features.navigation import on_nav
-from sonari.daemon.features import playback  # noqa: F401 — registers @handler decorators
-from sonari.daemon.features.playback import (
-    on_stop, on_skip, on_pause, on_mute, on_pin_toggle, on_jump_decision,
-)
-from sonari.daemon.features import focus  # noqa: F401 — registers @handler decorators
-from sonari.daemon.features.focus import on_jump_waiting
-from sonari.daemon.features import prose  # noqa: F401 — registers @handler decorators
-from sonari.daemon.features.prose import on_prose, on_tool, on_earcon, on_flush
-from sonari.daemon.features import hotkeys  # noqa: F401 — registers @handler decorators
-from sonari.daemon.features.hotkeys import on_reload_keymap
+# Side-effect imports: importing each feature module runs its @handler
+# decorators, populating the registry (assert_complete in __init__ guards it).
+from sonari.daemon.features import control  # noqa: F401
+from sonari.daemon.features import decisions  # noqa: F401
+from sonari.daemon.features import lifecycle  # noqa: F401
+from sonari.daemon.features import navigation  # noqa: F401
+from sonari.daemon.features import playback  # noqa: F401
+from sonari.daemon.features import focus  # noqa: F401
+from sonari.daemon.features import prose  # noqa: F401
+from sonari.daemon.features import hotkeys  # noqa: F401
 
 
 class SpeechDaemon:
