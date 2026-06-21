@@ -85,11 +85,15 @@ def _make_real_daemon(runner, foreground="s0"):
 
 def test_stress_no_lost_duplicated_or_resurrected_item():
     """Real-threaded stress: the REAL blocking _speak_loop runs against a fake
-    say_runner while threads hammer PAUSE/FLUSH/SET_FOREGROUND/JUMP_WAITING. The
-    invariant: no crash (no 'dictionary/list changed size during iteration'),
-    the speak thread never dies, and every stream's pending count stays bounded
-    and non-negative — i.e. no item is lost, duplicated, or resurrected into a
-    flushed queue. Probabilistic by design (interleaving pressure)."""
+    say_runner while threads hammer PAUSE/FLUSH/SET_FOREGROUND/JUMP_WAITING. This
+    guard's invariants, under interleaving pressure: no crash (no 'dictionary/list
+    changed size during iteration' — captured via the boundary wrappers below, since
+    production deliberately swallows handler/loop exceptions), no deadlock (every
+    thread joins), the speak loop stays live (runner.calls > 0), and no ORPHANED
+    pending-heard marker survives the storm. It does NOT bound queue length (cap-
+    exempt cues exceed _backlog_cap by design — see the assertion note). Lost/
+    duplicated/resurrected TRACKED items are pinned deterministically by
+    test_reentrant_flush_does_not_resurrect_paused_item. Probabilistic by design."""
     runner = _FastRunner()
     daemon, speaker = _make_real_daemon(runner, foreground="s0")
     sessions = daemon.sessions
@@ -172,13 +176,24 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     assert not speak_thread.is_alive(), "speak thread died under stress"
     # The speak loop actually did work — not merely "didn't deadlock at the end".
     assert runner.calls > 0, "speak loop never spoke anything; the stress window was empty"
-    # Every stream's queue is non-negative and bounded by the backlog cap; the
-    # _pending_heard dict never exceeds the total queued (no leak/resurrection).
+    # This guard does NOT bound queue LENGTH. Cap-exempt cues (PAUSE "Paused./
+    # Resumed.", JUMP_WAITING "Jumping to...") use enqueue_front, which is
+    # deliberately NOT subject to _backlog_cap (queue.py:42-45), so under this
+    # synthetic cue-storm a stream legitimately exceeds the cap (verified: ~50% of
+    # isolated runs reach len up to ~1000). Those cues drain and carry no pending-
+    # heard marker, so it is not a leak. The real leak/resurrection invariant lives
+    # in test_reentrant_flush_does_not_resurrect_paused_item. Here, in the quiescent
+    # end state (storm over, speak thread joined), assert only that every pending-
+    # heard marker still maps to a LIVE queued item or the in-flight claim — no
+    # ORPHANED markers. Cue-volume-independent, so it keeps its teeth no matter how
+    # many cap-exempt cues piled up.
     with daemon._lock:
-        total_queued = sum(len(st.queue) for st in daemon._streams.values())
-        for st in daemon._streams.values():
-            assert len(st.queue) <= daemon._backlog_cap
-        assert len(daemon._pending_heard) <= total_queued + 1
+        live_ids = {it.id for st in daemon._streams.values()
+                    for it in st.queue._items}
+        if daemon._current_item is not None:
+            live_ids.add(daemon._current_item.id)
+        orphaned = [k for k in daemon._pending_heard if k not in live_ids]
+        assert orphaned == [], "orphaned pending-heard markers: {0}".format(orphaned[:5])
 
 
 class _ReentrantSpeaker:
