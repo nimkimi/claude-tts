@@ -9,7 +9,7 @@ import shutil
 import subprocess
 
 from sonari import paths
-from sonari.platform.base import RaiseBackend
+from sonari.platform.contracts import RaiseBackend
 
 _HELPER_TIMEOUT = 6.0
 

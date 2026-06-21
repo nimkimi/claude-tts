@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 
-from sonari.platform.base import PlatformBackend
+from sonari.platform.contracts import PlatformBackend
 
 _CACHE = None
 

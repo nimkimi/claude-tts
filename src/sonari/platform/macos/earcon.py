@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import subprocess
 
-from sonari.platform.base import EarconBackend
+from sonari.platform.contracts import EarconBackend
 
 _DEFAULTS = {
     "permission": "/System/Library/Sounds/Funk.aiff",
@@ -17,7 +17,7 @@ _DEFAULTS = {
 }
 
 
-class MacEarconBackend(EarconBackend):
+class MacEarconBackend:
     def play(self, path: str):
         if not os.path.exists(path):
             return None

@@ -1,4 +1,4 @@
-from sonari.platform.base import PlatformBackend
+from sonari.platform.contracts import PlatformBackend
 from sonari.platform.macos.tts import MacTtsBackend
 from sonari.platform.macos.earcon import MacEarconBackend
 from sonari.platform.macos.hotkeys import MacHotkeyBackend

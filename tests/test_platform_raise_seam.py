@@ -1,5 +1,5 @@
 from sonari.platform import get_platform
-from sonari.platform.base import RaiseBackend, NoopRaiseBackend, PlatformBackend
+from sonari.platform.contracts import RaiseBackend, NoopRaiseBackend, PlatformBackend
 
 
 def test_platformbackend_has_raise_backend_field():

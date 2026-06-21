@@ -7,7 +7,7 @@ import shutil
 import subprocess
 
 from sonari import paths
-from sonari.platform.base import HotkeyBackend
+from sonari.platform.contracts import HotkeyBackend
 from sonari.platform.macos import keytables
 
 LAUNCH_AGENT_LABEL = "com.sonari.hotkeyd"
@@ -91,7 +91,7 @@ def _hotkeyd_plist(binary_path: str, log_path: str) -> str:
              log=_xml_escape(log_path))
 
 
-class MacHotkeyBackend(HotkeyBackend):
+class MacHotkeyBackend:
     _keycode_display = _KEYCODE_DISPLAY
     _mod_display = _MOD_DISPLAY
 
@@ -138,6 +138,19 @@ class MacHotkeyBackend(HotkeyBackend):
             sup = MacSupervisorBackend()
             sup.launchctl(["unload", LAUNCH_AGENT_PATH])
             sup.launchctl(["load", LAUNCH_AGENT_PATH])
+
+    def start(self, dispatch) -> None:
+        """No-op: the macOS hotkeyd is a SEPARATE process (started by its
+        LaunchAgent), not an in-process listener."""
+        return None
+
+    def stop(self) -> None:
+        """No-op: see start()."""
+        return None
+
+    def doctor_rows(self) -> "list":
+        """Platform hotkey diagnostics. None here (hotkeyd self-reports)."""
+        return []
 
     def build(self):
         """Compile sonari-hotkeyd if swiftc is present and the source changed.

@@ -8,7 +8,7 @@ import subprocess
 from typing import Optional
 
 from sonari import paths
-from sonari.platform.base import SupervisorBackend
+from sonari.platform.contracts import SupervisorBackend
 
 LAUNCH_AGENT_LABEL = "com.sonari.speechd"
 LAUNCH_AGENT_PATH = os.path.expanduser(
@@ -39,7 +39,7 @@ def _xml_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-class MacSupervisorBackend(SupervisorBackend):
+class MacSupervisorBackend:
     # --- python resolution (verbatim move of cli._resolve_python et al.) ---
     def _probe_python_version(self, candidate: str):
         """Return (major, minor) reported by *candidate*, or None if it cannot be run.

@@ -1,54 +1,59 @@
-import abc
-import pytest
-from sonari.platform import base
-from sonari.platform.base import NoopRaiseBackend
+"""Contracts pins for the collapsed platform layer (Stage 2).
+
+The 4 single-impl backends are runtime_checkable Protocols (structural, no
+inheritance); RaiseBackend stays an ABC. These pins replace the old base.py
+ABC-instantiation tests.
+"""
+import os
+
+from sonari.platform import contracts
 
 
-def test_backends_are_abstract():
-    for cls in (base.TtsBackend, base.EarconBackend,
-                base.HotkeyBackend, base.SupervisorBackend):
-        assert issubclass(cls, abc.ABC)
-        with pytest.raises(TypeError):
-            cls()  # cannot instantiate an ABC with abstract methods
+def test_four_backends_are_runtime_checkable_protocols():
+    # runtime_checkable: structural isinstance must work without inheritance,
+    # and a bare object must NOT satisfy any backend.
+    for proto in (contracts.TtsBackend, contracts.EarconBackend,
+                  contracts.HotkeyBackend, contracts.SupervisorBackend):
+        assert not isinstance(object(), proto)
 
 
-def test_platform_backend_bundles_the_four():
-    class _Tts(base.TtsBackend):
-        def run(self, text, voice, rate): return None
-        def best_voice(self): return "x"
-        def list_voices(self): return []
-    class _Ear(base.EarconBackend):
-        def play(self, path): return None
-        def default_earcons(self): return {}
-    class _Hk(base.HotkeyBackend):
-        def install(self): return (True, "")
-        def uninstall(self): return None
-        def display_combo(self, modifiers, key_code): return ""
-    class _Sup(base.SupervisorBackend):
-        def install(self, python, app_dir): return None
-        def uninstall(self): return None
-        def is_running(self): return False
-        def is_installed(self): return False
-        def resolve_python(self): return None
-        def launch_spec(self): return ([], {})
-        def doctor_rows(self): return []
-    pb = base.PlatformBackend(tts=_Tts(), earcon=_Ear(),
-                              hotkey=_Hk(), supervisor=_Sup(),
-                              raise_backend=NoopRaiseBackend())
-    assert isinstance(pb.tts, base.TtsBackend)
-    assert isinstance(pb.supervisor, base.SupervisorBackend)
+def test_mac_backends_satisfy_their_protocols_structurally():
+    from sonari.platform.macos.tts import MacTtsBackend
+    from sonari.platform.macos.earcon import MacEarconBackend
+    from sonari.platform.macos.hotkeys import MacHotkeyBackend
+    from sonari.platform.macos.supervisor import MacSupervisorBackend
+    assert isinstance(MacTtsBackend(), contracts.TtsBackend)
+    assert isinstance(MacEarconBackend(), contracts.EarconBackend)
+    assert isinstance(MacHotkeyBackend(), contracts.HotkeyBackend)
+    assert isinstance(MacSupervisorBackend(), contracts.SupervisorBackend)
 
 
-def test_macos_hotkey_exposes_keytables_and_default_mods():
+def test_platform_backend_bundles_the_five_fields():
+    fields = contracts.PlatformBackend.__dataclass_fields__
+    assert set(fields) == {"tts", "earcon", "hotkey", "supervisor", "raise_backend"}
+
+
+def test_macos_hotkey_exposes_keytables_default_mods_and_lifecycle():
     from sonari.platform.macos.hotkeys import MacHotkeyBackend
     hk = MacHotkeyBackend()
     assert hk.key_codes()["s"] == 1 and hk.mod_masks()["cmd"] == 256
     assert hk.default_mods() == ["ctrl", "cmd"]
-
-
-def test_base_hotkey_lifecycle_defaults_are_noops():
-    from sonari.platform.macos.hotkeys import MacHotkeyBackend
-    hk = MacHotkeyBackend()
-    hk.start(lambda msg: None)   # macOS: hotkeyd is a separate process -> no-op
+    # the moved no-ops: macOS hotkeyd is a separate process
+    hk.start(lambda msg: None)
     hk.stop()
     assert hk.doctor_rows() == []
+
+
+def test_contracts_module_has_future_annotations():
+    # test_py39_compat scans src/sonari NON-recursively, so platform/contracts.py
+    # is NOT covered there. Pin its future-import here. (Do NOT make that scan
+    # recursive — keep this local assertion instead.)
+    path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "src", "sonari", "platform", "contracts.py")
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    assert "from __future__ import annotations" in text
+    # ...and it is the FIRST code line after the module docstring.
+    body = text.split('"""', 2)[-1].lstrip()
+    assert body.startswith("from __future__ import annotations")

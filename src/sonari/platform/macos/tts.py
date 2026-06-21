@@ -21,7 +21,7 @@ import subprocess
 import tempfile
 from typing import List, Optional, Tuple
 
-from sonari.platform.base import TtsBackend
+from sonari.platform.contracts import TtsBackend
 
 _TMP_PREFIX = "sonari-tts-"
 
@@ -159,7 +159,7 @@ def _parse_listing(listing: str) -> "List[Tuple[str, str, bool]]":
     return results
 
 
-class MacTtsBackend(TtsBackend):
+class MacTtsBackend:
     def __init__(self) -> None:
         self._kokoro = None        # lazy KokoroEngine (only built if a Kokoro voice is used)
         _sweep_stale_wavs()        # clear temp WAVs leaked by a prior crash (#26)
