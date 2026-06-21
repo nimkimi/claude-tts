@@ -26,6 +26,8 @@ from sonari.daemon.features import decisions  # noqa: F401 — registers @handle
 from sonari.daemon.features.decisions import (
     on_choice, on_plan, on_permission, on_reread_options,
 )
+from sonari.daemon.features import lifecycle  # noqa: F401 — registers @handler decorators
+from sonari.daemon.features.lifecycle import on_set_foreground, on_session_end
 
 
 class SpeechDaemon:
@@ -597,29 +599,10 @@ class SpeechDaemon:
     # ------------------------------------------------------------------ #
 
     def _on_set_foreground(self, msg):
-        t = msg.get("type")
-        session = msg.get("session", "")
-        self.sessions.set_foreground(session, cwd=msg.get("cwd"))
-        if t == MsgType.SESSION_START:
-            self.sessions.register(session, cwd=msg.get("cwd"))
-            from sonari.sessions import Identity
-            self.sessions.set_identity(session, Identity(
-                term_program=msg.get("term_program", ""),
-                tty=msg.get("tty", ""),
-                iterm_session_id=msg.get("iterm_session_id", ""),
-            ))
-            self._maybe_guide_setup(session, msg.get("plugin_version", ""))
-        return None
+        return on_set_foreground(self._ctx.bind(msg), msg)
 
     def _on_session_end(self, msg):
-        session = msg.get("session", "")
-        self.sessions.unregister(session)
-        st = self._streams.get(session)
-        if st is not None:
-            self._drop_pending(st.queue.clear())
-        self.history.reset(session)
-        self._streams.pop(session, None)
-        return None
+        return on_session_end(self._ctx.bind(msg), msg)
 
     # ------------------------------------------------------------------ #
     # Hotkeys family handlers (Task 3.5)                                  #
@@ -1062,22 +1045,6 @@ def _h_jump_decision(ctx, msg):
 @handler(MsgType.JUMP_WAITING)
 def _h_jump_waiting(ctx, msg):
     return ctx.host._on_jump_waiting(msg)
-
-
-# ------------------------------------------------------------------ #
-# Registry thunks — lifecycle family (Task 3.5)                       #
-# Grouped for the Step-5 lift into features/lifecycle.py              #
-# ------------------------------------------------------------------ #
-
-@handler(MsgType.SET_FOREGROUND)
-@handler(MsgType.SESSION_START)
-def _h_set_foreground(ctx, msg):
-    return ctx.host._on_set_foreground(msg)
-
-
-@handler(MsgType.SESSION_END)
-def _h_session_end(ctx, msg):
-    return ctx.host._on_session_end(msg)
 
 
 # ------------------------------------------------------------------ #

@@ -40,7 +40,7 @@ def test_new_package_modules_declare_future_annotations():
                  "registry.py", "context.py", "state.py", "server.py",
                  "limits.py",
                  "features/__init__.py", "features/control.py",
-                 "features/decisions.py"):
+                 "features/decisions.py", "features/lifecycle.py"):
         text = (_SRC / name).read_text(encoding="utf-8")
         first = next(
             line.strip() for line in text.splitlines()
@@ -58,6 +58,21 @@ def test_decisions_handlers_registered_in_features_decisions():
     expected_module = "sonari.daemon.features.decisions"
     for key in (MsgType.CHOICE, MsgType.PLAN, MsgType.PERMISSION,
                 MsgType.REREAD_OPTIONS):
+        fn = registry.HANDLERS[key]
+        assert fn.__module__ == expected_module, (
+            f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"
+        )
+
+
+def test_lifecycle_handlers_registered_in_features_lifecycle():
+    # SET_FOREGROUND and SESSION_START both map to on_set_foreground (stacked
+    # decorators); SESSION_END maps to on_session_end. All three must resolve
+    # to the feature module, not the old host thunks.
+    from sonari.daemon import registry
+    from sonari.protocol import MsgType
+
+    expected_module = "sonari.daemon.features.lifecycle"
+    for key in (MsgType.SET_FOREGROUND, MsgType.SESSION_START, MsgType.SESSION_END):
         fn = registry.HANDLERS[key]
         assert fn.__module__ == expected_module, (
             f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"
