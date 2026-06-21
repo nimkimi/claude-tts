@@ -85,7 +85,10 @@ def drain_once(daemon):
     the foreground stream had an item to act on. The non-blocking seam that
     replaces drain_queue's reach into _streams: it runs the REAL
     _speak_loop_once (faithful attribution + mute-drop), but guards the call so
-    it never blocks on an empty foreground stream."""
+    it never blocks on an empty foreground stream. NOTE: when the foreground
+    stream is paused with a non-pause-exempt item, _speak_loop_once calls
+    _wake.wait(_poll_interval), which blocks for the full interval (default 0.1s)
+    up to 1000 drain iterations. For paused-stream tests, set daemon._poll_interval=0."""
     fg = daemon.sessions.foreground()
     st = daemon._streams.get(fg)
     if st is None or len(st.queue) == 0:
