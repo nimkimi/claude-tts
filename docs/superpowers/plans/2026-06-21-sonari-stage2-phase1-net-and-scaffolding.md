@@ -490,6 +490,30 @@
           sessions.register(s, cwd="/x/" + s)
 
       errors: list = []
+      # Capture crashes at the boundary BEFORE the production swallow layers eat
+      # them: _dispatch_hotkey wraps handle_message in `except Exception: pass`, and
+      # _speak_loop catches+continues every _speak_loop_once exception by design. We
+      # record-then-reraise so a real race ("list changed size during iteration",
+      # lost/duplicated/resurrected item) is OBSERVED here, then still swallowed by
+      # production (the speak thread must stay alive). Instance attrs shadow the
+      # bound methods, so _speak_loop's `self._speak_loop_once()` and
+      # _dispatch_hotkey's `self.handle_message(...)` hit these wrappers.
+      _orig_loop_once = daemon._speak_loop_once
+      def _capture_loop_once():
+          try:
+              _orig_loop_once()
+          except Exception as e:  # noqa: BLE001 - record, then re-raise into _speak_loop's handler
+              errors.append(("speak_loop", repr(e)))
+              raise
+      daemon._speak_loop_once = _capture_loop_once
+      _orig_handle = daemon.handle_message
+      def _capture_handle(m):
+          try:
+              return _orig_handle(m)
+          except Exception as e:  # noqa: BLE001 - record, then re-raise into _dispatch_hotkey's handler
+              errors.append(("handle_message", repr(e)))
+              raise
+      daemon.handle_message = _capture_handle
       speak_thread = threading.Thread(target=daemon._speak_loop, daemon=True)
       speak_thread.start()
 
@@ -539,6 +563,8 @@
       assert errors == [], "concurrency errors: {0}".format(errors[:3])
       # The speak thread survived the whole storm.
       assert not speak_thread.is_alive(), "speak thread died under stress"
+      # The speak loop actually did work — not merely "didn't deadlock at the end".
+      assert runner.calls > 0, "speak loop never spoke anything; the stress window was empty"
       # Every stream's queue is non-negative and bounded by the backlog cap; the
       # _pending_heard dict never exceeds the total queued (no leak/resurrection).
       with daemon._lock:
