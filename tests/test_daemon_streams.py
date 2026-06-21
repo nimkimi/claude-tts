@@ -1,7 +1,5 @@
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 from tests.daemon_helpers import make_daemon, stream_queue
-from sonari.daemon.state import SessionState
-from sonari.daemon.context import Ctx
 
 
 def _msg(mtype, session, **extra):
@@ -325,6 +323,7 @@ def test_daemon_state_is_session_state_wrapping_same_lock():
     # _state must be a SessionState whose ._lock is the SAME object as daemon._lock.
     # SessionState(self._lock) is constructed in __init__, so both sides point at
     # the same threading.Lock — behavior is byte-identical to the direct lock usage.
+    from sonari.daemon.state import SessionState
     daemon, *_ = make_daemon()
     assert isinstance(daemon._state, SessionState)
     assert daemon._state._lock is daemon._lock
@@ -332,6 +331,7 @@ def test_daemon_state_is_session_state_wrapping_same_lock():
 
 def test_daemon_ctx_is_ctx_pointing_at_daemon():
     # _ctx must be a Ctx whose .host is the daemon itself.
+    from sonari.daemon.context import Ctx
     daemon, *_ = make_daemon()
     assert isinstance(daemon._ctx, Ctx)
     assert daemon._ctx.host is daemon

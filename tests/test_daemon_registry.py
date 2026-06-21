@@ -3,16 +3,6 @@ from __future__ import annotations
 import pytest
 
 
-def _fresh_registry():
-    """Return a fresh (HANDLERS={}) module-level state via reimport."""
-    import importlib
-    import sonari.daemon.registry as reg
-    # Save and restore HANDLERS so tests are isolated from each other.
-    original = dict(reg.HANDLERS)
-    reg.HANDLERS.clear()
-    return reg, original
-
-
 def test_handlers_is_dict_and_starts_empty():
     import sonari.daemon.registry as reg
     saved = dict(reg.HANDLERS)
