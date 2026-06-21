@@ -42,7 +42,7 @@ def test_new_package_modules_declare_future_annotations():
                  "features/__init__.py", "features/control.py",
                  "features/decisions.py", "features/lifecycle.py",
                  "features/navigation.py", "features/playback.py",
-                 "features/focus.py"):
+                 "features/focus.py", "features/prose.py"):
         text = (_SRC / name).read_text(encoding="utf-8")
         first = next(
             line.strip() for line in text.splitlines()
@@ -137,3 +137,17 @@ def test_focus_handlers_registered_in_features_focus():
         f"HANDLERS[{MsgType.JUMP_WAITING!r}].__module__ == {fn.__module__!r}, "
         f"want {expected_module!r}"
     )
+
+
+def test_prose_handlers_registered_in_features_prose():
+    # Proves @handler decorators in features/prose.py ran and the four
+    # keys resolve to the feature module, not the old host thunks.
+    from sonari.daemon import registry
+    from sonari.protocol import MsgType
+
+    expected_module = "sonari.daemon.features.prose"
+    for key in (MsgType.PROSE, MsgType.TOOL, MsgType.EARCON, MsgType.FLUSH):
+        fn = registry.HANDLERS[key]
+        assert fn.__module__ == expected_module, (
+            f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"
+        )
