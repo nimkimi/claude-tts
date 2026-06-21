@@ -1,0 +1,84 @@
+"""Platform backend contracts. The portable core depends ONLY on these; the
+concrete macOS impl lives in the sibling macos package and is wired in by
+get_platform(). The 4 single-impl backends are runtime_checkable Protocols
+(signatures only); RaiseBackend is the one polymorphic seam (Mac + Noop)."""
+from __future__ import annotations
+
+import abc
+from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
+
+
+@runtime_checkable
+class TtsBackend(Protocol):
+    def run(self, text: "str", voice, rate: "int"): ...
+    def best_voice(self) -> "str": ...
+    def list_voices(self) -> "list[str]": ...
+
+
+@runtime_checkable
+class EarconBackend(Protocol):
+    def play(self, path: "str"): ...
+    def default_earcons(self) -> "dict": ...
+
+
+@runtime_checkable
+class HotkeyBackend(Protocol):
+    def install(self, log_path: "str", agent_path: "str", launchctl_fn) -> "tuple": ...
+    def uninstall(self) -> None: ...
+    def display_combo(self, modifiers: "int", key_code: "int") -> "str": ...
+    def key_codes(self) -> "dict": ...
+    def mod_masks(self) -> "dict": ...
+    def default_mods(self) -> "list": ...
+    def extra_default_bindings(self) -> "dict": ...
+    def start(self, dispatch) -> None: ...
+    def stop(self) -> None: ...
+    def reload(self, dispatch) -> None: ...
+    def doctor_rows(self) -> "list": ...
+
+
+@runtime_checkable
+class SupervisorBackend(Protocol):
+    def install(self, python: "str", app_dir: "str") -> None: ...
+    def uninstall(self) -> None: ...
+    def is_running(self) -> bool: ...
+    def is_installed(self) -> bool: ...
+    def resolve_python(self): ...
+    def launch_spec(self) -> "tuple": ...
+    def doctor_rows(self) -> "list": ...
+    def post_install_notes(self) -> None: ...
+    def hooks_doctor_row(self) -> "tuple": ...
+
+
+class RaiseBackend(abc.ABC):
+    """Bring a session's terminal window/tab to the foreground (focus-follow)."""
+
+    @abc.abstractmethod
+    def raise_session(self, identity) -> bool:
+        """Raise the window/tab for *identity* (a sessions.Identity). Return True
+        only on a confirmed raise; False for unsupported/missing/denied/failed.
+        Safe to call off the main thread; must never raise or hang."""
+
+    def supports(self, identity) -> bool:
+        """True if this backend can attempt a raise for *identity*. Default: no."""
+        return False
+
+    def doctor_rows(self) -> "list":
+        """Diagnostic [(name, ok, detail), ...] rows. Default: none."""
+        return []
+
+
+class NoopRaiseBackend(RaiseBackend):
+    """Inert backend for sessions without focus-follow (tests / unsupported)."""
+
+    def raise_session(self, identity) -> bool:
+        return False
+
+
+@dataclass
+class PlatformBackend:
+    tts: "TtsBackend"
+    earcon: "EarconBackend"
+    hotkey: "HotkeyBackend"
+    supervisor: "SupervisorBackend"
+    raise_backend: "RaiseBackend"

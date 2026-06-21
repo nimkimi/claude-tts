@@ -313,3 +313,25 @@ def test_attribution_survives_pause_on_switch():
     assert "backend. beta." in speaker.spoken, (
         "Attribution dropped after pause-on-switch: got {0}".format(speaker.spoken)
     )
+
+
+# ---------------------------------------------------------------------------
+# Host lock-model pins (Task 3.1)
+# ---------------------------------------------------------------------------
+
+def test_daemon_state_is_session_state_wrapping_same_lock():
+    # _state must be a SessionState whose ._lock is the SAME object as daemon._lock.
+    # SessionState(self._lock) is constructed in __init__, so both sides point at
+    # the same threading.Lock — behavior is byte-identical to the direct lock usage.
+    from sonari.daemon.state import SessionState
+    daemon, *_ = make_daemon()
+    assert isinstance(daemon._state, SessionState)
+    assert daemon._state._lock is daemon._lock
+
+
+def test_daemon_ctx_is_ctx_pointing_at_daemon():
+    # _ctx must be a Ctx whose .host is the daemon itself.
+    from sonari.daemon.context import Ctx
+    daemon, *_ = make_daemon()
+    assert isinstance(daemon._ctx, Ctx)
+    assert daemon._ctx.host is daemon

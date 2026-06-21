@@ -1,6 +1,6 @@
 """Connection-handling robustness: message-dispatch guard (#13) and the
 concurrent-handler cap (#14)."""
-from sonari.daemon import _MAX_CONN_THREADS
+from sonari.daemon.server import _MAX_CONN_THREADS
 from tests.daemon_helpers import make_daemon
 
 
@@ -21,14 +21,14 @@ def test_spawn_conn_handler_drops_connection_at_capacity():
     # (closed) rather than leaking another thread.
     daemon, *_ = make_daemon()
     for _ in range(_MAX_CONN_THREADS):
-        assert daemon._conn_sem.acquire(blocking=False)
+        assert daemon._server._conn_sem.acquire(blocking=False)
     closed = {"n": 0}
 
     class FakeConn:
         def close(self):
             closed["n"] += 1
 
-    assert daemon._spawn_conn_handler(FakeConn()) is False
+    assert daemon._server._spawn_conn_handler(FakeConn()) is False
     assert closed["n"] == 1
 
 
@@ -52,11 +52,11 @@ def test_spawn_conn_handler_releases_permit_when_thread_start_fails(monkeypatch)
         def close(self):
             closed["n"] += 1
 
-    assert daemon._spawn_conn_handler(FakeConn()) is False
+    assert daemon._server._spawn_conn_handler(FakeConn()) is False
     assert closed["n"] == 1
     # All permits are free again (none leaked).
     n = 0
-    while daemon._conn_sem.acquire(blocking=False):
+    while daemon._server._conn_sem.acquire(blocking=False):
         n += 1
     assert n == _MAX_CONN_THREADS
 
@@ -69,10 +69,10 @@ def test_handle_conn_guarded_releases_permit_even_on_error():
     def raising(conn):
         raise RuntimeError("handler blew up")
 
-    daemon._handle_conn = raising
-    daemon._conn_sem.acquire()              # the permit a spawn would have taken
-    daemon._handle_conn_guarded(object())   # raises inside; finally must release
+    daemon._server._handle_conn = raising
+    daemon._server._conn_sem.acquire()              # the permit a spawn would have taken
+    daemon._server._handle_conn_guarded(object())   # raises inside; finally must release
     n = 0
-    while daemon._conn_sem.acquire(blocking=False):
+    while daemon._server._conn_sem.acquire(blocking=False):
         n += 1
     assert n == _MAX_CONN_THREADS           # capacity fully restored

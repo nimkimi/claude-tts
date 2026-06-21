@@ -1,6 +1,6 @@
 # tests/test_macos_backend.py
 from sonari.platform.macos import make_backend
-from sonari.platform import base
+from sonari.platform import contracts as base
 
 
 def test_make_backend_returns_full_bundle():

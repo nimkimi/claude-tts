@@ -1,6 +1,6 @@
 import os
 
-import sonari.daemon as daemon_mod
+import sonari.daemon.bootstrap as daemon_mod
 
 
 def test_faulthandler_log_under_sonari_dir(tmp_path):

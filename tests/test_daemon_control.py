@@ -1,5 +1,6 @@
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 from sonari.queue import SpeechItem
+from sonari.daemon.features import lifecycle
 from tests.daemon_helpers import make_daemon, stream_queue
 
 
@@ -83,9 +84,9 @@ def test_set_foreground_sets_foreground():
     assert sessions.foreground() == "s9"
 
 
-def test_session_start_sets_foreground_and_registers():
+def test_session_start_sets_foreground_and_registers(monkeypatch):
     daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
-    daemon._setup_health = lambda v: ("ok", None)  # keep focus on fg/register
+    monkeypatch.setattr(lifecycle, "_setup_health", lambda v: ("ok", None))  # keep focus on fg/register
     daemon.handle_message(_msg(MsgType.SESSION_START, "s9"))
     assert sessions.foreground() == "s9"
     assert sessions.is_foreground("s9") is True

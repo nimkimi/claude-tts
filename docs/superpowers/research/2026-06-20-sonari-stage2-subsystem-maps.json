@@ -1,0 +1,847 @@
+[
+  {
+    "subsystem": "daemon-core",
+    "files": [
+      {
+        "path": "/Users/Nima.Hakimi/Projects/private/claude-tts/src/sonari/daemon.py",
+        "lines": 1236,
+        "role": "The single core file of Sonari: the SpeechDaemon class (a TCP-socket message server + a foreground-driven speak loop + per-session speech streams), plus three module-level functions (ensure_running lazy-start, _arm_faulthandler crash diagnostics, main entrypoint). Holds the entire daemon runtime: message dispatch, queue/history orchestration, threading, navigation, pause/mute/pin, hotkey lifecycle, and TTS playback bookkeeping."
+      }
+    ],
+    "responsibilities": [
+      "TCP socket server lifecycle: bind to transport.HOST on an ephemeral port, listen(16), write a lockfile with host/port/token/pid, accept connections, tear down + unlink lockfile on stop (run, _accept_loop, stop, lines 1118-1163)",
+      "Per-connection protocol handling: token handshake (first newline-terminated line must equal self._token), newline-framed message decode loop, reply send-back, 5s recv timeout (_handle_conn, lines 1025-1069)",
+      "Connection concurrency control: cap at 32 handler threads via a BoundedSemaphore, spawn-or-drop, guaranteed permit release in a finally, permit-leak recovery on thread-creation failure (_spawn_conn_handler, _handle_conn_guarded, lines 1083-1116)",
+      "Central message dispatch: a 403-line flat if-chain over 27 distinct MsgType branches, each an early `return None` or a reply dict (handle_message, lines 335-737)",
+      "Prose assembly + min-queue batching: feed deltas into a per-stream assembler, buffer chunks per session until the minqueue threshold, flush-all at turn boundaries (PROSE branch + _buffer_prose/_flush_prose_buffer/_minqueue, lines 116-151, 340-366)",
+      "Decision message text construction: turn raw CHOICE/PLAN/PERMISSION payloads into spoken strings, with selection cues and multi-select/>9-option notes (_choice_text/_plan_text/_permission_text/_selection_cue/_choice_notes, lines 218-293)",
+      "The speak loop: foreground-stream-only playback, pop+claim under lock, attribute folder prefix on session switch, speak via Speaker, re-queue the interrupted item on pause, mark heard-markers, never let an exception permanently kill the thread (_speak_loop/_speak_loop_once/_signal_speak_failure/note_spoken/_attributed_text, lines 188-217, 907-1024)",
+      "Per-session speech-stream registry: lazily create + cache SessionStream objects keyed by session id, allocate monotonic SpeechItem ids, enqueue/evict with pending-heard tracking (_stream/_alloc_id/_enqueue/_drop_pending, lines 80-115, 169-171)",
+      "Message-cursor navigation within a turn: prev/next/first/last over a turn's messages, seek-and-play, anchored-turn fallback on eviction (_nav, lines 791-836)",
+      "Response-to-response navigation across turns: move the turn anchor, relative orientation cues, follow-live vs pinned anchor (_nav_response, lines 837-882)",
+      "Play/pause + resume: hold the loop, cancel current speech, re-queue interrupted item, voice Paused/Resumed control cues, auto-resume on new prompt (PAUSE branch + _resume, lines 515-541, 883-888)",
+      "Per-session sticky mute toggle and pin-to-session toggle (MUTE/PIN_TOGGLE branches, lines 543-579)",
+      "Jump-to-waiting: pick a backlog target session, switch the voice (not OS focus), optionally raise the OS window via the lazily-built RaiseService with generation bumping (JUMP_WAITING branch + _raise/_raise_failed/_waiting_target, lines 61-79, 173-186, 606-645)",
+      "Global hotkey lifecycle: start/stop/reload via the platform backend, honour a SONARI_DISABLE_HOTKEYS env var or ~/.sonari/no_hotkeys file kill-switch, reload off-lock in a short-lived thread, dispatch a hotkey fire as if it were a socket message (_start_hotkeys/_stop_hotkeys/_reload_hotkeys/_dispatch_hotkey, lines 749-789, 890-905)",
+      "Live config mutation + persistence: SET_RATE (delta and absolute, clamped), SET_VOICE, SET_VERBOSITY, SET_MINQUEUE (clamped), CYCLE_VERBOSITY \u2014 each updates self.config, pushes to the speaker, and save_config to disk (lines 662-721)",
+      "Setup-health guidance: a once-per-session degraded-install nudge, reading install.json + checking launcher presence, version-drift detection (_maybe_guide_setup/_setup_health/_read_install_record/_launcher_present, lines 152-167, 295-334)",
+      "Status/ping reporting: STATUS returns verbosity/rate/voice/foreground/queue_len/minqueue; PING returns {ok:true} (lines 723-734)",
+      "Single-instance guard + process bootstrap: socket_connectable fast-path, exclusive flock singleton, build Speaker/SessionManager/SpeechDaemon from loaded config (main, lines 1198-1231)",
+      "Lazy daemon start for clients: spawn the daemon subprocess if no socket is connectable (ensure_running, lines 1165-1170)",
+      "Native-crash diagnostics: arm faulthandler to dump all-thread stacks to faulthandler.log (_arm_faulthandler, lines 1176-1195)"
+    ],
+    "publicSurface": [
+      "SpeechDaemon (class, lines 37-1163) \u2014 the daemon object; constructed only inside main() and by the test suite (no other src/ module imports it)",
+      "main (function, lines 1198-1231) \u2014 process entrypoint; called by cli.py:518-519 and invoked as `python -m sonari.daemon` by the macOS supervisor (supervisor.py:163)",
+      "ensure_running (function, lines 1165-1170) \u2014 lazy-start used by clients/hooks; imported and called by client.py:8 and client.py:46",
+      "SpeechDaemon.handle_message(msg) \u2014 the dispatch core; also called directly by tests and internally by both the socket path and the hotkey path",
+      "SpeechDaemon.run() \u2014 starts the speak + accept threads and the hotkey listener, then blocks until shutdown",
+      "SpeechDaemon.stop() \u2014 clears _running, wakes the loop, stops hotkeys, closes the server",
+      "SpeechDaemon.note_spoken(item, completed) \u2014 speak-loop bookkeeping; the only non-underscore instance method besides handle_message (callable surface is otherwise all underscore-prefixed)"
+    ],
+    "dependencies": {
+      "internalImports": [
+        "sonari.protocol (MsgType, encode, decode)",
+        "sonari.queue (SpeechItem)",
+        "sonari.config (save_config, load_config)",
+        "sonari.session_stream (SessionStream)",
+        "sonari.paths (LOCK_PATH, SINGLETON_PATH, ensure_sonari_dir, socket_connectable, INSTALL_RECORD_PATH, and SONARI_DIR imported live inside _arm_faulthandler)",
+        "sonari.platform (transport; get_platform imported lazily in 6 places for hotkey/supervisor/tts/earcon/raise backends)",
+        "sonari.history (SessionHistory \u2014 lazy import in __init__)",
+        "sonari.raise_service (RaiseService \u2014 lazy import in _raise)",
+        "sonari.assembler (PARAGRAPH_BREAK \u2014 lazy import in PROSE branch)",
+        "sonari.sessions (SessionManager, Identity \u2014 lazy imports in main and SESSION_START)",
+        "sonari.speaker (Speaker \u2014 lazy import in main)"
+      ],
+      "externalImports": [
+        "os",
+        "secrets",
+        "socket",
+        "subprocess",
+        "threading",
+        "json (lazy, inside _read_install_record)",
+        "faulthandler (lazy, inside _arm_faulthandler)",
+        "sys + traceback (lazy, imported inside three local except blocks \u2014 NOT at module top; this is the source of a latent NameError, see frictionAndSmells)"
+      ]
+    },
+    "internalCoupling": "\"Extremely high, concentrated in one method. handle_message (lines 335-737) is 403 lines \u2014 a third of the file \u2014 implementing a flat 27-branch if-chain over MsgType (PROSE, CHOICE, PLAN, PERMISSION, TOOL, EARCON, FLUSH, SET_FOREGROUND/SESSION_START, SESSION_END, STOP, SKIP, NAV, PAUSE, MUTE, PIN_TOGGLE, RELOAD_KEYMAP, REREAD_OPTIONS, JUMP_WAITING, JUMP_DECISION, SET_RATE, SET_VOICE, SET_VERBOSITY, SET_MINQUEUE, CYCLE_VERBOSITY, STATUS, PING). Every branch mutates shared daemon state and reaches into helpers (_enqueue, _stream, _flush_prose_buffer, self.history.*, self.sessions.*, self.speaker.*), so the dispatch is the hub through which nearly all other methods are reached. The second-largest method, _speak_loop_once (lines 939-1024, 86 lines), is densely coupled to that same shared state under self._lock: it reads sessions.foreground(), pops the foreground stream's queue, computes attributed text, captures speaker cancel epochs, and re-queues on pause \u2014 interleaving four concerns (foreground resolution, mute filtering, attribution, pause re-queue) in one body. The two navigation methods (_nav 46 lines, _nav_response 46 lines) share the same nav_turn/nav_cursor/queue/history state and overlap heavily in their seek-and-play tails (both clear the queue, cancel the speaker, then enqueue every entry of every message from a start index). State is shared via self._lock across the message-handler path, the speak loop, the hotkey dispatch, and the reload thread, so the coupling is not just call-graph but concurrency-invariant coupling: comments repeatedly explain why a given line must sit inside/outside the lock (e.g. lines 966-998, 1007-1021, 890-905, 581-592).\"",
+    "stateAndSideEffects": [
+      "Module globals: _SINGLETON (line 20, holds the single-instance flock for process lifetime, set in main) and _FAULT_FILE (line 1173, the open faulthandler log file handle)",
+      "Instance threading primitives (__init__, lines 44-57): _running (Event), _wake (Event), _paused (Event), _lock (Lock, the master state lock), _reload_lock (Lock, serializes hotkey reloads), _conn_sem (BoundedSemaphore cap 32)",
+      "Instance mutable state (__init__): _streams (dict session->SessionStream), _next_id (monotonic id counter), _server (the socket), _token (32-byte hex handshake token), _poll_interval (0.1), history (SessionHistory cap from config), _backlog_cap, _pending_heard (dict id->HistoryEntry), _current_item, _last_spoken_session (folder-attribution tracking), raise_service (lazily built)",
+      "Threads spawned: _speak_loop (1 daemon thread, run line 1140), _accept_loop (1 daemon thread, run line 1141), per-connection _handle_conn_guarded threads (up to 32, line 1105), keymap-reload thread (line 590), plus raise_async fired by the RaiseService",
+      "Socket side effects: AF_INET SOCK_STREAM socket, SO_REUSEADDR, bind to transport.HOST on ephemeral port 0, listen(16) (run, lines 1129-1133)",
+      "File side effects: LOCK_PATH written via transport.write_lockfile (line 1135) and os.unlink on shutdown (line 1160); faulthandler.log opened in 'w' mode (line 1190); install.json read (line 300); singleton lock acquired via transport.acquire_singleton(SINGLETON_PATH) (line 1210)",
+      "Config persisted to disk via save_config on every SET_RATE/SET_VOICE/SET_VERBOSITY/SET_MINQUEUE/CYCLE_VERBOSITY (lines 679, 690, 695, 706, 717)",
+      "subprocess.Popen to spawn the daemon (ensure_running, line 1170)",
+      "Environment reads: SONARI_DISABLE_HOTKEYS (lines 758, 782); plus the ~/.sonari/no_hotkeys file flag read at the same sites (a file-based kill-switch)",
+      "Audio/OS side effects via injected backends: self.speaker.speak/cancel/earcon/set_rate/set_voice, the RaiseService raising OS windows",
+      "stderr writes: traceback.print_exc to sys.stderr in the speak-loop and message/conn guards (lines 919, 1080, 1091); faulthandler all-thread dumps to _FAULT_FILE"
+    ],
+    "frictionAndSmells": [
+      "handle_message is a 403-line, 27-branch flat dispatch (lines 335-737) \u2014 a single method holding the daemon's entire command vocabulary; one third of the file. Branches range from one-liners (PING line 733) to ~40-line blocks (JUMP_WAITING 606-645, PAUSE 515-541), with no shared structure between them beyond the `if t == MsgType.X: ... return None` shape.",
+      "LATENT NameError / silent diagnostic loss in _signal_speak_failure (lines 922-937): it calls traceback.print_exc(file=sys.stderr) at lines 934-935, but neither `traceback` nor `sys` is imported in scope (module top imports only os/secrets/socket/subprocess/threading; sys+traceback are imported locally only inside other functions at 917-918, 1078-1079, 1089-1090). The call sits in its own try/except Exception: pass (lines 934-936), so the NameError is swallowed \u2014 the function does not crash and the error earcon at line 931 still fires, but the traceback the docstring promises is NEVER written. Every inner-speak-loop failure loses its diagnostic silently. (The OUTER _speak_loop handler at 917-919 imports traceback locally and does log; only this inner path is dead.)",
+      "Lazy/local imports scattered across 12 sites (lines 50, 65-66, 298, 309, 345, 466, 760, 767, 785, 917-918, 1078-1079, 1089-1090, 1168, 1186, 1214-1216) \u2014 get_platform alone is re-imported lazily in 6 places. Some are deliberate (SONARI_DIR live-import for test monkeypatch, line 1186; circular-import avoidance) but the pattern obscures the true dependency set from the module header.",
+      "Dead Windows residue in comments/rationale despite the 2026-06-20 macOS-only removal: line 427 (Windows earcon audio path), lines 585-586 (Windows hotkey pump thread), lines 750-751 (Windows in-process RegisterHotKey thread), line 778 (Windows thread-joined stop+start), line 1178 (_arm_faulthandler docstring centres on WinRT/winsound/access-violation, a Windows-only failure mode). The code paths are gone but the explanatory prose still describes a two-platform world.",
+      "_nav (791-836) and _nav_response (837-882) duplicate their seek-and-play tail almost verbatim: both do speaker.cancel(), _drop_pending(queue.clear()), then `for mid in mids: for e in entries_for_message: self._enqueue(...)` (lines 830-835 vs 876-881).",
+      "Config validation/clamping is duplicated and inconsistent: SET_RATE (662-684) and SET_MINQUEUE (698-707) each re-implement max(MIN, min(MAX, int(...))) with a try/except (TypeError, ValueError): return None, while SET_VOICE/SET_VERBOSITY (686-696) persist their raw payload with no validation at all.",
+      "21% of the file (258 of 1236 lines: 160 comment + 98 docstring) is rationale prose \u2014 dense concurrency-invariant explanations, spec \u00a7-references (\u00a74.2, \u00a74.5), and issue tags (M2/M6/M8/H2/#41). It documents WHY each lock acquisition and ordering exists, which is valuable but means a large share of the line count is justification for a design whose correctness rests on undocumented-in-code invariants.",
+      "The 'flip' comments (lines 348-349, 384-385, 398, 411) narrate a past behavioural change (background prose now accumulates instead of being dropped) inline in the dispatch branches \u2014 historical commentary embedded in live code.",
+      "_speak_loop_once (939-1024) interleaves four concerns in one 86-line body across two lock regions: foreground resolution + pop/claim (970-993), mute filtering (985-988), folder attribution with rollback snapshot (982-993), and pause re-queue with _last_spoken_session rollback (1007-1021). The pause branch at the top (945-965) partly duplicates the pop/claim/speak/note_spoken sequence of the normal branch."
+    ],
+    "naturalSeams": [
+      "The 12 config/control message branches (SET_RATE, SET_VOICE, SET_VERBOSITY, SET_MINQUEUE, CYCLE_VERBOSITY, STATUS, PING, MUTE, PIN_TOGGLE, PAUSE, plus the validation helpers) cluster around self.config + save_config + self.speaker and are largely independent of the prose/decision pipeline \u2014 they read/mutate config and emit a confirmation cue, sharing almost no state with PROSE/CHOICE/PLAN.",
+      "The five static/pure text-builder methods (_choice_text, _plan_text, _permission_text, _choice_notes, _selection_cue, lines 218-293) form a self-contained cluster: they take a raw msg dict and return a spoken string, touching no daemon state except _selection_cue's once-per-stream warned_immediate flag. They are the only @staticmethod-heavy region.",
+      "The socket/connection layer (_handle_conn, _handle_message_guarded, _handle_conn_guarded, _spawn_conn_handler, _accept_loop, lines 1025-1126) is a cohesive cluster sharing the token handshake, the BoundedSemaphore, and the recv/decode framing \u2014 it touches daemon state only through the single self.handle_message call under _handle_message_guarded.",
+      "The hotkey lifecycle methods (_start_hotkeys, _stop_hotkeys, _reload_hotkeys, _dispatch_hotkey, lines 749-789, 890-905) cluster around the platform hotkey backend + the no_hotkeys kill-switch + _reload_lock, and connect to the rest only by feeding a synthesized message into handle_message.",
+      "The two navigation methods (_nav, _nav_response) plus their shared seek-and-play idiom form a unit operating on nav_turn/nav_cursor/queue/history \u2014 distinct from streaming-prose handling.",
+      "The setup-health cluster (_maybe_guide_setup, _setup_health, _read_install_record, _launcher_present, lines 152-167, 295-334) is self-contained: it reads install.json and the launcher state, is gated by a per-stream `guided` flag, and only emits a single prose cue \u2014 it shares no state with playback.",
+      "The speak loop (_speak_loop, _speak_loop_once, _signal_speak_failure, note_spoken, _attributed_text) is the one cluster that lives on the speak thread and is the consumer side of the queue; it shares _lock, _current_item, _last_spoken_session, and _pending_heard with the producer-side enqueue helpers, observably the tightest state-sharing knot in the file.",
+      "The three module-level functions (ensure_running, _arm_faulthandler, main) plus the two module globals sit outside the class as process bootstrap/lifecycle, distinct from the running daemon's behaviour."
+    ],
+    "changeHints": [
+      "Issue/ticket tags embedded inline mark hot-fixed spots: M2 (line 976 pop->speak gap), M6 (line 650 heard-marker clearing), M8 (line 1109 permit leak), H2 (line 591 dark-hotkey race), L2/L (lines 1008, 985 lock re-check), \u00a74.2/\u00a74.5 spec references (lines 446, 632) \u2014 these are the places that have been patched against concurrency/edge-case bugs and are likely to keep attracting fixes.",
+      "The 'flip' comments (lines 348, 384, 398, 411) mark a recently changed behaviour (background prose now accumulates per-stream instead of being dropped) \u2014 a recently churned area.",
+      "Config knobs read from self.config with defaults, all runtime-tunable and persisted: rate (RATE_MIN 100 / RATE_MAX 400), minqueue (MINQUEUE_MIN 1 / MINQUEUE_MAX 10), verbosity (everything|medium|quiet cycle), voice, history_cap (200), backlog_cap (200), background_policy (earcon_only).",
+      "Kill-switches indicating a still-stabilising hotkey subsystem: SONARI_DISABLE_HOTKEYS env var and the ~/.sonari/no_hotkeys file flag (lines 757-758, 781-782), explicitly described as a crash-diagnosis isolation lever.",
+      "_MAX_CONN_THREADS = 32 (line 34) is a tunable hardening bound against connection-thread leaks, added defensively.",
+      "Stage references (Stage 3/4/5 at lines 178, 454, 837) indicate a phased feature rollout (navigation/history persistence) layered onto the dispatch over time.",
+      "Comments repeatedly assert 'NOTHING may permanently kill the speak thread' (line 912) and that swallowed exceptions are the worst eyes-free outcome (#41, line 922) \u2014 a stability concern that has driven multiple defensive try/except wrappers and will gate future changes to the loop.",
+      "_arm_faulthandler (line 1176) is pure diagnostics scaffolding added to catch native crashes; its existence signals the daemon has had hard-to-debug C-level deaths."
+    ]
+  },
+  {
+    "subsystem": "cli-entry",
+    "files": [
+      {
+        "path": "src/sonari/cli.py",
+        "lines": 568,
+        "role": "Main CLI: argparse subparser tree, control subcommands (status/verbosity/rate/voice/minqueue/stop/skip), local subcommands (doctor/install/uninstall/daemon/keymap/voices), and the install/uninstall/doctor lifecycle logic."
+      },
+      {
+        "path": "src/sonari/hooks_entry.py",
+        "lines": 122,
+        "role": "Pure mapping function handle_event(event, payload) -> list[protocol message dicts]. No I/O, no main; maps Claude Code hook event names + parsed stdin payload to MsgType dicts."
+      },
+      {
+        "path": "bin/sonari",
+        "lines": 15,
+        "role": "Bash launcher shim: sets PYTHONPATH to repo src, picks /usr/bin/python3 (else PATH python3), execs `python -m sonari.cli \"$@\"`."
+      },
+      {
+        "path": "bin/sonari-daemon",
+        "lines": 14,
+        "role": "Bash launcher shim identical to bin/sonari but execs `python -m sonari.daemon`. Used by macOS supervisor.launch_spec() to lazily start the daemon."
+      },
+      {
+        "path": "bin/sonari-hook",
+        "lines": 95,
+        "role": "Python hook entrypoint invoked by Claude Code as `bin/sonari-hook <Event>` with payload JSON on stdin. Reads stdin, optional SONARI_CAPTURE dump, mutates sys.path to plugin src, calls handle_event, ensure_daemon, sends each message. Total try/except, always exits 0."
+      }
+    ],
+    "responsibilities": [
+      "Define the full `sonari` command-line surface via argparse subparsers and dispatch to per-command handler functions (cli.py:155-187, 523-546).",
+      "Build 'control' protocol messages from CLI args and hand them to client.send (cli.py:38-40, 59-116).",
+      "Run 'local' (in-process) operations: doctor health checks, install, uninstall, daemon foreground run, keymap list/unbind, neural-voice install/uninstall (cli.py:267-546).",
+      "Own the install lifecycle: resolve Python, copy the runtime package into APP_DIR, write the install record, delegate OS autostart/hooks/launcher/hotkeys to the platform backend, build the focus-follow helper (cli.py:343-427).",
+      "Own the uninstall lifecycle: tear down OS artifacts via the backend and remove runtime files while preserving config.json + keymap.json (cli.py:434-482).",
+      "Aggregate doctor health rows from platform backends plus inline neutral checks (SONARI_DIR writable, daemon socket PING, keymap resolves, neural-voice health, python3 resolution, plugin path) (cli.py:190-264).",
+      "Persist and read the durable install record (~/.sonari/install.json) and read the plugin version from plugin.json (cli.py:296-340).",
+      "Map every Claude Code hook event to zero or more protocol messages, including earcon+payload pairs for choice/plan/permission and SessionStart terminal-identity capture (hooks_entry.py:29-122).",
+      "Bootstrap a self-contained Python runtime from the plugin's own src/ for the CLI, daemon, and hook entrypoints, independent of any globally installed sonari package (bin/sonari, bin/sonari-daemon, bin/sonari-hook:39-43).",
+      "Guarantee hook failures never surface to Claude by capturing raw stdin first and always exiting 0 (bin/sonari-hook:14-31, 89-95)."
+    ],
+    "publicSurface": [
+      "cli.main(argv) -> int \u2014 process entry point; called by `python -m sonari.cli` via bin/sonari and by tests (cli.py:549).",
+      "cli.install() -> int \u2014 re-used by _cmd_voices_install/_cmd_voices_uninstall to re-wire the daemon onto/off the neural venv (cli.py:361, called 502, 512).",
+      "cli.uninstall() -> int \u2014 public uninstall lifecycle (cli.py:434).",
+      "cli.doctor() -> list[(check, ok, detail)] \u2014 health-check rows, consumed by _cmd_doctor and sonari:doctor command (cli.py:190).",
+      "hooks_entry.handle_event(event, payload) -> list[dict] \u2014 pure event->messages mapper imported by bin/sonari-hook and tests (hooks_entry.py:29).",
+      "bin/sonari, bin/sonari-daemon \u2014 bash launchers referenced by macOS supervisor.place_launcher (wraps bin/sonari) and supervisor.launch_spec (execs bin/sonari-daemon).",
+      "bin/sonari-hook \u2014 referenced by hooks/hooks.json for all 7 Claude Code hook events via ${CLAUDE_PLUGIN_ROOT}/bin/sonari-hook <Event>."
+    ],
+    "dependencies": {
+      "internalImports": [
+        "sonari.protocol (MsgType, PROTOCOL_VERSION, encode/decode)",
+        "sonari.paths (SONARI_DIR, APP_DIR, INSTALL_RECORD_PATH, LOCK_PATH, LOG_PATH, KEYMAP_PATH, CONFIG_PATH, HOTKEYD_RESOLVED_PATH, ensure_sonari_dir, repo_root, kokoro_venv_python, socket_connectable)",
+        "sonari.keymap (ACTION_MESSAGES, load_keymap, resolve_keymap, unbind_action, write_default_keymap_if_absent, write_resolved)",
+        "sonari.platform.get_platform (and the cached PlatformBackend: .tts, .hotkey, .raise_backend, .supervisor)",
+        "sonari.platform.transport (connect, used by client.send)",
+        "sonari.client (send, ensure_daemon, ensure_running indirectly, DaemonNotRunning) \u2014 imported lazily inside handlers and in bin/sonari-hook",
+        "sonari.daemon (main, ensure_running) \u2014 lazy import in _cmd_daemon and client",
+        "sonari.kokoro_provision (neural_enabled, neural_healthy, install_kokoro, uninstall_kokoro, predownload) \u2014 lazy import",
+        "sonari.ttyutil (controlling_tty) \u2014 used by hooks_entry SessionStart"
+      ],
+      "externalImports": [
+        "argparse",
+        "json",
+        "os",
+        "shutil",
+        "sys",
+        "typing.Optional",
+        "datetime (lazy, in _write_install_record)",
+        "bash (#!/usr/bin/env bash for bin/sonari + bin/sonari-daemon)"
+      ]
+    },
+    "internalCoupling": "Within this subsystem cli.py is the heavy file (568 lines). The two largest functions are doctor() at ~74 lines (cli.py:190-264) and install() at ~66 lines (cli.py:361-427). doctor() mixes platform-backend delegation (supervisor/hotkey/raise doctor_rows) with seven inline checks reaching into paths, client, keymap, and kokoro_provision \u2014 it touches nearly every other subsystem. install() interleaves eight distinct steps (python resolution, app copy, keymap setup, install-record write, OS autostart/hooks, hotkey install, focus-follow helper build, voice check + post-install notes), each its own concern. The control handlers (_cmd_status/_verbosity/_rate/_minqueue/_voice/_stop/_skip) are thin and uniform \u2014 each just builds a dict and calls _send. The install-record cluster (install/uninstall/_copy_app/_write_install_record/_read_install_record/_read_plugin_version) shares the paths.* and supervisor objects. hooks_entry.py is loosely coupled to cli.py: they do NOT import each other; both independently build protocol dicts from PROTOCOL_VERSION+MsgType. The two entrypoints (cli.main vs bin/sonari-hook.main) duplicate the \"resolve sonari from plugin src\" concern in different forms (bash PYTHONPATH vs runtime sys.path insert).",
+    "stateAndSideEffects": [
+      "Module-global `_PLATFORM` cache mutated by _platform() \u2014 the single OS-dispatch point, lazy-initialized (cli.py:24-32).",
+      "bin/sonari-hook mutates sys.path at runtime: removes any existing src entry then inserts plugin src at index 0 to shadow a stale global sonari (bin/sonari-hook:41-43).",
+      "bin/sonari-hook reads raw bytes from sys.stdin.buffer and optionally writes a capture file to $SONARI_CAPTURE/<event>-<pid>.json (bin/sonari-hook:17-31).",
+      "bin/sonari and bin/sonari-daemon export PYTHONPATH=<repo>/src and exec a python3 interpreter (bin/sonari:5,15; bin/sonari-daemon:5,14).",
+      "install() writes ~/.sonari/install.json, copies plugin src/sonari into APP_DIR (rmtree+copytree, overwrites every install), writes default+resolved keymap, and triggers backend LaunchAgent/hooks/launcher/hotkey side effects (cli.py:343-427).",
+      "uninstall() removes LOCK/LOG/HOTKEYD_RESOLVED/INSTALL_RECORD/hotkeyd.log/faulthandler.log + rmtree APP_DIR, preserving config.json + keymap.json (cli.py:444-479).",
+      "client.send opens a unix socket to LOCK_PATH on every CLI control command and on every hook message (client.py:15-40).",
+      "Environment reads: CLAUDE_PLUGIN_VERSION, CLAUDE_PLUGIN_ROOT (hooks_entry.py:109-110; bin/sonari-hook:49-52), TERM_PROGRAM, ITERM_SESSION_ID (hooks_entry.py:113-114), SONARI_CAPTURE, PYTHONPATH (bin/sonari-hook:22; bin scripts).",
+      "_cmd_voices_install spawns the Kokoro provisioning (uv + ~316MB download) and then calls install() again to re-wire the daemon (cli.py:489-505)."
+    ],
+    "frictionAndSmells": [
+      "install() is ~66 lines mixing 8 numbered concerns in one function (cli.py:361-427); doctor() is ~74 lines of inline checks reaching into paths/client/keymap/kokoro_provision/platform (cli.py:190-264).",
+      "_daemon_python reaches across the platform seam into a private method `sup._probe_python_version(...)` (cli.py:291, 375) \u2014 a CLI module calling a leading-underscore method on the supervisor backend.",
+      "The `voice` command has a split execution path: listing voices runs in-process via _platform().tts.list_voices() (cli.py:92-103) while setting a voice goes over IPC via _send SET_VOICE (cli.py:104) \u2014 two transports in one handler.",
+      "Pervasive broad `except Exception` with `# noqa: BLE001` suppressions across cli.py (e.g. 94, 137, 208, 218, 227, 241, 249, 261, 321, 338, 415, 422, 441, 498) and silent bare excepts in bin/sonari-hook (18, 30, 58, 71, 80, 85, 92) \u2014 failures are swallowed broadly.",
+      "Windows comment residue in a codebase the project states is now macOS-only: doctor()/install() docstrings and comments still describe Windows schtasks/Task/pythonw/UIPI/M3 behavior (cli.py:195, 197, 364-365, 405) \u2014 dead documentation residue.",
+      "The voices parent parser uses an inline lambda as its no-subcommand fallback: `vp.set_defaults(func=lambda _a: (vp.print_help() or 2))` (cli.py:546) \u2014 relies on print_help() returning None so `None or 2` yields exit code 2.",
+      "Two duplicated copies of the 'prefer /usr/bin/python3 else PATH python3' interpreter-selection logic across bin/sonari (9-14) and bin/sonari-daemon (8-13).",
+      "The 'self-contained src resolution' concern is solved three different ways: bash PYTHONPATH (bin/sonari, bin/sonari-daemon), runtime sys.path removal+insert (bin/sonari-hook:41-43), and LaunchAgent env PYTHONPATH (supervisor.py:165).",
+      "main()'s error handling only special-cases DaemonNotRunning and re-raises every other OSError (cli.py:559-564); all non-OSError exceptions from handlers propagate uncaught to the user."
+    ],
+    "naturalSeams": [
+      "The control-vs-local split is already documented in code: the module docstring states the two groups (cli.py:3-8) and _register_local() physically groups the local subcommands separately from the control ones registered inline in _build_parser (cli.py:160-187 vs 523-546).",
+      "An install-record + app-copy cluster: install/uninstall/_copy_app/_write_install_record/_read_install_record/_read_plugin_version all operate on paths.INSTALL_RECORD_PATH / paths.APP_DIR and the supervisor object, separate from the message-sending handlers (cli.py:296-358, 361-482).",
+      "The thin control handlers (_cmd_status/_verbosity/_rate/_minqueue/_voice/_stop/_skip) form a uniform cluster: each builds a {v, type, ...} dict and calls _send, sharing the same _send/PROTOCOL_VERSION/MsgType dependency (cli.py:59-116).",
+      "doctor() is an aggregation point that pulls one or more rows from each subsystem (supervisor, hotkey, raise_backend, paths, client, keymap, kokoro_provision, python resolution, plugin path) \u2014 a self-contained health-reporting concern (cli.py:190-264).",
+      "hooks_entry.handle_event is already an isolated pure unit (no I/O, marked PURE in its docstring) physically separated from the stdin/IPC shell in bin/sonari-hook \u2014 the side-effecting half lives entirely in the bin script (hooks_entry.py:29-33 vs bin/sonari-hook:14-86).",
+      "Three protocol-message producers converge on the same client.send -> daemon transport: CLI control subcommands (cli.py:38-40), hook events (hooks_entry + bin/sonari-hook:82-86), and hotkey actions defined in keymap.ACTION_MESSAGES \u2014 all emit {v, type, ...} dicts from the same MsgType vocabulary."
+    ],
+    "changeHints": [
+      "The CLI exposes only a subset of the MsgType vocabulary: status/stop/skip/set_verbosity/set_rate/set_voice/set_minqueue/status/reload_keymap. The hotkey-only types (nav, pause, mute, pin_toggle, jump_waiting, jump_decision, reread_options, cycle_verbosity) have NO CLI subcommand \u2014 they are reachable only via keymap.ACTION_MESSAGES (keymap.py:26+) and the hotkey daemon. RELOAD_KEYMAP is sent internally by _cmd_keymap (cli.py:136), never as a user subcommand.",
+      "Issue/feature markers in code reference GitHub issues: pin_toggle (#31) tagged in protocol.py:25 and keymap.py. Spec section references appear in comments (spec \u00a73.B, \u00a75.4 \u2014 cli.py:382, 444, 463).",
+      "Windows support markers persist as comments referencing a deferred 'M3' milestone (cli.py:405) and Windows backends (schtasks/Task Scheduler/pythonw) despite the project being macOS-only now \u2014 a phase/version marker that is stale.",
+      "Plugin version is resolved from multiple advisory sources with fallbacks: plugin.json 'version' field, then CLAUDE_PLUGIN_VERSION env var (cli.py:325-340; bin/sonari-hook:49-59) \u2014 version is explicitly treated as advisory/never-fatal.",
+      "Neural-voice state is derived implicitly from the venv rather than a flag: _daemon_python checks kp.neural_enabled() + probes the venv python >=3.10 so re-running `sonari install` keeps the daemon on the venv interpreter without a separate config knob (cli.py:282-293).",
+      "SONARI_CAPTURE env var is a golden-payload test/capture knob in bin/sonari-hook (lines 22-31) referenced by tests/fixtures/CAPTURE_INSTRUCTIONS.md \u2014 a debug/test affordance baked into the production hook path."
+    ]
+  },
+  {
+    "subsystem": "platform",
+    "files": [
+      {
+        "path": "src/sonari/platform/base.py",
+        "lines": 164,
+        "role": "Five ABCs (TtsBackend, EarconBackend, HotkeyBackend, RaiseBackend, SupervisorBackend) + the inert NoopRaiseBackend + the PlatformBackend dataclass that bundles the five backend instances. The portable-core/platform boundary contract."
+      },
+      {
+        "path": "src/sonari/platform/__init__.py",
+        "lines": 20,
+        "role": "get_platform() \u2014 the single sys.platform dispatch + module-level cache. darwin -> macos.make_backend(); everything else -> RuntimeError."
+      },
+      {
+        "path": "src/sonari/platform/transport.py",
+        "lines": 74,
+        "role": "Localhost-TCP transport: lockfile read/write (host/port/token/pid, 0o600), token-handshake connect(), connectable() probe, and acquire_singleton() (fcntl.flock single-instance lock). Not a platform backend; pure stdlib, OS-agnostic."
+      },
+      {
+        "path": "src/sonari/platform/macos/__init__.py",
+        "lines": 16,
+        "role": "make_backend() \u2014 constructs the PlatformBackend dataclass from the five Mac* concrete backends."
+      },
+      {
+        "path": "src/sonari/platform/macos/supervisor.py",
+        "lines": 349,
+        "role": "MacSupervisorBackend: python resolution, launchd plist generation, launchctl wrapper, install/uninstall, launcher placement, post-install notes, and the large doctor_rows() diagnostic block. Largest file."
+      },
+      {
+        "path": "src/sonari/platform/macos/tts.py",
+        "lines": 234,
+        "role": "MacTtsBackend: routes Kokoro voices through the portable engine + afplay (via _AfplayHandle), everything else through `say`. Plus _parse_listing, _sweep_stale_wavs, _play_wav_bytes helpers."
+      },
+      {
+        "path": "src/sonari/platform/macos/hotkeys.py",
+        "lines": 220,
+        "role": "MacHotkeyBackend: compiles+supervises the Swift Carbon hotkeyd, writes/loads its LaunchAgent, builds display tables from keytables, exposes keytables to the keymap resolver, and overrides reload()."
+      },
+      {
+        "path": "src/sonari/platform/macos/raiser.py",
+        "lines": 96,
+        "role": "MacRaiseBackend: focus-follow. supports()/raise_session() dispatch on identity.term_program (Apple_Terminal via sonari-raise helper, iTerm.app via --iterm helper), build() compiles the Swift helper, doctor_rows()."
+      },
+      {
+        "path": "src/sonari/platform/macos/earcon.py",
+        "lines": 30,
+        "role": "MacEarconBackend: play() spawns afplay, default_earcons() returns the System Sounds {kind: path} map. Smallest backend."
+      },
+      {
+        "path": "src/sonari/platform/macos/keytables.py",
+        "lines": 24,
+        "role": "Pure data: KEY_CODES (Carbon virtual key codes), MOD_MASKS, DEFAULT_MODS (['ctrl','cmd']). No logic."
+      }
+    ],
+    "responsibilities": [
+      "Define the abstract contract between the portable core and OS backends (base.py: 5 ABCs + bundling dataclass)",
+      "Select the OS backend at runtime and cache it (__init__.get_platform \u2014 the single sys.platform branch for SELECTION)",
+      "Provide the daemon<->client localhost-TCP transport: lockfile advertisement, token handshake, single-instance flock (transport.py \u2014 OS-agnostic, not a backend)",
+      "macOS speech synthesis: `say` invocation plus a parallel Kokoro-neural path through afplay with subprocess-like handle semantics (macos/tts.py)",
+      "macOS voice enumeration and best-voice selection by parsing `say -v ?` output (macos/tts.py _parse_listing, list_voices, best_voice)",
+      "macOS earcon playback via afplay and the default System Sounds mapping (macos/earcon.py)",
+      "macOS global-hotkey lifecycle: compile Swift Carbon hotkeyd, write+load its LaunchAgent, live-reload by rewriting the resolved keymap (macos/hotkeys.py)",
+      "macOS hotkey display labels + exposing Carbon key/mod tables to the portable keymap resolver (macos/hotkeys.py + keytables.py)",
+      "macOS daemon supervision: resolve a usable python3, generate/load the speechd LaunchAgent plist, place ~/.local/bin launcher, install/uninstall, post-install notes (macos/supervisor.py)",
+      "macOS health diagnostics: the doctor_rows() blocks aggregating say/afplay/voice/swiftc/hotkeyd/launchagent/launcher/raise-helper status (macos/supervisor.py + raiser.py + hotkeys.py)",
+      "macOS focus-follow: raise the right Terminal.app/iTerm2 window for a session identity via the Swift sonari-raise helper (macos/raiser.py)",
+      "Compile-on-change build logic for two Swift helpers, gated by a stored source sha256 to preserve OS permission grants (macos/hotkeys.build + raiser.build \u2014 duplicated)"
+    ],
+    "publicSurface": [
+      "get_platform() -> PlatformBackend \u2014 single OS dispatch; imported by cli.py, keymap.py, daemon.py",
+      "PlatformBackend dataclass \u2014 bundles tts/earcon/hotkey/supervisor/raise_backend; referenced by cli docstring + constructed in macos/__init__.make_backend",
+      "TtsBackend ABC (run/best_voice/list_voices) \u2014 consumed via get_platform().tts; best_voice also called directly in supervisor.doctor_rows",
+      "EarconBackend ABC (play/default_earcons) \u2014 consumed via get_platform().earcon",
+      "HotkeyBackend ABC (install/uninstall/display_combo + key_codes/mod_masks/default_mods/extra_default_bindings/start/stop/reload/doctor_rows) \u2014 consumed by cli.install and daemon hotkey lifecycle; keytables consumed by keymap.py",
+      "SupervisorBackend ABC (install/uninstall/is_running/is_installed/resolve_python/launch_spec/doctor_rows/post_install_notes/hooks_doctor_row) \u2014 consumed by cli install/doctor and daemon spawn",
+      "RaiseBackend ABC + NoopRaiseBackend (raise_session/supports/doctor_rows) \u2014 consumed by daemon via RaiseService(get_platform().raise_backend)",
+      "transport.connect/connectable/write_lockfile/read_lockfile/acquire_singleton \u2014 consumed by client.py, daemon.py, paths.socket_connectable",
+      "transport.HOST constant",
+      "macos.make_backend() \u2014 imported only by get_platform()",
+      "MacTtsBackend, MacHotkeyBackend (.build), MacRaiseBackend (.build), MacSupervisorBackend (.launchctl) \u2014 concrete classes imported directly by tests, doctor_rows, cli build helpers, and reload()",
+      "keytables.KEY_CODES / MOD_MASKS / DEFAULT_MODS \u2014 re-exported through MacHotkeyBackend to keymap.py; also imported at hotkeys.py module top to build display tables",
+      "macos LAUNCH_AGENT_LABEL constants (com.sonari.speechd, com.sonari.hotkeyd) \u2014 supervisor imports the hotkeyd label for doctor_rows"
+    ],
+    "dependencies": {
+      "internalImports": [
+        "sonari.paths (repo_root, LOG_PATH, SONARI_DIR, HOTKEYD_BIN_PATH, RAISE_BIN_PATH, HOTKEYD_RESOLVED_PATH, socket_connectable)",
+        "sonari.kokoro (is_kokoro_voice, require_installed, rate_to_speed, KokoroEngine, VOICES, is_installed) \u2014 lazy-imported in tts.run/list_voices",
+        "sonari.kokoro_provision (neural_enabled) \u2014 lazy-imported in tts.list_voices",
+        "sonari.keymap (write_resolved) \u2014 lazy-imported in hotkeys.reload",
+        "sonari.platform.macos.keytables \u2014 imported by hotkeys.py",
+        "sonari.platform.macos.supervisor.MacSupervisorBackend \u2014 lazy cross-import inside hotkeys.reload/uninstall and supervisor.doctor_rows pulls the hotkeyd label from hotkeys.py (mutual macos-package coupling)"
+      ],
+      "externalImports": [
+        "abc",
+        "dataclasses",
+        "json",
+        "os",
+        "socket",
+        "fcntl (lazy import in transport.acquire_singleton)",
+        "sys",
+        "subprocess",
+        "shutil",
+        "tempfile",
+        "hashlib",
+        "glob (lazy in tts._sweep_stale_wavs)",
+        "time (lazy in tts._sweep_stale_wavs)",
+        "typing"
+      ]
+    },
+    "internalCoupling": "The subsystem is loosely coupled at the package level (each backend is a separate small file behind an ABC), but two files concentrate most of the mass and mix concerns. Largest function: MacSupervisorBackend.doctor_rows (supervisor.py:268-349, ~82 lines) is a flat sequence of ad-hoc diagnostic probes (say, afplay, enhanced voice, swiftc, hotkeyd binary, hotkeyd resolved keymap, two LaunchAgent `launchctl list` checks, launcher+PATH) \u2014 it reaches into MacTtsBackend, hotkeys.py's label, paths, and runs subprocesses, so it is the single most concern-mixed function in the subsystem. Next: MacSupervisorBackend.plist (supervisor.py:98-156, ~58 lines) builds plist XML by string concatenation, near-duplicated by hotkeys._hotkeyd_plist (lines 62-91). resolve_python (supervisor.py:59-88) embeds candidate-discovery + version-probing + preference policy. MacHotkeyBackend.install (hotkeys.py:172-200) and .build (142-170) mix swiftc compilation, plist writing, launchctl loading, and stdout reporting. The macos package has a mutual dependency: hotkeys.reload/uninstall lazy-import MacSupervisorBackend (for .launchctl), while supervisor.doctor_rows imports the hotkeyd LAUNCH_AGENT_LABEL from hotkeys.py.",
+    "stateAndSideEffects": [
+      "Module-global cache: __init__._CACHE holds the singleton PlatformBackend (mutated by get_platform)",
+      "Module-level mutable build in hotkeys.py: _KEYCODE_DISPLAY / _MOD_DISPLAY computed via a top-level for-loop, with loop vars explicitly `del`-ed (hotkeys.py:42-54)",
+      "MacTtsBackend.__init__ runs _sweep_stale_wavs() (deletes /tmp/sonari-tts-*.wav older than 300s) and lazily caches self._kokoro (KokoroEngine, ~316MB model download on first Kokoro voice)",
+      "Spawns OS processes: `say`, `afplay`, `swiftc`, `launchctl`, the sonari-raise helper, the sonari-daemon shim",
+      "Writes files: LaunchAgent plists (~/Library/LaunchAgents/*.plist), ~/.local/bin/sonari launcher (0o755), compiled Swift binaries, .hotkeyd.srchash / .raise.srchash, temp WAVs (mkstemp), the resolved keymap (via keymap.write_resolved)",
+      "transport: writes lockfile (0o600, atomic os.replace), opens AF_INET socket to 127.0.0.1, holds an fcntl.flock singleton fd for process lifetime",
+      "Reads env: PATH (supervisor _local_bin_on_path / resolve_python), os.environ in launch paths",
+      "Prints directly to stdout extensively (install/uninstall/post_install_notes/build/hotkey install) \u2014 side-effecting user-facing output baked into backend methods",
+      "raiser/hotkeys read+write a stored source sha256 to decide whether to recompile (preserving OS permission grants keyed to the binary cdhash)"
+    ],
+    "frictionAndSmells": [
+      "KEY-QUESTION FINDING \u2014 every production ABC has exactly one concrete impl (TtsBackend->MacTtsBackend, EarconBackend->MacEarconBackend, HotkeyBackend->MacHotkeyBackend, SupervisorBackend->MacSupervisorBackend). Only RaiseBackend has two (MacRaiseBackend + NoopRaiseBackend at base.py:120). `find src/sonari -iname '*win*'` returns nothing and there is no windows/ package \u2014 the abstraction is shaped for a multi-platform world the code no longer contains (project is macOS-only as of 2026-06-20).",
+      "Trivial single impls behind abstract methods: EarconBackend.default_earcons (base.py:33) -> MacEarconBackend.default_earcons returns `dict(_DEFAULTS)` (earcon.py:29-30); TtsBackend.best_voice/list_voices each have exactly one real impl; SupervisorBackend.launch_spec (base.py:140) -> 4-line tuple return (supervisor.py:169-175); SupervisorBackend.is_installed -> `os.path.exists(_launcher_path())` (supervisor.py:195-197); is_running -> `_p.socket_connectable()` (supervisor.py:199-202).",
+      "Portability residue in comments/docstrings with no implementation behind them: base.py:2 'concrete macOS/Windows implementations live in sibling packages' (no windows sibling exists); base.py:76 'Windows runs a thread; macOS runs a process'; base.py:89-92 reload() default 'correct for an in-process listener like Windows'; NoopRaiseBackend docstring base.py:121 'Windows/Linux/tests'.",
+      "Dead-on-macOS ABC defaults: HotkeyBackend.start/stop (base.py:77-84) are no-ops AND MacHotkeyBackend never overrides them, so daemon._start_hotkeys passing self._dispatch_hotkey to start() (daemon.py:762) is wired to a no-op \u2014 the dispatch callback is never invoked on macOS. key_codes/mod_masks/default_mods/extra_default_bindings have concrete defaults in base.py (return {}/[]) that exist only for absent non-mac platforms.",
+      "ABC signature is a lie / unenforced: HotkeyBackend.install declares (self, log_path, agent_path, launchctl_fn) (base.py:40) but the contract-test double defines install(self) (test_platform_base.py:24) and the cli fake uses install(self, **kwargs) (_fakeplatform.py:48) \u2014 Python ABCs don't check signatures, so three incompatible shapes coexist.",
+      "Two of install's three params are near-ceremony for the sole impl: cli passes agent_path=None and the backend immediately replaces it with its own LAUNCH_AGENT_PATH (cli.py:409 + hotkeys.py:186-187); launchctl_fn is built via `getattr(sup, 'launchctl', None) or (lambda a:0)` (cli.py:407) yet hotkeys.reload/uninstall call MacSupervisorBackend().launchctl directly anyway (hotkeys.py:139-140, 207), so the injected fn and the internal call coexist inconsistently.",
+      "Duplicated build() logic: hotkeys.py:142-170 (build hotkeyd) and raiser.py:63-89 (build sonari-raise) are near-identical sha256-gated swiftc compiles differing only in src filename, binary path, hash path, and grant-message text. build() is not on the HotkeyBackend/RaiseBackend ABC at all \u2014 it's an informal convention cli relies on (_build_raise_helper, cli.py:414).",
+      "Duplicated _xml_escape: defined identically in supervisor.py:37-39 and hotkeys.py:57-59; plist XML generation duplicated between supervisor.plist (98-156) and hotkeys._hotkeyd_plist (62-91).",
+      "Self-documented cross-platform duplication in tts.py:11-15 \u2014 _TMP_PREFIX/_sweep_stale_wavs 'deliberately duplicate the Windows backend's' and the docstring (line 8-9) references '#42 (issue #41)' Windows parity for a Windows backend that no longer exists; the comment is now stale.",
+      "supervisor.doctor_rows (268-349) is a long flat probe list that hard-imports the hotkeyd label from the hotkeys module and instantiates MacTtsBackend to call best_voice() inside a diagnostic \u2014 diagnostics are interleaved with every other backend's internals in one method.",
+      "transport.py is filed under platform/ but is OS-agnostic stdlib (only fcntl, lazily imported) and is not a PlatformBackend \u2014 base.py's docstring even notes it 'branches separately', flagging it as a misfit in this package."
+    ],
+    "naturalSeams": [
+      "keytables.py is already a clean data-only seam (KEY_CODES/MOD_MASKS/DEFAULT_MODS, zero logic) consumed both by hotkeys.py's display-table construction and re-exported to keymap.py.",
+      "transport.py sits apart from the backend abstraction: it is OS-agnostic, depends on no ABC, and is consumed by client/daemon/paths rather than by get_platform \u2014 it clusters with daemon-IPC concerns, not platform-selection.",
+      "The two Swift-helper build() methods (hotkeys.build + raiser.build) form a self-similar cluster: identical sha256-gated-swiftc-compile shape over different source files, and both live outside the ABC contract as cli-driven conventions.",
+      "plist XML generation + _xml_escape recur across supervisor.py and hotkeys.py as a shared LaunchAgent-emission concern currently copied into both files.",
+      "doctor diagnostics cluster across three files (supervisor.doctor_rows, raiser.doctor_rows, hotkeys.doctor_rows) \u2014 supervisor.doctor_rows already aggregates the others' subject matter (it reaches into tts.best_voice and the hotkeyd label), so health-reporting is a concern threaded through the whole macos package.",
+      "Within tts.py the Kokoro/afplay path (_AfplayHandle, _play_wav_bytes, _sweep_stale_wavs, _get_kokoro) is a self-contained cluster separable from the thin `say` path.",
+      "MacSupervisorBackend mixes three internally-separable clusters: python resolution (_probe_python_version + resolve_python), plist+launchctl mechanics (plist/launchagent_plist/launchctl/install/uninstall/place_launcher), and reporting (doctor_rows/post_install_notes/hooks_doctor_row).",
+      "RaiseBackend already shows the only genuine multi-impl polymorphism in the subsystem (Noop vs Mac), so its abstraction earns its keep where the other four ABCs currently bind a single concrete class."
+    ],
+    "changeHints": [
+      "Project is explicitly macOS-only as of 2026-06-20 (Windows removed) but the cross-platform seam was 'KEPT intact' \u2014 base.py ABCs, the get_platform else-branch RuntimeError, and Windows-referencing comments are the surviving scaffolding of that decision; this is the central tension the redesign targets.",
+      "Stage/issue markers embedded in comments: hotkeys.extra_default_bindings 'Stage 5' (hotkeys.py:117); reload() '(M7)' (hotkeys.py:130); tts docstrings cite issue #41/#42/#26 and 'Windows parity'; raiser/tts cite '#26 parity' \u2014 frequent-change areas tracked by issue numbers.",
+      "Kill switches / config knobs read at runtime: SONARI_DISABLE_HOTKEYS env + ~/.sonari/no_hotkeys flag file gate hotkey start/reload (daemon.py:758, 782); PYTHONPATH injected via plist EnvironmentVariables.",
+      "Version/candidate lists likely to drift: _PYTHON_CANDIDATE_NAMES enumerates python3.9-3.13 (supervisor.py:16-18); KEY_CODES/MOD_MASKS are hand-maintained Carbon constants; Kokoro VOICES count (28) referenced in a tts comment.",
+      "Several methods are annotated 'verbatim move' from cli (supervisor resolve_python/launchctl/plist/install/uninstall/post_install_notes; hotkeys.build was cli._build_hotkeyd) \u2014 indicating a prior extraction refactor; the seam was carved by lifting cli bodies into backends, so altitude/ownership of stdout-printing still reflects the old cli home.",
+      "build() is an informal, ABC-unlisted convention (cli calls .build directly) \u2014 a likely point of future formalization or churn since it differs between hotkeys and raiser."
+    ]
+  },
+  {
+    "subsystem": "pipeline (text/session pipeline: raw hook input -> queued speakable text)",
+    "files": [
+      {
+        "path": "src/sonari/protocol.py",
+        "lines": 46,
+        "role": "Wire protocol: PROTOCOL_VERSION=1, MsgType string constants (24 message types), encode()/decode() = NDJSON over a Unix stream socket. The shared vocabulary between hook producer and daemon consumer."
+      },
+      {
+        "path": "src/sonari/client.py",
+        "lines": 55,
+        "role": "Client transport: send(msg, expect_reply) connects to LOCK_PATH via platform.transport, writes encode(msg), optionally reads one NDJSON reply line; ensure_daemon() spins up the daemon and polls socket_connectable(). DaemonNotRunning raised on unreachable socket."
+      },
+      {
+        "path": "src/sonari/cleaner.py",
+        "lines": 37,
+        "role": "Pure markdown-to-speakable text scrubber. clean_markdown() runs 7 ordered regex subs (links->label, inline code, headings, emphasis x2, bare url->'link', table-sep, whitespace-collapse). Explicitly does NOT handle fenced code blocks (the assembler does)."
+      },
+      {
+        "path": "src/sonari/assembler.py",
+        "lines": 215,
+        "role": "Pure streaming prose assembler. ProseAssembler.feed(delta,index,final) accumulates streamed text deltas, dedupes by index, splits into sentences, replaces ``` fenced code blocks with an 'N-line LANG code block' summary, and emits PARAGRAPH_BREAK sentinels at blank-line boundaries. The core text transform stage."
+      },
+      {
+        "path": "src/sonari/queue.py",
+        "lines": 88,
+        "role": "Per-session speech queue. SpeechItem dataclass (id/session/kind/text/is_decision + 4 exempt/naming flags) and SpeechQueue (capped deque) with decision-exempt eviction, enqueue_front, pop_next, pop_pause_exempt, jump_to_decision, has_decision, clear."
+      },
+      {
+        "path": "src/sonari/session_stream.py",
+        "lines": 37,
+        "role": "SessionStream: bundles all per-session speech state (own SpeechQueue, own ProseAssembler, prose_buffer for minqueue batching, nav cursors, sticky muted/guided/warned flags). reset_for_new_prompt() rebuilds the assembler and clears playback state but keeps sticky flags."
+      },
+      {
+        "path": "src/sonari/sessions.py",
+        "lines": 121,
+        "role": "SessionManager + Identity: tracks which session owns the voice (foreground vs pinned vs auto), cwd-basename per session, terminal identities for focus-follow. foreground()/is_foreground() decide which stream the speak loop plays; pin_toggle/focus/set_foreground mutate it. Does NOT touch text/queues."
+      }
+    ],
+    "responsibilities": [
+      "Wire protocol definition: message-type vocabulary, version stamping, NDJSON encode/decode (protocol.py).",
+      "Client-side transport: connect to daemon socket, send messages, ensure the daemon is running, read optional replies (client.py).",
+      "Hook-event-to-message mapping: turning Claude Code hook payloads into protocol dicts (hooks_entry.py, adjacent producer \u2014 not a listed file but the chain's head).",
+      "Markdown scrubbing: removing markdown noise so text reads naturally aloud (cleaner.py).",
+      "Streamed-delta assembly: dedup by index, sentence splitting, fenced-code summarization, paragraph-break detection across delta boundaries (assembler.py).",
+      "Per-session speech queueing: bounded FIFO with decision-exempt eviction, front-insert resume, pause-exempt scanning, jump-to-decision discard (queue.py).",
+      "Per-session state aggregation: each session's queue + assembler + prose buffer + nav cursors + sticky flags in one object (session_stream.py).",
+      "Foreground/voice-ownership tracking: which session the single voice currently plays, pin vs auto-follow, terminal identity capture for focus-follow (sessions.py).",
+      "Minqueue batching: holding prose until N items accumulate before enqueueing (prose_buffer in session_stream.py, threshold logic in daemon._buffer_prose)."
+    ],
+    "publicSurface": [
+      "protocol.MsgType (24 constants) \u2014 message-type vocabulary imported by hooks_entry, daemon, cli, keymap.",
+      "protocol.PROTOCOL_VERSION \u2014 stamped on every message by hooks_entry._msg and cli command builders.",
+      "protocol.encode/decode \u2014 used by client.send and daemon connection handler for NDJSON framing.",
+      "client.send(msg, expect_reply, timeout) \u2014 single send path used by cli command handlers and bin/sonari-hook.",
+      "client.ensure_daemon(timeout) \u2014 called by bin/sonari-hook before sending the first message.",
+      "client.DaemonNotRunning \u2014 exception raised on unreachable socket.",
+      "cleaner.clean_markdown(text) \u2014 imported only by assembler (and tests); the prose scrubber.",
+      "assembler.ProseAssembler / .feed() \u2014 instantiated per SessionStream; fed by daemon's PROSE handler.",
+      "assembler.PARAGRAPH_BREAK \u2014 sentinel imported by daemon to trigger history.end_message between paragraphs.",
+      "queue.SpeechItem \u2014 constructed by daemon._enqueue; consumed by the speak loop.",
+      "queue.SpeechQueue \u2014 owned by each SessionStream; daemon calls enqueue/pop_next/clear/jump_to_decision/has_decision/pop_pause_exempt/enqueue_front directly.",
+      "session_stream.SessionStream \u2014 instantiated per session by daemon._stream(); exposes .queue/.assembler/.prose_buffer/.options/.nav_cursor/.nav_turn/.muted/.guided/.waiting_signaled and reset_for_new_prompt().",
+      "sessions.SessionManager \u2014 held by SpeechDaemon as self.sessions; foreground()/is_foreground()/set_foreground/register/unregister/focus/pin_toggle/folder/set_identity/identity.",
+      "sessions.Identity \u2014 dataclass constructed by daemon's SESSION_START handler from hook env fields."
+    ],
+    "dependencies": {
+      "internalImports": [
+        "assembler imports cleaner.clean_markdown",
+        "session_stream imports assembler.ProseAssembler and queue.SpeechQueue",
+        "client imports protocol.encode/decode, paths.LOCK_PATH/socket_connectable, platform.transport, daemon.ensure_running",
+        "daemon imports protocol (MsgType/encode/decode), queue.SpeechItem, session_stream.SessionStream, sessions.SessionManager+Identity, assembler.PARAGRAPH_BREAK (local import inside PROSE handler), config, history, paths, platform.transport",
+        "hooks_entry imports protocol.PROTOCOL_VERSION/MsgType and ttyutil (producer head of the chain)",
+        "cli imports protocol.MsgType/PROTOCOL_VERSION and calls client.send via _send",
+        "bin/sonari-hook imports hooks_entry.handle_event and client"
+      ],
+      "externalImports": [
+        "__future__.annotations (every file)",
+        "dataclasses.dataclass (sessions, queue)",
+        "re (assembler, cleaner)",
+        "json (protocol)",
+        "time (client)",
+        "collections.deque (queue, history)",
+        "os/secrets/socket/subprocess/threading (daemon)"
+      ]
+    },
+    "internalCoupling": "The pipeline files themselves are small and loosely coupled (37-215 lines each); the real coupling lives in daemon.py (1236 lines), which is the orchestrator that wires every pipeline file together and where the data flow actually executes. The single most coupled function is daemon.handle_message (lines 335-735, ~400 lines): a flat if/elif ladder over ~24 MsgType values that reaches into nearly every pipeline object \u2014 it calls assembler.feed (343), the PARAGRAPH_BREAK sentinel (345-356), history.record/end_message/start_turn, _buffer_prose/_flush_prose_buffer, _enqueue (SpeechItem construction), st.queue.clear/jump_to_decision/has_decision, sessions.set_foreground/register/set_identity/unregister/foreground, and speaker.cancel/earcon. The decision branches (CHOICE 373-388, PLAN 390-401, PERMISSION 403-414) are near-identical triplets: each computes text, appends selection cue, stores st.options, history.record + end_message, _flush_prose_buffer, _enqueue(...is_decision=True). The PROSE path is split across three layers that must stay in lockstep: assembler.feed produces chunks/PARAGRAPH_BREAK -> daemon's PROSE handler routes to history + _buffer_prose -> _buffer_prose/_flush_prose_buffer apply the minqueue threshold -> _enqueue builds the SpeechItem into the SessionStream's queue. The speak loop (_speak_loop_once, 939-1023) is the consumer end and is tightly coupled to threading: it reads sessions.foreground(), pops that stream's queue, computes attributed text, and on a pause-interrupt re-inserts via enqueue_front \u2014 all under self._lock with careful pop-and-claim atomicity. SessionStream is a passive state bag with no behavior beyond reset_for_new_prompt; all logic that mutates it lives in daemon.",
+    "stateAndSideEffects": [
+      "assembler.ProseAssembler holds mutable per-instance parse state: _seen (index dedup set), _buf (raw prose), _emitted (cleaned-chars-already-emitted counter), _pending, _in_fence/_fence_lang/_fence_lines/_fence_opened_line. Pure (no I/O) but stateful across feed() calls.",
+      "queue.SpeechQueue mutates an internal deque; _next_id-style id allocation lives in daemon._alloc_id, not the queue.",
+      "SessionStream is entirely mutable per-session state; daemon owns the dict {session -> SessionStream} (self._streams).",
+      "sessions.SessionManager mutates _sessions (dict), _foreground, _pinned, _identities dicts; the source of voice-ownership truth.",
+      "client.send opens/closes a real socket via platform.transport.connect to LOCK_PATH; ensure_daemon spawns the daemon (daemon.ensure_running) and sleeps polling socket_connectable.",
+      "hooks_entry.handle_event reads env vars (CLAUDE_PLUGIN_VERSION, CLAUDE_PLUGIN_ROOT, TERM_PROGRAM, ITERM_SESSION_ID) and probes the controlling tty (ttyutil) inside SessionStart \u2014 its only impurity.",
+      "bin/sonari-hook reads stdin bytes, optionally writes a capture file (SONARI_CAPTURE env), mutates sys.path, reads plugin.json, sends over the socket. Always exits 0.",
+      "protocol.encode/decode are pure; no module-level mutable state in protocol/cleaner/assembler/queue/session_stream/sessions."
+    ],
+    "frictionAndSmells": [
+      "The prose-text transform is split across THREE files plus the daemon, and the contract between them is implicit and fragile: assembler._split_sentences (assembler.py:163-192) keeps _buf RAW and tracks _emitted as 'chars of the current paragraph's CLEANED text already emitted', re-running clean_markdown on the growing raw buffer each call and slicing cleaned[_emitted:] \u2014 a re-clean-and-diff approach whose correctness depends on clean_markdown being deterministic and length-stable in a way the cleaner has no idea it must guarantee (assembler.py:178-191, comment at 167-173 documents the past bug where a straddling blank line erased a paragraph break).",
+      "assembler._partial_fence_tail_len (assembler.py:126-131) hardcodes a 2-char backtick lookback; the fence marker length _FENCE='```' is 3 but only 1-2 trailing backticks are held back, an off-by-one-looking constant that is actually intentional (a full ``` would have been consumed) but is undocumented and easy to break.",
+      "daemon.handle_message is a ~400-line flat if/elif dispatch over 24 message types (daemon.py:335-735) \u2014 no dispatch table; adding a MsgType means editing this ladder. The pipeline's actual control flow lives here, not in the pipeline files.",
+      "CHOICE/PLAN/PERMISSION handlers (daemon.py:373-414) are three near-duplicate blocks differing only in text-builder and kind string; the shared shape (build text + cue, store options, history.record+end_message, flush prose, enqueue decision) is copy-pasted three times.",
+      "The PROSE 'final' flag is overloaded and documented as a footgun: it marks the end of ONE assistant text block, not the turn, so the prose buffer is deliberately NOT flushed on final (daemon.py:360-364) and instead flushed on the turn_done EARCON (daemon.py:431-435) \u2014 a non-local coupling where correct behavior depends on two separate message handlers cooperating.",
+      "session_stream.reset_for_new_prompt deliberately does NOT clear self.queue (session_stream.py:27-31, comment); the FLUSH handler in daemon clears it separately (daemon.py:439-440) so it can drop heard-markers \u2014 split responsibility for resetting one object's state across two files.",
+      "Dead/legacy residue in comments: assembler/session_stream/daemon reference numbered 'Stage 2/3/4/5' redesign phases and 'the flip' (daemon.py:346,384,398,411) and retired features ('catch_up/REPEAT retired', history.py:150) \u2014 archaeology that no longer maps to current code structure.",
+      "_basename in sessions.py:14-22 still strips Windows backslashes 'regardless of host OS' though the project is now macOS-only (per project memory, Windows removed 2026-06-20) \u2014 dead cross-platform residue.",
+      "Type hints are written as forward-ref strings ('str | None', 'dict[str, SessionStream]') throughout rather than real annotations, a workaround style that suggests an older Python target and hurts readability."
+    ],
+    "naturalSeams": [
+      "The pure text-transform trio (cleaner.clean_markdown + assembler.ProseAssembler) is already a self-contained, I/O-free cluster: text in, speakable chunks + PARAGRAPH_BREAK out. It has no knowledge of sessions, queues, or the daemon and is the clearest existing boundary.",
+      "SessionStream is an aggregation seam: it bundles queue + assembler + prose_buffer + nav state, but it is purely passive \u2014 every operation on it lives in daemon. The state and the behavior that mutates it are physically separated (session_stream.py holds fields, daemon.py holds all logic).",
+      "The minqueue-batching concern is split: the buffer (prose_buffer) lives on SessionStream, but the threshold logic (_buffer_prose / _flush_prose_buffer / _minqueue, daemon.py:116-150) lives in the daemon \u2014 a single concern straddling two files.",
+      "sessions.SessionManager is cleanly separable: it tracks voice ownership and terminal identity only, touches no text or queues, and the speak loop consults it via a narrow interface (foreground/is_foreground). It clusters with focus-follow more than with the text pipeline.",
+      "The wire layer (protocol + client) is a clean transport seam already isolated from the text pipeline \u2014 encode/decode/send know nothing about assemblers or queues.",
+      "Within the daemon, the PROSE-handling path (assembler.feed -> history record/end_message -> _buffer_prose -> _flush_prose_buffer -> _enqueue) is a recognizable end-to-end sub-pipeline that currently lives inline in handle_message and its helper methods, distinct from the control-message handlers (NAV/PAUSE/MUTE/etc.) that share the same dispatch ladder.",
+      "The three decision handlers (CHOICE/PLAN/PERMISSION) cluster together by identical shape, distinct from PROSE and from control messages."
+    ],
+    "changeHints": [
+      "Comments are densely tagged with numbered redesign phases \u2014 'Stage 2 of the per-session-streams redesign' (session_stream.py:10), 'Stage 4', 'Stage 5 two-level navigation', '\u00a74.2 cut-on-switch', '\u00a77' \u2014 indicating this subsystem has been actively reworked in staged phases and the per-session-streams 'flip' is recent.",
+      "'The flip' is referenced repeatedly (daemon.py:346,384,398,411) as a completed architectural change: gating moved from production-time to playback-time, each session now buffers into its OWN stream. This is the dominant recent structural shift.",
+      "Defect-fix markers embedded in comments (#31 PIN_TOGGLE in protocol.py:25, #41/#8/M2/M8/L2/H1/2a references in daemon.py) point to a history of concurrency and edge-case bug fixes around the queue/speak-loop boundary \u2014 a churny, defect-prone area.",
+      "PROTOCOL_VERSION=1 with explicit version stamping on every message (hooks_entry._msg) signals the wire format is treated as a stable contract expected to evolve.",
+      "Config knobs read at runtime: minqueue (1-10), backlog_cap, history_cap, verbosity, background_policy, rate (100-400) \u2014 these are the tunable surface; minqueue and verbosity directly gate the prose pipeline's flush and speak decisions.",
+      "Windows-removal residue (cross-platform _basename in sessions.py, 'Windows earcon backend' comment daemon.py:427) is stale relative to the macOS-only decision \u2014 a cleanup the code has not yet caught up to.",
+      "MsgType has 24 entries and the dispatch ladder grows with each new control feature (hotkey actions like JUMP_WAITING, PIN_TOGGLE, RELOAD_KEYMAP, CYCLE_VERBOSITY), suggesting the control surface is the frequently-extended part while the core text transform (cleaner/assembler) is comparatively stable."
+    ]
+  },
+  {
+    "subsystem": "output-support",
+    "files": [
+      {
+        "path": "src/sonari/speaker.py",
+        "lines": 104,
+        "role": "Orchestrates one utterance at a time: calls an injected say_runner to get a proc-like handle, blocks on it, and handles cancel/interrupt via a cancel-epoch. Also fires non-blocking earcons. Pure orchestration: holds no knowledge of say vs kokoro."
+      },
+      {
+        "path": "src/sonari/history.py",
+        "lines": 162,
+        "role": "Pure (no-I/O) per-session narration history. Records every narrated sentence grouped by message and by turn; tracks a per-entry heard flag; powers within-turn and cross-turn navigation queries."
+      },
+      {
+        "path": "src/sonari/kokoro.py",
+        "lines": 191,
+        "role": "Kokoro-82M neural TTS engine wrapper: voice catalog/normalization, WPM->speed mapping, lazy ML-stack import gating, model/voices file download, and synth-to-WAV-bytes (KokoroEngine)."
+      },
+      {
+        "path": "src/sonari/kokoro_provision.py",
+        "lines": 124,
+        "role": "Provisions the opt-in uv-managed venv for neural voices (ensure uv, create venv, pip install pinned reqs), pre-downloads the model, and health-checks the venv via injected subprocess runners."
+      },
+      {
+        "path": "src/sonari/raise_service.py",
+        "lines": 54,
+        "role": "Focus-follow orchestration: config gate (focus_follow), monotonic jump-generation supersession, and async dispatch to a platform raise_backend on a daemon thread."
+      },
+      {
+        "path": "src/sonari/config.py",
+        "lines": 63,
+        "role": "Persisted config: DEFAULTS dict plus deep-merge load_config (corruption-tolerant) and atomic save_config against CONFIG_PATH."
+      },
+      {
+        "path": "src/sonari/paths.py",
+        "lines": 42,
+        "role": "Central path constants under ~/.sonari plus small helpers (kokoro_venv_python, ensure_sonari_dir, socket_connectable, repo_root). The within-subsystem dependency hub."
+      },
+      {
+        "path": "src/sonari/keymap.py",
+        "lines": 213,
+        "role": "All hotkey logic: action->protocol-message table, default keys, user keymap.json merge/unbind/write, and resolve into the Swift-facing JSON array; pulls per-platform key/mod tables lazily from the active backend."
+      },
+      {
+        "path": "src/sonari/ttyutil.py",
+        "lines": 55,
+        "role": "Derives the controlling tty by walking process ancestry via ps; normalizes to /dev/ttysNNN. Best-effort, never raises."
+      }
+    ],
+    "responsibilities": [
+      "speaker.py: serialize one utterance at a time and block until the proc-like handle completes (speaker.py:65-75)",
+      "speaker.py: cancel/interrupt correctness via a monotonic cancel_epoch captured before synthesis to close the claim->speak() and synth-gap races (speaker.py:30-64,77-82)",
+      "speaker.py: fire-and-forget earcon playback with manual non-blocking reaping of finished earcon procs (speaker.py:84-98)",
+      "speaker.py: hold mutable voice/rate and expose setters (speaker.py:100-104)",
+      "history.py: record each narrated sentence keyed by session, grouped by message-id and turn-id, with a rolling cap deque (history.py:35-45)",
+      "history.py: maintain heard flags (flipped externally by the speak loop) and answer the unheard query bounded to the current turn (history.py:145-154)",
+      "history.py: open message/turn boundaries (end_message, start_turn) and full reset on SESSION_END (history.py:47-60,156-161)",
+      "history.py: a family of navigation queries over the recorded structure (last_message, nth_last_message, message_ids[_in_turn], turn_ids, entries_for_message, current_turn) (history.py:62-143)",
+      "kokoro.py: voice identity (VOICES catalog, normalize_voice, is_kokoro_voice) and rate->speed mapping (kokoro.py:27-74)",
+      "kokoro.py: gate the optional ML extra via find_spec without importing it (is_installed, require_installed) (kokoro.py:77-103)",
+      "kokoro.py: model/voices file download with atomic .tmp rename and size-floor re-download (_download, _ensure_file) (kokoro.py:119-141)",
+      "kokoro.py: lazy model load behind a lock and synth to float32 audio or 16-bit PCM WAV bytes (KokoroEngine, to_wav_bytes) (kokoro.py:105-192)",
+      "kokoro_provision.py: locate-or-bootstrap uv, create the uv venv, pip-install pinned requirements (ensure_uv, provision) (kokoro_provision.py:36-75)",
+      "kokoro_provision.py: derive neural_enabled from venv-python existence (no separate flag), pre-download the model, and health-check via subprocess (kokoro_provision.py:21-23,89-103)",
+      "kokoro_provision.py: install/uninstall orchestrators that abort-on-any-step-failure (kokoro_provision.py:110-124)",
+      "raise_service.py: config-gate + backend-supports decision (will_attempt), generation bump on every jump, and async stale-checked raise dispatch (raise_service.py:19-49)",
+      "config.py: define DEFAULTS, deep-merge persisted over defaults with corruption tolerance, atomic save (config.py:9-63)",
+      "paths.py: own all ~/.sonari path constants and small filesystem/derivation helpers (paths.py:6-42)",
+      "keymap.py: map actions->protocol messages, supply default keys/chord per platform, merge user overrides, unbind, and resolve to keyCode/modifier-mask entries (keymap.py:26-213)",
+      "ttyutil.py: walk process ancestry to find the first ancestor's real controlling tty (ttyutil.py:38-55)"
+    ],
+    "publicSurface": [
+      "Speaker (class) \u2014 daemon.py:1222 constructs it with say_runner=_backend.tts.run, earcon_player=_backend.earcon.play; daemon calls speak(), cancel(), cancel_epoch(), earcon(), set_voice(), set_rate()",
+      "SessionHistory / HistoryEntry (history.py) \u2014 imported by daemon.py for record/heard-marking/navigation queries; pure, no I/O",
+      "kokoro.is_kokoro_voice / require_installed / rate_to_speed / KokoroEngine.wav_bytes / VOICES / is_installed \u2014 consumed by platform/macos/tts.py (run, list_voices) and cli.py",
+      "kokoro_provision.neural_enabled / install_kokoro / uninstall_kokoro \u2014 consumed by cli.py (voices install/remove) and tts.py:210 (list_voices gating)",
+      "RaiseService (class) \u2014 daemon.py:67 builds it lazily from get_platform().raise_backend + self.config; daemon calls will_attempt/bump_generation/raise_async (daemon.py:626-643)",
+      "config.DEFAULTS / load_config / save_config \u2014 load_config used by daemon.py and cli.py; DEFAULTS is the single source of config keys (voice, rate, verbosity, background_policy, history_cap, backlog_cap, minqueue, focus_follow)",
+      "paths constants (SONARI_DIR, CONFIG_PATH, LOCK_PATH, SINGLETON_PATH, LOG_PATH, KEYMAP_PATH, HOTKEYD_*, RAISE_BIN_PATH, INSTALL_RECORD_PATH, KOKORO_VENV) + kokoro_venv_python/ensure_sonari_dir/socket_connectable/repo_root \u2014 imported by config, keymap, kokoro_provision, cli, client, daemon, and all macos platform modules",
+      "keymap.ACTION_MESSAGES / default_keymap / load_keymap / resolve_keymap / unbind_action / write_default_keymap_if_absent / write_resolved \u2014 consumed by cli.py, daemon.py, protocol.py; ACTION_MESSAGES is the action->protocol-message contract",
+      "ttyutil.controlling_tty \u2014 consumed only by hooks_entry.py"
+    ],
+    "dependencies": {
+      "internalImports": [
+        "paths.py is the within-subsystem hub: config.py imports CONFIG_PATH/SONARI_DIR/ensure_sonari_dir from paths (config.py:7); keymap.py imports KEYMAP_PATH/HOTKEYD_RESOLVED_PATH/SONARI_DIR/ensure_sonari_dir from paths (keymap.py:12-17); kokoro_provision.py does `from sonari import paths` (kokoro_provision.py:18)",
+        "Lazy (function-body) cross-package imports: paths.socket_connectable imports sonari.platform.transport (paths.py:31); keymap._keytables and keymap.default_keymap import sonari.platform.get_platform (keymap.py:57,69)",
+        "speaker.py, history.py, kokoro.py, raise_service.py, ttyutil.py import NOTHING from the sonari package \u2014 they are leaves wired purely via injected callables/objects (Speaker via say_runner/earcon_player; RaiseService via backend+config dict; KokoroEngine via factory/ensure)",
+        "NOTE non-edges: kokoro_provision does NOT statically import kokoro \u2014 it references kokoro only inside the _PREDOWNLOAD/_HEALTH string literals run in a subprocess (kokoro_provision.py:83,86). config does NOT import history (only has the 'history_cap' string). The substring grep falsely suggested both, plus assembler<-history (assembler imports only cleaner)"
+      ],
+      "externalImports": [
+        "stdlib only across the subsystem: subprocess, threading (speaker, kokoro_provision, raise_service); collections.deque (history); importlib.util, io, os, urllib.request, wave, pathlib.Path, threading.Lock (kokoro); os, shutil, subprocess, sys (kokoro_provision); json, os (config, keymap); os, pathlib.Path (paths); os (ttyutil)",
+        "Third-party imported lazily inside kokoro.py functions only (never at module import): numpy (to_wav_bytes), kokoro_onnx.Kokoro (_default_factory) \u2014 declared as the optional [kokoro] extra"
+      ]
+    },
+    "internalCoupling": "Internal coupling within this subsystem is LOW; it is a loose collection of mostly-independent leaf utilities rather than a tangle. The only structural edges are config/keymap/kokoro_provision -> paths.py (the path-constant hub). speaker, history, kokoro, raise_service, and ttyutil import nothing from each other or the rest of the package \u2014 they communicate only through injected dependencies (Speaker takes say_runner/earcon_player callables; RaiseService takes a backend object + a config dict; KokoroEngine takes factory/ensure callables). The largest functions are modest: keymap.resolve_keymap (~33 lines, 89-121) mixes validation (unknown action/key/modifier -> ValueError), the explicit-unbound skip, and modifier-mask accumulation in one loop; keymap.load_keymap (~25 lines, 124-148) mixes default-copy, file read, corruption handling, and per-entry override merging; Speaker.speak (~39 lines, 37-75) interleaves the epoch baseline, synthesis call, interrupt check, blocking wait+timeout, and current-proc bookkeeping under one lock. None is a hotspot of cross-module state. kokoro.py and kokoro_provision.py share the neural-voice concept but are NOT statically coupled \u2014 they only meet via tts.py importing both and via kokoro_provision executing kokoro inside subprocess string literals.",
+    "stateAndSideEffects": [
+      "speaker.py: mutable instance state guarded by a threading.Lock \u2014 _current (in-flight proc), _cancel_epoch (bumped by cancel()), _earcon_procs list (manually reaped), plus _voice/_rate. Side effect: terminates child procs via proc.terminate() (speaker.py:24-28,63,79-82)",
+      "history.py: in-memory only \u2014 per-session dicts of deques (bounded maxlen=cap) plus msg_id/group_seq/turn_id counters; HistoryEntry.heard is mutated externally by the speak loop. No I/O (file docstring asserts PURE)",
+      "kokoro.py: KokoroEngine lazy-loads the model behind a threading.Lock and caches it in _k; _ensure_file/_download write to and unlink files under the model dir (network download via urllib, atomic .tmp rename); to_wav_bytes touches no disk (in-memory BytesIO/wave)",
+      "kokoro_provision.py: heavy side effects via injected subprocess runners \u2014 installs uv (pip --user), creates a uv venv at paths.KOKORO_VENV, pip-installs, downloads the model, rmtree on uninstall; reads os.environ and copies it with PYTHONPATH set (kokoro_provision.py:92,98); neural_enabled() stats the venv python path",
+      "raise_service.py: spawns daemon threads named 'sonari-raise' (one per raise_async), prunes dead threads from _threads, mutates _generation under a Lock; calls into the platform backend.raise_session (an OS-level focus change). Swallows all backend exceptions (raise_service.py:41)",
+      "config.py: reads CONFIG_PATH; save_config writes a temp file in SONARI_DIR with fsync then os.replace (atomic). Creates SONARI_DIR via ensure_sonari_dir",
+      "paths.py: reads Path.home() and __file__ at import to build constants; ensure_sonari_dir mkdirs SONARI_DIR; socket_connectable opens a transport probe",
+      "keymap.py: reads/writes KEYMAP_PATH and HOTKEYD_RESOLVED_PATH with temp-file + fsync + os.replace; default tables fetched from the active platform backend at call time",
+      "ttyutil.py: shells out to `ps` (5s timeout) per ancestor, reads os.getpid(); bounded to 32 hops; swallows all exceptions -> ''"
+    ],
+    "frictionAndSmells": [
+      "Dead Windows/cross-platform residue in a now-macOS-only codebase: kokoro.py:1 docstring says '(optional, cross-platform)'; kokoro.py:6 'plays the WAV through its existing path \u2014 winsound on Windows'; kokoro.py:100 'Mirrors the WinRT backend's _require_winrt() (#7)'; keymap.py:21 'The ONLY sys.platform branch stays in platform/__init__'; keymap.py:45 'Windows: Ctrl+Shift+Alt'; keymap.py:67-68 reference Windows '[ / ]' response-nav bindings. These describe a Windows backend that no longer exists.",
+      "Atomic-JSON-write pattern (open temp -> json.dump/write -> flush -> os.fsync -> os.replace) is independently reimplemented at four sites: config.save_config (config.py:55-63), keymap._write_user_keymap (keymap.py:161-169), keymap.write_default_keymap_if_absent (keymap.py:187-197), keymap.write_resolved (keymap.py:200-213). Same procedure, four copies.",
+      "Corruption-tolerant 'merge user file over defaults, return defaults on FileNotFoundError/ValueError/OSError + non-dict guard' is duplicated between config.load_config (config.py:39-52) and keymap.load_keymap (keymap.py:124-148); keymap._read_user_keymap (keymap.py:151-158) is a third near-copy of the same read+guard.",
+      "kokoro_provision invokes kokoro logic through Python source embedded in string literals run in a subprocess (_PREDOWNLOAD kokoro_provision.py:82-84, _HEALTH :86) \u2014 fragile, untyped, refactor-invisible coupling (renaming kokoro.is_installed or KokoroEngine silently breaks the health/predownload strings).",
+      "Speaker manually tracks and reaps a list of earcon subprocesses (_earcon_procs, _reap_earcon_procs, speaker.py:84-98) with no upper bound on simultaneously-tracked procs between reaps; reaping only happens lazily on the next earcon() call.",
+      "neural-reachability is computed two different ways for two different consumers: tts.run gates on require_installed() (in-interpreter), while tts.list_voices gates on is_installed() OR kokoro_provision.neural_enabled() (tts.py:210) \u2014 the split (CLI on system python vs daemon on venv) is real but the dual definition of 'is neural available' lives across kokoro.py + kokoro_provision.py.",
+      "kokoro.py mixes four unrelated concerns in one 191-line module: voice identity/rate math, extra-installed gating, file download/IO, and the synth engine class.",
+      "Magic constants embedded inline: history default cap 200 (history.py:28) duplicates config DEFAULTS history_cap 200 (config.py:14); speaker default rate 200 (speaker.py:13) duplicates config rate 200 and kokoro's /200.0 normal-rate divisor (kokoro.py:72) \u2014 three independent literals encode the same 'normal rate = 200'."
+    ],
+    "naturalSeams": [
+      "kokoro.py and kokoro_provision.py both cluster around the neural-voice stack but split along an observable line: kokoro.py is the in-process engine (catalog, gating, download, synth) and kokoro_provision.py is the out-of-process venv lifecycle (uv, venv, pip, health). They share concepts (VOICES, is_installed, the model dir) but communicate across a process boundary via subprocess strings rather than imports.",
+      "The four atomic-JSON-write call sites (config.save_config; keymap._write_user_keymap / write_default_keymap_if_absent / write_resolved) all perform the identical temp+fsync+replace dance \u2014 an observable recurring pattern that currently lives copy-by-copy in two files.",
+      "The 'load JSON file, tolerate corruption, merge over a defaults dict' behavior recurs across config.load_config and keymap.load_keymap/_read_user_keymap \u2014 a shared shape sitting in two modules.",
+      "keymap.py has two internal clusters: pure data/resolution (ACTION_MESSAGES, _DEFAULT_KEYS, default_keymap, resolve_keymap, _copy_keymap) versus filesystem persistence of keymap.json/hotkeyd.resolved.json (load_keymap, _read/_write_user_keymap, unbind_action, write_default_keymap_if_absent, write_resolved) \u2014 the latter group is the only part touching disk.",
+      "Within kokoro.py the module-level free functions divide into stateless helpers (normalize_voice, is_kokoro_voice, rate_to_speed, is_installed, require_installed, to_wav_bytes) sharing module constants, versus the stateful KokoroEngine class that owns lazy load + lock; the download helpers (_download, _ensure_file) are used only by the class.",
+      "config.DEFAULTS is the de-facto schema for the whole app's settings, but individual keys are consumed far apart (focus_follow read in raise_service via the passed config dict; rate/voice/earcons/background_policy read in daemon at Speaker construction; minqueue/verbosity/history_cap/backlog_cap elsewhere) \u2014 the key definitions and their readers are physically separated."
+    ],
+    "changeHints": [
+      "Heavy issue-tracker churn markers throughout: kokoro.py references (#7); tts.py (consumer) references (#26),(#41),(#42); raise_service spec citations (\u00a74.5 lines 191-201 in daemon.py:632); history.py cites Stage 4 / Stage 5 / M2 / M6 / \u00a77 \u2014 indicates this area evolved incrementally across many tracked changes.",
+      "Multi-stage navigation feature grew over time: history.py docstrings explicitly mark Stage 4 (cross-turn transcript) and Stage 5 (two-level / response-to-response nav) additions (history.py:71-119), and keymap added nav_prev_response/nav_next_response 'Two new `to` values on the existing NAV message (no new protocol type)' (keymap.py:32-35) \u2014 nav surface is an active growth area.",
+      "config.DEFAULTS (config.py:9-18) and keymap.ACTION_MESSAGES/_DEFAULT_KEYS (keymap.py:26-52) are the explicit config knobs; new settings/hotkey actions land here. _DEFAULT_KEYS comment notes faster/slower ship UNBOUND by deliberate choice (keymap.py:46-52).",
+      "neural_enabled() is derived from venv existence specifically 'so there is no separate flag to drift' (kokoro_provision.py:5-6,21-23) \u2014 a stated design choice to avoid a future drift bug.",
+      "Windows-removal is in progress but incomplete: live macOS-only code with stale Windows references in docstrings (kokoro.py, keymap.py) signals a half-swept platform abstraction; the platform indirection (get_platform, the TtsBackend/HotkeyBackend abstractions) is retained even though only macOS implementations remain.",
+      "Cross-version Python constraint is load-bearing and likely to shift: kokoro_provision pins CPython 3.12 for the venv (kokoro_provision.py:73) because the daemon defaults to system 3.9 but kokoro-onnx needs >=3.10 (kokoro_provision.py:3-4); requirements pinned in the bundled requirements-kokoro.txt.",
+      "Model download URLs and size floors are hardcoded to a specific upstream release tag (model-files-v1.0) in kokoro.py:38-47 \u2014 a maintenance pin that breaks if upstream moves the release."
+    ]
+  },
+  {
+    "subsystem": "tests",
+    "files": [
+      {
+        "path": "tests/conftest.py",
+        "lines": 86,
+        "role": "The suite's only conftest. One autouse fixture (_isolate_sonari_dir) that redirects every ~/.sonari path constant to a per-test tmp dir by monkeypatching the by-value-bound copies on ~7 modules (paths, config, client, keymap, daemon). Also performs the sys.path insertion of repo root + src/."
+      },
+      {
+        "path": "tests/daemon_helpers.py",
+        "lines": 57,
+        "role": "Shared daemon test harness: FakeSpeaker recorder (records spoken/earcons/cancels/rates/voices) and make_daemon()/stream_queue() factory used by ~21 test_daemon_*.py files. Returns (daemon, queue, speaker, sessions, config) tuple consumed across the daemon cluster."
+      },
+      {
+        "path": "tests/_fakeplatform.py",
+        "lines": 91,
+        "role": "Fake PlatformBackend (FakeSupervisor/FakeHotkey/FakeTts/FakeRaiseBackend + fake_platform()) for cli dispatch tests. Asserts the cli->get_platform() dispatch contract independent of real OS backends."
+      },
+      {
+        "path": "tests/_fakeclient/sitecustomize.py",
+        "lines": 30,
+        "role": "Injects a socket-free sonari.client double via sys.modules at interpreter startup, before bin/sonari-hook runs. Activated only when tests/_fakeclient is on PYTHONPATH (the subprocess hook tests)."
+      },
+      {
+        "path": "tests/_fakeclient/sonari/client.py",
+        "lines": 59,
+        "role": "Test double for sonari.client: records sent messages to a log file instead of using a socket; env-var-driven fault injection (SONARI_FAKE_RAISE / _AFTER / _ON) for the subprocess hook-resilience tests."
+      },
+      {
+        "path": "tests/test_daemon_streams.py",
+        "lines": 315,
+        "role": "Largest single daemon test (23 funcs): per-stream enqueue, foreground-only speak loop, background accumulation, jump_waiting target selection, waiting earcon, session attribution/folder-prefix, backlog cap eviction, pause-on-switch attribution rollback."
+      },
+      {
+        "path": "tests/test_daemon_nav.py",
+        "lines": 309,
+        "role": "Message-cursor + response-level navigation (21 funcs): nav prev/next/first/last clamping, seek-and-play, streaming-vs-cursor, turn anchoring, prev_response/next_response with relative cues, anchor-eviction fallback."
+      },
+      {
+        "path": "tests/test_daemon_phase2.py",
+        "lines": 319,
+        "role": "Build-phase-named (28 funcs): relative SET_RATE delta + clamping, cycle_verbosity wrap, option caching/reread, selection cues + immediate warning + multiSelect/>9 notes per verbosity."
+      },
+      {
+        "path": "tests/test_daemon_phase21.py",
+        "lines": 244,
+        "role": "Build-phase-named (20 funcs): prose recording/heard-marking, FLUSH persists prior turn, per-stream accumulation of background sessions, reread per-session, permission text fallback."
+      },
+      {
+        "path": "tests/test_daemon_pause_mute.py",
+        "lines": 176,
+        "role": "Pause/resume + sticky per-session mute (12 funcs): pause holds loop, requeue-on-interrupt, FLUSH-races-pause, mute drops content but exempt cues spoken, heard-marker preservation across pause replay."
+      },
+      {
+        "path": "tests/test_speaker_cancel_2b.py",
+        "lines": 396,
+        "role": "Real Speaker + Event-gated GatedProc (6 funcs, heavy docstring): concurrent cancel-epoch/synth-gap probes mapping symptom 2b's timing windows (W2 synth, W3 playback, W4 cancel==completion, pause-requeue) with no sleeps."
+      },
+      {
+        "path": "tests/test_keymap.py",
+        "lines": 280,
+        "role": "Largest test-function cluster (31 funcs): keytables via active platform backend, per-OS default chord, resolve_keymap to Carbon codes, unbind/load/merge/corrupt-tolerance, write_resolved atomicity, response-nav Ctrl+Cmd+Shift defaults. Pins the documented macOS-coupling seam in keymap.py."
+      },
+      {
+        "path": "tests/test_e2e_pipeline.py",
+        "lines": 194,
+        "role": "End-to-end (2 funcs): real hooks_entry -> real SpeechDaemon -> a third FakeSpeaker (its own copy). Asserts the full ordering contract (earcon-immediate vs text-FIFO) via one exact log== assertion; plus background earcon-only."
+      },
+      {
+        "path": "tests/test_hooks_entry.py",
+        "lines": 342,
+        "role": "Hook-event-to-protocol mapping (30 funcs): every Claude Code event (MessageDisplay/PreToolUse/Notification/Stop/UserPromptSubmit/SessionStart/SessionEnd) mapped to exact protocol dicts, with golden fixtures and identity/env capture."
+      },
+      {
+        "path": "tests/test_sonari_hook_bin.py",
+        "lines": 186,
+        "role": "Subprocess integration (10 funcs): runs the real bin/sonari-hook executable end-to-end via the fakeclient, asserting exit-0-always, capture dump, send-failure swallowing, and src-shadows-stale-global sys.path behavior."
+      },
+      {
+        "path": "tests/test_no_os_branch_in_core.py",
+        "lines": 34,
+        "role": "Architecture-guard (3 funcs): reads CORE module source text and asserts no sys.platform branch / no platform.macos import; asserts the one allowed branch lives in platform/__init__.py."
+      },
+      {
+        "path": "tests/test_macos_tts.py",
+        "lines": 183,
+        "role": "MacTtsBackend say-command building, best_voice selection (premium/Allison/Samantha fallback, non-English exclusion), list_voices parsing; autouse fixture forces neural OFF to isolate from a real ~/.sonari/venv."
+      },
+      {
+        "path": "tests/test_cli_install.py",
+        "lines": 258,
+        "role": "install() dispatch contract via fake_platform (17 funcs): supervisor/hotkey call ordering, fatal paths, copy-app remove-then-copy, install-record/plugin-version helpers, neural-aware _daemon_python venv selection, macOS stdout regression guard."
+      },
+      {
+        "path": "tests/test_manifests.py",
+        "lines": 102,
+        "role": "Ships-correctly guards (7 funcs): plugin.json/hooks.json/marketplace.json valid JSON, hook commands resolve to existing bin/sonari-hook, every Phase-1 event hooked, version-pinned to 0.5.0 across three manifests + pyproject."
+      },
+      {
+        "path": "tests/test_py39_compat.py",
+        "lines": 61,
+        "role": "Public-3.9-target guard (2 funcs): asserts every src module's first code line is the future-annotations import, and pyproject declares requires-python >=3.9."
+      }
+    ],
+    "responsibilities": [
+      "Pin the daemon's message-handling behavior \u2014 the dominant responsibility: ~21 test_daemon_*.py files, ~3049 lines, ~250 test functions cover handle_message() across prose assembly, decisions, nav, pause/mute, pin, minqueue batching, streams/foreground gating, focus-follow, connection handling, and the speak loop",
+      "Map every Claude Code hook event to exact protocol dicts (test_hooks_entry.py, 30 funcs) including golden-fixture replay (test_fixtures.py, fixtures/*.json)",
+      "Verify the end-to-end pipeline ordering contract: real hooks_entry -> real daemon -> recording speaker (test_e2e_pipeline.py)",
+      "Pin the CLI dispatch contract across 8 test_cli_*.py files (install/uninstall/doctor/control/hotkeyd/voices/focus_follow/resolve_python) against a fake platform backend",
+      "Pin the macOS platform backends directly (tts, raise, hotkeys, supervisor, earcon, kokoro routing) under patched OS calls \u2014 ~1212 lines across test_macos_*/test_raise_*/test_hotkeyd_*",
+      "Pin keymap resolution + the macOS-coupled keytables seam (test_keymap.py, 31 funcs \u2014 the single largest test-function cluster)",
+      "Pin the small portable-core data structures: queue, assembler, cleaner, protocol, history, sessions, session_stream, config, ttyutil, transport (one dedicated file each)",
+      "Enforce architecture invariants as executable guards: no OS branch in core (test_no_os_branch_in_core), one factory branch (test_platform_factory), raise-backend seam shape (test_platform_raise_seam), Python 3.9 future-annotations (test_py39_compat)",
+      "Verify the shipped artifacts: manifests version-pinning (test_manifests), bin shims interpreter preference (test_bin_shims/test_bin_sonari), slash-command files (test_commands)",
+      "Run the real bin/sonari-hook as a subprocess to prove the production hot path (test_sonari_hook_bin), including sys.path shadowing of a stale global sonari",
+      "Probe genuine concurrency in the real Speaker cancel-epoch mechanism (test_speaker_cancel_2b) \u2014 the one place FakeSpeaker is deliberately abandoned for a real timing window",
+      "Isolate all filesystem side effects from the developer's real ~/.sonari via the autouse conftest fixture"
+    ],
+    "publicSurface": [
+      "tests/daemon_helpers.py make_daemon() \u2014 the daemon-cluster factory imported by ~21 test_daemon_*.py files; returns (daemon, queue, speaker, sessions, config)",
+      "tests/daemon_helpers.py FakeSpeaker \u2014 recording speaker double (one of three FakeSpeaker definitions in the suite)",
+      "tests/daemon_helpers.py stream_queue(daemon, session) \u2014 per-session queue accessor for non-foreground assertions",
+      "tests/_fakeplatform.py fake_platform() + FakeSupervisor/FakeHotkey/FakeTts/FakeRaiseBackend \u2014 imported by test_cli_install/_uninstall/_doctor/_hotkeyd for the dispatch contract",
+      "tests/conftest.py _isolate_sonari_dir (autouse) \u2014 applies to the entire suite; no opt-out",
+      "tests/_fakeclient/ (sitecustomize.py + sonari/client.py) \u2014 a PYTHONPATH-activated package consumed only by the test_sonari_hook_bin subprocess via env injection",
+      "tests/fixtures/*.json \u2014 golden hook payloads replayed by test_fixtures.py and test_hooks_entry.py"
+    ],
+    "dependencies": {
+      "internalImports": [
+        "sonari.daemon (SpeechDaemon)",
+        "sonari.sessions (SessionManager, Identity)",
+        "sonari.queue (SpeechQueue, SpeechItem)",
+        "sonari.protocol (MsgType, PROTOCOL_VERSION, encode, decode)",
+        "sonari.config (DEFAULTS)",
+        "sonari.hooks_entry (handle_event)",
+        "sonari.keymap (ACTION_MESSAGES, default_keymap, resolve_keymap, load/write helpers)",
+        "sonari.platform (get_platform, _CACHE)",
+        "sonari.platform.base (PlatformBackend, RaiseBackend, NoopRaiseBackend)",
+        "sonari.platform.macos.tts/raiser/supervisor/hotkeys/earcon",
+        "sonari.speaker (Speaker)",
+        "sonari.session_stream (SessionStream)",
+        "sonari.assembler (ProseAssembler)",
+        "sonari.cleaner (clean_markdown)",
+        "sonari.history (SessionHistory)",
+        "sonari.cli",
+        "sonari.paths",
+        "sonari.kokoro / sonari.kokoro_provision",
+        "sonari.ttyutil"
+      ],
+      "externalImports": [
+        "pytest",
+        "unittest.mock",
+        "socket",
+        "threading",
+        "subprocess",
+        "tempfile",
+        "json",
+        "pathlib",
+        "os",
+        "sys",
+        "numpy (test_kokoro.py only \u2014 unguarded top-level import)",
+        "io",
+        "wave",
+        "types",
+        "importlib.util"
+      ]
+    },
+    "internalCoupling": "The suite is heavily centered on the daemon. ~21 test_daemon_*.py files (~3049 lines, the largest at test_daemon_streams.py 315 lines / test_daemon_phase2.py 319 lines) all drive one entry point: SpeechDaemon.handle_message(), routing every protocol MsgType through it and asserting on a FakeSpeaker recorder and per-session SpeechQueue state. This mirrors daemon.py being the single largest src module (1236 lines, vs cli.py 568). The coupling between test files is via tests/daemon_helpers.make_daemon \u2014 almost every daemon test starts `daemon, queue, speaker, sessions, config = make_daemon(...)`, and many redefine a near-identical local `_msg`/`_prose`/`_drain` helper inline (e.g. _msg appears redefined in test_daemon_streams, _phase2, _phase21, _decisions, _control, _pin, _minqueue). Tests reach into private daemon internals: daemon._stream(), daemon._streams, daemon._enqueue(), daemon._speak_loop_once(), daemon._pending_heard, daemon._current_item, daemon._paused, daemon._wake, daemon._backlog_cap, daemon._alloc_id() \u2014 the test suite is tightly bound to daemon's private structure, so the daemon's internal refactor surface is large. The CLI cluster (8 files) is decoupled from the daemon by routing through fake_platform instead.",
+    "stateAndSideEffects": [
+      "conftest.py autouse fixture monkeypatches ~15 module-level path constants across paths/config/client/keymap/daemon to per-test tmp dirs; its comments document that a plain `pytest` run once DELETED the developer's live ~/.sonari/app (uninstall path rmtree'd APP_DIR) and mutated the real config \u2014 the fixture exists to prevent recurrence (conftest.py:33-84)",
+      "conftest resets daemon._SINGLETON to None per test because daemon.main() takes a process-wide exclusive flock on SINGLETON_PATH for single-instance (conftest.py:80-84)",
+      "test_daemon_loop.py opens real localhost TCP sockets (AF_INET, port 0), starts real daemon accept+speak threads, and does token-handshake round trips; uses time.sleep(0.05) and deadline-polling loops",
+      "test_speaker_cancel_2b.py spawns real daemon speak threads with Event-gated fake procs; all waits bounded by TIMEOUT=2.0 / _HANG_CEILING=10.0 to avoid wedging the suite",
+      "test_sonari_hook_bin.py and test_bin_shims.py spawn real subprocesses (sys.executable bin/sonari-hook, bin/sonari) with crafted PYTHONPATH/PATH and tmp marker files; fakeclient writes a sent.jsonl log via SONARI_FAKE_SENT_LOG env var",
+      "Multiple autouse _no_neural_venv fixtures (test_macos_tts.py, test_cli_install.py) monkeypatch kokoro_provision.neural_enabled to False to isolate from a real ~/.sonari/venv on the dev machine",
+      "test_platform_factory.py / test_keymap.py mutate the module-global platform._CACHE and monkeypatch platform.sys.platform to force darwin/unknown-OS",
+      "Reads env: CLAUDE_PLUGIN_VERSION, CLAUDE_PLUGIN_ROOT, TERM_PROGRAM, ITERM_SESSION_ID (hooks_entry tests); SONARI_FAKE_* and SONARI_CAPTURE (subprocess tests)"
+    ],
+    "frictionAndSmells": [
+      "VERIFIED de-facto suite state: on a base env, pytest collection ABORTS the entire run because tests/test_kokoro.py:4 does an unguarded top-level `import numpy` with no skip guard (test_kokoro_provision.py and test_macos_tts_kokoro.py correctly mock at the seams and need no extra). A single optional-extra import gates the whole suite. Measured: with the 3 kokoro files excluded, 650 passed in ~4.8s; the kokoro tests were NOT run (no numpy in either .venv or .venv39)",
+      "Build-phase file naming obscures behavior: test_daemon_phase2.py (rate/verbosity/options) and test_daemon_phase21.py (per-stream enqueue + recording) are named by build history, unlike the behavior-named test_daemon_pause_mute / _nav / _minqueue / _pin. You must open them to learn what they pin",
+      "Three separate FakeSpeaker definitions: daemon_helpers.py:7, test_e2e_pipeline.py:21 (its own copy with a shared log list), plus the real-Speaker+GatedProc rig in test_speaker_cancel_2b.py \u2014 the recorder double is duplicated rather than shared",
+      "No pytest configuration at all: pyproject.toml has no [tool.pytest.ini_options], no testpaths, no addopts, no registered markers; only 3 @pytest.mark.parametrize and 3 @pytest.mark.skipif used in the whole suite",
+      "Local _msg/_prose/_drain helpers are re-implemented near-identically across many daemon test files (test_daemon_streams, _phase2, _phase21, _decisions, _control, _pin, _minqueue, _nav) instead of living in daemon_helpers",
+      "Tests assert heavily on daemon private internals (_stream, _streams, _enqueue, _speak_loop_once, _pending_heard, _current_item, _paused, _wake, _backlog_cap) \u2014 tight coupling to private structure",
+      "Stale Windows residue in comments/docstrings after the macOS-only removal: test_macos_tts_kokoro.py:3 references a deleted 'tests/test_win_tts_kokoro.py'; test_daemon_loop.py:209-211 and test_loop comments still discuss Windows abort/WinRT behavior; _fakeplatform.py:6 references 'test_win_supervisor'. No actual test_win_*.py modules remain, and conftest no longer isolates a Windows path",
+      "Many test files carry large narrative docstrings encoding design-spec stage history (e.g. 'Was test_nav_makes_foreground...', 'Stage 2 flip', 'the flip:') \u2014 useful provenance but ties tests to a migration narrative rather than current behavior",
+      "test_daemon_loop.py uses time.sleep + deadline-polling rather than deterministic synchronization (functional but timing-dependent), in contrast to test_speaker_cancel_2b.py which deliberately uses bounded Events and 'no sleeps'"
+    ],
+    "naturalSeams": [
+      "The daemon cluster self-partitions by behavior into cohesive groups that each pin one concern: prose assembly/recording (test_daemon_prose, _phase21), decisions+cues (test_daemon_decisions, _phase2), navigation (test_daemon_nav), pause/mute (test_daemon_pause_mute), pin (test_daemon_pin), minqueue batching (test_daemon_minqueue), per-stream/foreground gating (test_daemon_streams), focus-follow/raise (test_daemon_focus_follow), connection/threading (test_daemon_loop, _conn, _hotkeys, _single_instance, _faulthandler), control commands (test_daemon_control), settings (test_daemon_settings). All share make_daemon + handle_message but each cluster is otherwise self-contained",
+      "An architecture-guard cluster pins the portable-core / platform-backend boundary as executable rules: test_no_os_branch_in_core (core has no sys.platform/macos import), test_platform_factory (one factory branch), test_platform_raise_seam (backend field shape), test_platform_base. These read source text or backend interfaces rather than behavior \u2014 a distinct, self-contained group",
+      "A CLI dispatch cluster (8 test_cli_*.py) is cohesively isolated from the daemon: it all routes through fake_platform/_fakeplatform.py and asserts what cli calls in what order, never touching SpeechDaemon",
+      "A macOS-backend cluster (test_macos_tts/_raise/_hotkeys/_supervisor/_earcon/_tts_kokoro + test_raise_service/_raise_swift/_hotkeyd_swift/_hotkeyd_contract) pins real OS-coupled backends under patched subprocess/filesystem \u2014 guarded by sys.platform=='darwin' skips and autouse neural-OFF fixtures",
+      "A ships-correctly cluster pins artifacts rather than runtime: test_manifests (version pins, hook wiring), test_bin_shims/test_bin_sonari (interpreter preference), test_commands (slash-command files), test_py39_compat (future-annotations + requires-python)",
+      "The kokoro/neural concern clusters into 3 files (test_kokoro, test_kokoro_provision, test_macos_tts_kokoro) that share the optional-extra dependency and the neural_enabled gating \u2014 the only group requiring the [kokoro] extra",
+      "A subprocess-integration seam (test_sonari_hook_bin + the _fakeclient package) is a distinct group that exercises the real bin/sonari-hook executable end-to-end, separate from the in-process test_hooks_entry unit tests of the same handle_event"
+    ],
+    "changeHints": [
+      "Test files carry explicit build-stage markers throughout docstrings: 'Stage 2 flip', 'Stage 4', 'Stage 5', 'Stage 6', 'Task 2/3/4/5', 'M6', 'Phase 1', 'Phase 2', plus 'Was test_...' rename trails and 'Removed test_...' tombstones \u2014 the daemon tests track a multi-stage migration and change frequently with it",
+      "Numbered regression-guard references ('#4', '#10', '#13', '#14', '#41', 'L2', 'H1', 'FIX 1', 'symptom 2b', 'spec \u00a71.1/\u00a74.3') tie individual tests to specific defects/issues \u2014 high-churn defect-driven area, especially daemon streams/nav/pause",
+      "Version is hard-pinned to 0.5.0 in test_manifests.py (plugin.json/marketplace.json/pyproject all asserted == 0.5.0) \u2014 these tests must be updated on every release bump",
+      "test_no_os_branch_in_core.py:6-9 documents a planned change: 'M3 adds the Windows keytables + a resolver-injection that removes even that' coupling for keymap.py \u2014 an anticipated future seam, though the project is now macOS-only (stale Windows residue suggests M3-Windows was dropped)",
+      "Stable, low-churn areas: the portable-core unit tests (test_queue, test_assembler, test_cleaner, test_protocol, test_history, test_sessions, test_config, test_session_stream, test_ttyutil, test_transport) are one-file-per-module with no stage markers \u2014 these pin settled data structures",
+      "conftest.py comments are defensive/scar-tissue-driven (documenting a past incident where tests deleted the real ~/.sonari) \u2014 the isolation fixture grows by accretion as new by-value-bound path constants are added to src modules"
+    ]
+  }
+]

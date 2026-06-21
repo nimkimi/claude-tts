@@ -1,8 +1,8 @@
 import io
 import wave
 
-import numpy as np
 import pytest
+np = pytest.importorskip("numpy")
 
 from sonari import kokoro
 
