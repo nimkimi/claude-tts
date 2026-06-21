@@ -28,6 +28,8 @@ from sonari.daemon.features.decisions import (
 )
 from sonari.daemon.features import lifecycle  # noqa: F401 — registers @handler decorators
 from sonari.daemon.features.lifecycle import on_set_foreground, on_session_end
+from sonari.daemon.features import navigation  # noqa: F401 — registers @handler decorators
+from sonari.daemon.features.navigation import on_nav
 
 
 class SpeechDaemon:
@@ -438,15 +440,7 @@ class SpeechDaemon:
         return on_reread_options(self._ctx.bind(msg), msg)
 
     def _on_nav(self, msg):
-        fg = self.sessions.foreground()
-        if fg is None:
-            return None
-        to = msg.get("to", "prev")
-        if to in ("prev_response", "next_response"):
-            self._nav_response(fg, to)
-        else:
-            self._nav(fg, to)
-        return None
+        return on_nav(self._ctx.bind(msg), msg)
 
     # ------------------------------------------------------------------ #
     # Playback + focus family handlers (Task 3.4)                         #
@@ -990,16 +984,6 @@ def _h_earcon(ctx, msg):
 @handler(MsgType.FLUSH)
 def _h_flush(ctx, msg):
     return ctx.host._on_flush(msg)
-
-
-# ------------------------------------------------------------------ #
-# Registry thunks — navigation family (Task 3.3)                      #
-# Grouped for the Step-5 lift into features/navigation.py             #
-# ------------------------------------------------------------------ #
-
-@handler(MsgType.NAV)
-def _h_nav(ctx, msg):
-    return ctx.host._on_nav(msg)
 
 
 # ------------------------------------------------------------------ #

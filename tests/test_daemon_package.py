@@ -40,7 +40,8 @@ def test_new_package_modules_declare_future_annotations():
                  "registry.py", "context.py", "state.py", "server.py",
                  "limits.py",
                  "features/__init__.py", "features/control.py",
-                 "features/decisions.py", "features/lifecycle.py"):
+                 "features/decisions.py", "features/lifecycle.py",
+                 "features/navigation.py"):
         text = (_SRC / name).read_text(encoding="utf-8")
         first = next(
             line.strip() for line in text.splitlines()
@@ -77,6 +78,18 @@ def test_lifecycle_handlers_registered_in_features_lifecycle():
         assert fn.__module__ == expected_module, (
             f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"
         )
+
+
+def test_navigation_handlers_registered_in_features_navigation():
+    # NAV must resolve to the feature module, not the old host thunk.
+    from sonari.daemon import registry
+    from sonari.protocol import MsgType
+
+    expected_module = "sonari.daemon.features.navigation"
+    fn = registry.HANDLERS[MsgType.NAV]
+    assert fn.__module__ == expected_module, (
+        f"HANDLERS[{MsgType.NAV!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"
+    )
 
 
 def test_control_handlers_registered_in_features_control():
