@@ -73,14 +73,16 @@ def _isolate_sonari_dir(tmp_path, monkeypatch):
         keymap, "HOTKEYD_RESOLVED_PATH", sonari_dir / "hotkeyd.resolved.json",
         raising=False)
 
-    # daemon.py binds LOCK_PATH + SINGLETON_PATH by value at import; main() takes
-    # an exclusive flock on SINGLETON_PATH for single-instance. Repoint per-test
-    # (each test has a unique sonari_dir) and reset the process-wide held-flock
-    # global so a main()-calling test never blocks a later one.
+    # daemon/host.py binds LOCK_PATH by value at import; daemon/bootstrap.py binds
+    # SINGLETON_PATH and main() takes an exclusive flock on it for single-instance.
+    # Repoint each module's copy per-test (each test has a unique sonari_dir) and
+    # reset the process-wide held-flock global so a main()-calling test never
+    # blocks a later one.
     monkeypatch.setattr(paths, "SINGLETON_PATH", sonari_dir / "daemon.singleton", raising=False)
-    import sonari.daemon as daemon
-    monkeypatch.setattr(daemon, "LOCK_PATH", sonari_dir / "daemon.lock", raising=False)
-    monkeypatch.setattr(daemon, "SINGLETON_PATH", sonari_dir / "daemon.singleton", raising=False)
-    monkeypatch.setattr(daemon, "_SINGLETON", None, raising=False)
+    import sonari.daemon.host as daemon_host
+    import sonari.daemon.bootstrap as daemon_bootstrap
+    monkeypatch.setattr(daemon_host, "LOCK_PATH", sonari_dir / "daemon.lock", raising=False)
+    monkeypatch.setattr(daemon_bootstrap, "SINGLETON_PATH", sonari_dir / "daemon.singleton", raising=False)
+    monkeypatch.setattr(daemon_bootstrap, "_SINGLETON", None, raising=False)
 
     yield
