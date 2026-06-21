@@ -772,12 +772,3 @@ class SpeechDaemon:
                 os.unlink(LOCK_PATH)
             except FileNotFoundError:
                 pass
-
-
-
-# ------------------------------------------------------------------ #
-# Registry thunks — hotkeys family (Task 3.5)                         #
-# Grouped for the Step-5 lift into features/hotkeys.py                #
-# ------------------------------------------------------------------ #
-
-
