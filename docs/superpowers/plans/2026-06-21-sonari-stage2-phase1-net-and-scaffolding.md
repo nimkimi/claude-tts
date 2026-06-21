@@ -552,8 +552,9 @@
       """Deterministic re-entrant FakeSpeaker: its speak() fires PAUSE then FLUSH
       (in that order) BEFORE returning not-completed, exactly reproducing the L2
       race — a FLUSH landing between speak() returning and the pause re-queue. The
-      interrupted item must NOT be resurrected into the flushed queue, and
-      _last_spoken_session must roll back."""
+      interrupted item must NOT be resurrected into the flushed queue; because FLUSH
+      (not a bare PAUSE) wins, the re-queue/rollback branch (daemon.py:1011) is
+      skipped, so _last_spoken_session stays committed (no rollback)."""
 
       def __init__(self, daemon):
           self.daemon = daemon
@@ -590,7 +591,8 @@
       """L2 (deterministic): speak() fires PAUSE then FLUSH before returning
       not-completed. The re-queue-on-pause check is INSIDE the lock and re-reads
       _paused, so the FLUSH (which cleared pause) wins — the item is NOT
-      resurrected and _last_spoken_session rolls back to its pre-speak value."""
+      resurrected; and because FLUSH won, the re-queue/rollback branch
+      (daemon.py:1011) is skipped, so _last_spoken_session stays committed."""
       sessions = SessionManager()
       sessions.set_foreground("fg")
       config = {k: (v.copy() if isinstance(v, dict) else v)
@@ -608,7 +610,7 @@
       assert not daemon._paused.is_set()                # FLUSH cleared the pause
       assert len(daemon._stream("fg").queue) == 0       # NOT resurrected
       assert daemon._current_item is None               # claim released
-      assert daemon._last_spoken_session is None         # rolled back to baseline
+      assert daemon._last_spoken_session == "fg"        # NOT rolled back: FLUSH cleared pause, so the re-queue branch (daemon.py:1011) is skipped — no resurrect, no rollback
   ```
 
 - [ ] **Run both guards; they must pass.** Run:
