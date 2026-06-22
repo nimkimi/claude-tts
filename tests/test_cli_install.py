@@ -3,6 +3,7 @@ from unittest import mock
 import pytest
 
 from sonari import cli, paths
+from sonari import install_record
 from sonari import kokoro_provision as kp
 from tests._fakeplatform import fake_platform, FakeSupervisor, FakeHotkey, FakeTts
 
@@ -23,15 +24,19 @@ def test_install_dispatches_through_platform(tmp_path, monkeypatch, capsys):
     hk = FakeHotkey(ok=False, detail="M3")
     pb = fake_platform(supervisor=sup, hotkey=hk, tts=FakeTts("Aria"))
     monkeypatch.setattr(cli, "_platform", lambda: pb)
-    monkeypatch.setattr(cli, "_copy_app", lambda root: str(tmp_path / "app"))
-    monkeypatch.setattr(cli, "_write_install_record", lambda **k: None)
-    monkeypatch.setattr(cli, "_read_plugin_version", lambda root: "0.5.0")
+    copy_mock = mock.Mock(return_value=str(tmp_path / "app"))
+    write_mock = mock.Mock()
+    monkeypatch.setattr("sonari.cli.install._copy_app", copy_mock)
+    monkeypatch.setattr("sonari.install_record.write_install_record", write_mock)
+    monkeypatch.setattr("sonari.cli.install._read_plugin_version", mock.Mock(return_value="0.5.0"))
     monkeypatch.setattr("sonari.keymap.write_default_keymap_if_absent", lambda: None)
     monkeypatch.setattr("sonari.keymap.write_resolved", lambda: None)
     monkeypatch.setattr("sonari.paths.ensure_sonari_dir", lambda: None)
 
-    rc = cli.install()
+    rc = cli.install.install()
     assert rc == 0
+    copy_mock.assert_called_once()
+    write_mock.assert_called_once()
     # Supervisor got install(python, app_dir) then post_install_notes().
     assert ("install", "/PY/python3", str(tmp_path / "app")) in sup.calls
     assert ("notes",) in sup.calls
@@ -47,7 +52,7 @@ def test_install_fatal_when_no_python_found(monkeypatch, capsys):
     sup = FakeSupervisor(python=None)
     monkeypatch.setattr(cli, "_platform", lambda: fake_platform(supervisor=sup))
     monkeypatch.setattr("sonari.paths.ensure_sonari_dir", lambda: None)
-    rc = cli.install()
+    rc = cli.install.install()
     assert rc == 1
     out = capsys.readouterr().out.lower()
     assert "python" in out and "3.9" in out
@@ -57,9 +62,9 @@ def test_install_fatal_when_no_python_found(monkeypatch, capsys):
 def test_install_copy_failure_is_fatal(monkeypatch, capsys):
     sup = FakeSupervisor(python="/PY/python3")
     monkeypatch.setattr(cli, "_platform", lambda: fake_platform(supervisor=sup))
-    monkeypatch.setattr(cli, "_copy_app", mock.Mock(side_effect=OSError("read-only")))
+    monkeypatch.setattr("sonari.cli.install._copy_app", mock.Mock(side_effect=OSError("read-only")))
     monkeypatch.setattr("sonari.paths.ensure_sonari_dir", lambda: None)
-    rc = cli.install()
+    rc = cli.install.install()
     assert rc == 1
     assert sup.calls == []  # backend install never reached
     out = capsys.readouterr().out.lower()
@@ -67,7 +72,7 @@ def test_install_copy_failure_is_fatal(monkeypatch, capsys):
 
 
 def test_install_subcommand_invokes_install():
-    with mock.patch("sonari.cli.install", return_value=0) as inst:
+    with mock.patch("sonari.cli.install.install", return_value=0) as inst:
         rc = cli.main(["install"])
     inst.assert_called_once()
     assert rc == 0
@@ -77,8 +82,8 @@ def test_install_subcommand_invokes_install():
 
 def test_write_install_record_writes_expected_keys(tmp_path):
     rec = tmp_path / "install.json"
-    with mock.patch.object(cli.paths, "INSTALL_RECORD_PATH", rec):
-        cli._write_install_record(
+    with mock.patch.object(install_record, "INSTALL_RECORD_PATH", rec):
+        install_record.write_install_record(
             python="/usr/bin/python3",
             python_version="3.9",
             plugin_root="/plug",
@@ -86,7 +91,9 @@ def test_write_install_record_writes_expected_keys(tmp_path):
             plugin_version="0.4.0",
         )
     import json as _json
-    data = _json.loads(rec.read_text())
+    raw = rec.read_bytes()
+    assert raw.endswith(b"\n")
+    data = _json.loads(raw)
     assert data["python"] == "/usr/bin/python3"
     assert data["python_version"] == "3.9"
     assert data["plugin_root"] == "/plug"
@@ -101,12 +108,12 @@ def test_read_plugin_version_reads_version_from_plugin_json(tmp_path, monkeypatc
     pdir = tmp_path / ".claude-plugin"
     pdir.mkdir()
     (pdir / "plugin.json").write_text('{"name": "sonari", "version": "0.4.0"}')
-    assert cli._read_plugin_version(str(tmp_path)) == "0.4.0"
+    assert cli.install._read_plugin_version(str(tmp_path)) == "0.4.0"
 
 
 def test_read_plugin_version_missing_file_returns_empty(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_PLUGIN_VERSION", raising=False)
-    assert cli._read_plugin_version(str(tmp_path)) == ""
+    assert cli.install._read_plugin_version(str(tmp_path)) == ""
 
 
 def test_read_plugin_version_corrupt_file_returns_empty(tmp_path, monkeypatch):
@@ -114,12 +121,12 @@ def test_read_plugin_version_corrupt_file_returns_empty(tmp_path, monkeypatch):
     pdir = tmp_path / ".claude-plugin"
     pdir.mkdir()
     (pdir / "plugin.json").write_text("{ not json")
-    assert cli._read_plugin_version(str(tmp_path)) == ""
+    assert cli.install._read_plugin_version(str(tmp_path)) == ""
 
 
 def test_read_plugin_version_falls_back_to_env(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PLUGIN_VERSION", "9.9.9")
-    assert cli._read_plugin_version(str(tmp_path)) == "9.9.9"
+    assert cli.install._read_plugin_version(str(tmp_path)) == "9.9.9"
 
 
 def test_copy_app_copies_package_into_app_dir(tmp_path):
@@ -129,8 +136,8 @@ def test_copy_app_copies_package_into_app_dir(tmp_path):
     (src_pkg / "__init__.py").write_text("# sonari\n")
     (src_pkg / "daemon.py").write_text("# daemon\n")
     app_dir = tmp_path / "home" / ".sonari" / "app"
-    with mock.patch.object(cli.paths, "APP_DIR", app_dir):
-        returned = cli._copy_app(str(plugin_root))
+    with mock.patch.object(cli.install.paths, "APP_DIR", app_dir):
+        returned = cli.install._copy_app(str(plugin_root))
     assert returned == str(app_dir)
     assert (app_dir / "sonari" / "__init__.py").exists()
     assert (app_dir / "sonari" / "daemon.py").exists()
@@ -150,10 +157,10 @@ def test_copy_app_is_remove_then_copy_so_stale_modules_vanish(tmp_path):
 
     first = _root_with(["old_only.py", "daemon.py"])
     second = _root_with(["daemon.py"])
-    with mock.patch.object(cli.paths, "APP_DIR", app_dir):
-        cli._copy_app(str(first))
+    with mock.patch.object(cli.install.paths, "APP_DIR", app_dir):
+        cli.install._copy_app(str(first))
         assert (app_dir / "sonari" / "old_only.py").exists()
-        cli._copy_app(str(second))
+        cli.install._copy_app(str(second))
     assert not (app_dir / "sonari" / "old_only.py").exists()
     assert (app_dir / "sonari" / "daemon.py").exists()
 
@@ -161,9 +168,9 @@ def test_copy_app_is_remove_then_copy_so_stale_modules_vanish(tmp_path):
 def test_copy_app_raises_oserror_when_source_missing(tmp_path):
     plugin_root = tmp_path / "plugin"  # no src/sonari beneath it
     app_dir = tmp_path / "home" / ".sonari" / "app"
-    with mock.patch.object(cli.paths, "APP_DIR", app_dir):
+    with mock.patch.object(cli.install.paths, "APP_DIR", app_dir):
         try:
-            cli._copy_app(str(plugin_root))
+            cli.install._copy_app(str(plugin_root))
             raised = False
         except OSError:
             raised = True
@@ -193,15 +200,19 @@ def test_install_macos_stdout_locks_hotkeyd_and_speechd_lines(tmp_path, monkeypa
     monkeypatch.setattr(pb.supervisor, "resolve_python", lambda: "/usr/bin/python3")
     monkeypatch.setattr(pb.supervisor, "_probe_python_version", lambda p: (3, 12))
     monkeypatch.setattr(cli, "_platform", lambda: pb)
-    monkeypatch.setattr(cli, "_copy_app", lambda root: str(tmp_path / "app"))
-    monkeypatch.setattr(cli, "_write_install_record", lambda **k: None)
-    monkeypatch.setattr(cli, "_read_plugin_version", lambda root: "0.5.0")
+    copy_mock = mock.Mock(return_value=str(tmp_path / "app"))
+    write_mock = mock.Mock()
+    monkeypatch.setattr("sonari.cli.install._copy_app", copy_mock)
+    monkeypatch.setattr("sonari.install_record.write_install_record", write_mock)
+    monkeypatch.setattr("sonari.cli.install._read_plugin_version", mock.Mock(return_value="0.5.0"))
     monkeypatch.setattr("sonari.keymap.write_default_keymap_if_absent", lambda: None)
     monkeypatch.setattr("sonari.keymap.write_resolved", lambda: None)
     monkeypatch.setattr("sonari.paths.ensure_sonari_dir", lambda: None)
 
-    rc = cli.install()
+    rc = cli.install.install()
     assert rc == 0
+    copy_mock.assert_called_once()
+    write_mock.assert_called_once()
     out = capsys.readouterr().out
     assert "Wrote LaunchAgent: {0}".format(speechd) in out
     assert "Loaded LaunchAgent com.sonari.speechd." in out
@@ -219,7 +230,7 @@ def test_daemon_python_prefers_venv_when_neural_enabled(monkeypatch):
         def _probe_python_version(self, p): return (3, 12)
     monkeypatch.setattr(kp, "neural_enabled", lambda: True)
     monkeypatch.setattr(paths, "kokoro_venv_python", lambda: "/venv/bin/python")
-    assert cli._daemon_python(_Sup()) == "/venv/bin/python"
+    assert cli.install._daemon_python(_Sup()) == "/venv/bin/python"
 
 
 def test_daemon_python_falls_back_when_venv_too_old(monkeypatch):
@@ -229,7 +240,7 @@ def test_daemon_python_falls_back_when_venv_too_old(monkeypatch):
         def _probe_python_version(self, p): return (3, 9)
     monkeypatch.setattr(kp, "neural_enabled", lambda: True)
     monkeypatch.setattr(paths, "kokoro_venv_python", lambda: "/venv/bin/python")
-    assert cli._daemon_python(_Sup()) == "/usr/bin/python3"
+    assert cli.install._daemon_python(_Sup()) == "/usr/bin/python3"
 
 
 def test_daemon_python_uses_system_when_no_neural(monkeypatch):
@@ -237,7 +248,7 @@ def test_daemon_python_uses_system_when_no_neural(monkeypatch):
         def resolve_python(self): return "/usr/bin/python3"
         def _probe_python_version(self, p): return (3, 12)
     monkeypatch.setattr(kp, "neural_enabled", lambda: False)
-    assert cli._daemon_python(_Sup()) == "/usr/bin/python3"
+    assert cli.install._daemon_python(_Sup()) == "/usr/bin/python3"
 
 
 def test_install_uses_venv_interpreter_when_neural_enabled(tmp_path, monkeypatch):
@@ -246,13 +257,17 @@ def test_install_uses_venv_interpreter_when_neural_enabled(tmp_path, monkeypatch
     pb = fake_platform(supervisor=sup, hotkey=FakeHotkey(ok=True, detail="ok"),
                        tts=FakeTts("Samantha"))
     monkeypatch.setattr(cli, "_platform", lambda: pb)
-    monkeypatch.setattr(cli, "_copy_app", lambda root: str(tmp_path / "app"))
-    monkeypatch.setattr(cli, "_write_install_record", lambda **k: None)
-    monkeypatch.setattr(cli, "_read_plugin_version", lambda root: "0.5.0")
+    copy_mock = mock.Mock(return_value=str(tmp_path / "app"))
+    write_mock = mock.Mock()
+    monkeypatch.setattr("sonari.cli.install._copy_app", copy_mock)
+    monkeypatch.setattr("sonari.install_record.write_install_record", write_mock)
+    monkeypatch.setattr("sonari.cli.install._read_plugin_version", mock.Mock(return_value="0.5.0"))
     monkeypatch.setattr("sonari.keymap.write_default_keymap_if_absent", lambda: None)
     monkeypatch.setattr("sonari.keymap.write_resolved", lambda: None)
     monkeypatch.setattr("sonari.paths.ensure_sonari_dir", lambda: None)
     monkeypatch.setattr(kp, "neural_enabled", lambda: True)
     monkeypatch.setattr(paths, "kokoro_venv_python", lambda: "/venv/bin/python")
-    cli.install()
+    cli.install.install()
+    copy_mock.assert_called_once()
+    write_mock.assert_called_once()
     assert ("install", "/venv/bin/python", str(tmp_path / "app")) in sup.calls
