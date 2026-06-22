@@ -3,13 +3,12 @@
 (no grant needed). Everything else -> unsupported."""
 from __future__ import annotations
 
-import hashlib
 import os
-import shutil
 import subprocess
 
 from sonari import paths
 from sonari.platform.contracts import RaiseBackend
+from sonari.platform.macos._helpers import build_swift_binary
 
 _HELPER_TIMEOUT = 6.0
 
@@ -61,32 +60,11 @@ class MacRaiseBackend(RaiseBackend):
     # --- build (mirror MacHotkeyBackend.build: skip if source unchanged to keep
     #     the Automation grant, which is keyed to the binary's cdhash) ---
     def build(self):
-        if shutil.which("swiftc") is None:
-            return (False, "swiftc not found")
         src = os.path.join(paths.repo_root(), "hotkeyd", "sonari-raise.swift")
-        try:
-            with open(src, "rb") as fh:
-                src_hash = hashlib.sha256(fh.read()).hexdigest()
-        except OSError as exc:
-            return (False, "cannot read sonari-raise source: {0}".format(exc))
         hash_path = str(paths.SONARI_DIR / ".raise.srchash")
-        if os.path.exists(str(paths.RAISE_BIN_PATH)):
-            try:
-                with open(hash_path, "r", encoding="utf-8") as fh:
-                    if fh.read().strip() == src_hash:
-                        return (True, "{0} (unchanged; kept to preserve the "
-                                "Automation grant)".format(paths.RAISE_BIN_PATH))
-            except OSError:
-                pass
-        rc = subprocess.call(["swiftc", src, "-o", str(paths.RAISE_BIN_PATH)])
-        if rc == 0:
-            try:
-                with open(hash_path, "w", encoding="utf-8") as fh:
-                    fh.write(src_hash)
-            except OSError:
-                pass
-            return (True, str(paths.RAISE_BIN_PATH))
-        return (False, "swiftc exited {0}".format(rc))
+        return build_swift_binary(
+            src, paths.RAISE_BIN_PATH, hash_path,
+            "sonari-raise", "the Automation grant")
 
     # --- diagnostics ---
     def doctor_rows(self) -> "list":

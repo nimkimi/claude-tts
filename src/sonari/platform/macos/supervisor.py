@@ -9,6 +9,7 @@ from typing import Optional
 
 from sonari import paths
 from sonari.platform.contracts import SupervisorBackend
+from sonari.platform.macos._helpers import xml_escape
 
 LAUNCH_AGENT_LABEL = "com.sonari.speechd"
 LAUNCH_AGENT_PATH = os.path.expanduser(
@@ -32,11 +33,6 @@ def _local_bin_on_path() -> bool:
     return lb in entries
 
 
-
-
-def _xml_escape(s: str) -> str:
-    """Escape the three XML-significant characters for safe plist interpolation."""
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 class MacSupervisorBackend:
@@ -108,14 +104,14 @@ class MacSupervisorBackend:
         Carbon hotkeys require.
         """
         args_xml = "".join(
-            "        <string>{0}</string>\n".format(_xml_escape(a))
+            "        <string>{0}</string>\n".format(xml_escape(a))
             for a in program_args)
         env_xml = ""
         if env:
             pairs = "".join(
                 "        <key>{0}</key>\n"
                 "        <string>{1}</string>\n".format(
-                    _xml_escape(k), _xml_escape(v))
+                    xml_escape(k), xml_escape(v))
                 for k, v in env.items())
             env_xml = (
                 '    <key>EnvironmentVariables</key>\n'
@@ -149,10 +145,10 @@ class MacSupervisorBackend:
             '</dict>\n'
             '</plist>\n'
         ).format(
-            label=_xml_escape(label),
+            label=xml_escape(label),
             args_xml=args_xml,
             env_xml=env_xml,
-            log_path=_xml_escape(log_path),
+            log_path=xml_escape(log_path),
         )
 
     def launchagent_plist(self, python_executable: str, src_path: str,

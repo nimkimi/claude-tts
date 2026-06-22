@@ -1,14 +1,12 @@
 """macOS hotkey backend — compiles + supervises the Swift Carbon hotkeyd."""
 from __future__ import annotations
 
-import hashlib
 import os
-import shutil
-import subprocess
 
 from sonari import paths
 from sonari.platform.contracts import HotkeyBackend
 from sonari.platform.macos import keytables
+from sonari.platform.macos._helpers import xml_escape, build_swift_binary
 
 LAUNCH_AGENT_LABEL = "com.sonari.hotkeyd"
 LAUNCH_AGENT_PATH = os.path.expanduser(
@@ -54,14 +52,9 @@ for _mod_name, _mod_label in _MOD_DISPLAY_ORDER:
 del _name, _display, _code, _mod_name, _mod_label, _mask, _seen_mod_masks
 
 
-def _xml_escape(s: str) -> str:
-    """Escape the three XML-significant characters for safe plist interpolation."""
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
 def _hotkeyd_plist(binary_path: str, log_path: str) -> str:
     """Return the full LaunchAgent plist XML for the hotkey daemon."""
-    args_xml = "        <string>{0}</string>\n".format(_xml_escape(binary_path))
+    args_xml = "        <string>{0}</string>\n".format(xml_escape(binary_path))
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
@@ -86,9 +79,9 @@ def _hotkeyd_plist(binary_path: str, log_path: str) -> str:
         '    <string>Interactive</string>\n'
         '</dict>\n'
         '</plist>\n'
-    ).format(label=_xml_escape(LAUNCH_AGENT_LABEL),
+    ).format(label=xml_escape(LAUNCH_AGENT_LABEL),
              args=args_xml,
-             log=_xml_escape(log_path))
+             log=xml_escape(log_path))
 
 
 class MacHotkeyBackend:
@@ -155,32 +148,11 @@ class MacHotkeyBackend:
     def build(self):
         """Compile sonari-hotkeyd if swiftc is present and the source changed.
         Returns (ok: bool, detail: str). (Verbatim move of cli._build_hotkeyd.)"""
-        if shutil.which("swiftc") is None:
-            return (False, "swiftc not found")
         src = os.path.join(paths.repo_root(), "hotkeyd", "sonari-hotkeyd.swift")
-        try:
-            with open(src, "rb") as fh:
-                src_hash = hashlib.sha256(fh.read()).hexdigest()
-        except OSError as exc:
-            return (False, "cannot read hotkeyd source: {0}".format(exc))
         hash_path = str(paths.SONARI_DIR / ".hotkeyd.srchash")
-        if os.path.exists(str(paths.HOTKEYD_BIN_PATH)):
-            try:
-                with open(hash_path, "r", encoding="utf-8") as fh:
-                    if fh.read().strip() == src_hash:
-                        return (True, "{0} (unchanged; kept to preserve any "
-                                "permission grants)".format(paths.HOTKEYD_BIN_PATH))
-            except OSError:
-                pass
-        rc = subprocess.call(["swiftc", src, "-o", str(paths.HOTKEYD_BIN_PATH)])
-        if rc == 0:
-            try:
-                with open(hash_path, "w", encoding="utf-8") as fh:
-                    fh.write(src_hash)
-            except OSError:
-                pass
-            return (True, str(paths.HOTKEYD_BIN_PATH))
-        return (False, "swiftc exited {0}".format(rc))
+        return build_swift_binary(
+            src, paths.HOTKEYD_BIN_PATH, hash_path,
+            "hotkeyd", "any permission grants")
 
     def install(self, log_path: str, agent_path: str, launchctl_fn) -> "tuple[bool, str]":
         """Set up the global-hotkey mechanism: compile binary, write the
