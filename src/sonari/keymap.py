@@ -9,10 +9,10 @@ from __future__ import annotations
 import json
 import os
 
+from sonari.atomicio import atomic_write_json
 from sonari.paths import (
     KEYMAP_PATH,
     HOTKEYD_RESOLVED_PATH,
-    SONARI_DIR,
     ensure_sonari_dir,
 )
 
@@ -161,12 +161,7 @@ def _read_user_keymap() -> dict:
 def _write_user_keymap(user: dict) -> None:
     """Atomically persist the user's keymap.json overrides."""
     ensure_sonari_dir()
-    tmp = str(KEYMAP_PATH) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(user, fh, indent=2)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, str(KEYMAP_PATH))
+    atomic_write_json(KEYMAP_PATH, user, indent=2)
 
 
 def unbind_action(action: str) -> None:
@@ -202,12 +197,6 @@ def write_resolved(keymap=None) -> str:
     path. Uses load_keymap() when no explicit keymap is given."""
     if keymap is None:
         keymap = load_keymap()
-    data = json.dumps(resolve_keymap(keymap))
     ensure_sonari_dir()
-    tmp_path = SONARI_DIR / (HOTKEYD_RESOLVED_PATH.name + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as fh:
-        fh.write(data)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp_path, HOTKEYD_RESOLVED_PATH)
+    atomic_write_json(HOTKEYD_RESOLVED_PATH, resolve_keymap(keymap), indent=None)
     return str(HOTKEYD_RESOLVED_PATH)

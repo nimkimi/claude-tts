@@ -10,16 +10,14 @@ import json
 import os
 import socket
 
+from sonari.atomicio import atomic_write_json
+
 HOST = "127.0.0.1"
 
 
 def write_lockfile(path, host, port, token, pid) -> None:
     data = {"host": host, "port": int(port), "token": token, "pid": int(pid)}
-    tmp = str(path) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh)
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, str(path))
+    atomic_write_json(path, data, indent=None, fsync=False, chmod=0o600)
 
 
 def read_lockfile(path):
