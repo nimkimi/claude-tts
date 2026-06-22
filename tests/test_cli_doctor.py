@@ -17,9 +17,8 @@ def _patches(rows=None, hooks_row=None, send=None, install_record=None):
         mock.patch("sonari.paths.ensure_sonari_dir"),
         mock.patch("sonari.client.send",
                    return_value=(send if send is not None else {"ok": True})),
-        mock.patch.object(
-            cli, "_read_install_record",
-            return_value=install_record or {"app_path": "/home/u/.sonari/app"}),
+        mock.patch("sonari.install_record.read_install_record",
+                   return_value=install_record or {"app_path": "/home/u/.sonari/app"}),
         mock.patch("os.path.exists", return_value=True),
     ]
 
@@ -28,7 +27,7 @@ def _run(patches):
     for p in patches:
         p.start()
     try:
-        return cli.doctor()
+        return cli.doctor.doctor()
     finally:
         for p in reversed(patches):
             p.stop()
@@ -73,7 +72,7 @@ def test_doctor_hooks_row_comes_from_backend():
 
 
 def test_doctor_subcommand_prints_and_returns(capsys):
-    with mock.patch("sonari.cli.doctor",
+    with mock.patch("sonari.cli.doctor.doctor",
                     return_value=[("say", True, "/usr/bin/say"),
                                   ("afplay", False, "not found")]):
         rc = cli.main(["doctor"])
@@ -83,7 +82,7 @@ def test_doctor_subcommand_prints_and_returns(capsys):
 
 
 def test_doctor_subcommand_all_ok_returns_zero(capsys):
-    with mock.patch("sonari.cli.doctor", return_value=[("say", True, "ok")]):
+    with mock.patch("sonari.cli.doctor.doctor", return_value=[("say", True, "ok")]):
         rc = cli.main(["doctor"])
     assert rc == 0
     assert "say" in capsys.readouterr().out
@@ -102,16 +101,16 @@ def test_doctor_includes_hotkey_rows(monkeypatch):
     monkeypatch.setattr("os.access", lambda *a, **k: True)
     monkeypatch.setattr("sonari.paths.ensure_sonari_dir", lambda: None)
     monkeypatch.setattr("sonari.client.send", lambda *a, **k: {"ok": True})
-    monkeypatch.setattr(cli, "_read_install_record", lambda: {"app_path": "/a"})
+    monkeypatch.setattr("sonari.install_record.read_install_record", lambda: {"app_path": "/a"})
     monkeypatch.setattr("os.path.exists", lambda p: True)
-    names = {r[0] for r in cli.doctor()}
+    names = {r[0] for r in cli.doctor.doctor()}
     assert "hotkey chords" in names
 
 
 def _doctor_rows(monkeypatch):
     pb = fake_platform(supervisor=FakeSupervisor(), hotkey=FakeHotkey(ok=True, detail="ok"))
     monkeypatch.setattr(cli, "_platform", lambda: pb)
-    return {name: (ok, detail) for name, ok, detail in cli.doctor()}
+    return {name: (ok, detail) for name, ok, detail in cli.doctor.doctor()}
 
 
 def test_doctor_neural_row_ok_and_green_when_absent(monkeypatch):
