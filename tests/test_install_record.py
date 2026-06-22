@@ -11,3 +11,5 @@ def test_write_install_record_trailing_newline(tmp_path, monkeypatch):
     rec = json.loads(raw)
     assert rec["python"] == "/py" and rec["plugin_version"] == "0.5.0"
     assert "installed_at" in rec
+    assert list(rec.keys()) == [
+        "python", "python_version", "app_path", "plugin_root", "plugin_version", "installed_at"]

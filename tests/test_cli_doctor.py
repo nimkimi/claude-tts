@@ -88,6 +88,15 @@ def test_doctor_subcommand_all_ok_returns_zero(capsys):
     assert "say" in capsys.readouterr().out
 
 
+def test_doctor_plugin_path_detail_contains_app_path():
+    """The 'plugin path resolved' detail must carry the actual app_path from the
+    install record — a hollow reader (returning None) would produce a different
+    detail string, proving the patch is load-bearing."""
+    _, patches = _patches(install_record={"app_path": "/SENTINEL/app"})
+    d = _as_dict(_run(patches))
+    assert "/SENTINEL/app" in d["plugin path resolved"][1]
+
+
 def test_doctor_includes_hotkey_rows(monkeypatch):
     from tests._fakeplatform import fake_platform, FakeSupervisor
 
