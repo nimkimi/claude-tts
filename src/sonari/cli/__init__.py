@@ -13,7 +13,6 @@ import argparse
 import sys
 from typing import Optional
 
-from ..protocol import MsgType, PROTOCOL_VERSION
 from .. import paths
 from .. import keymap
 from sonari.platform import get_platform
