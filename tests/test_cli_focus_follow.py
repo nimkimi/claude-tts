@@ -46,5 +46,5 @@ def test_doctor_includes_raise_rows(monkeypatch):
     monkeypatch.setattr(cli, "_send", lambda *a, **k: {"ok": True})
     # pin neural_enabled to avoid filesystem touches
     monkeypatch.setattr(kp, "neural_enabled", lambda: False)
-    rows = cli.doctor()
+    rows = cli.doctor.doctor()
     assert ("focus-follow helper", True, "ok") in rows
