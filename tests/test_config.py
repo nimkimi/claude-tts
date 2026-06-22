@@ -204,10 +204,13 @@ def test_save_config_is_atomic_on_replace_failure(monkeypatch, tmp_path):
     sonari_dir.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(_json.dumps({"rate": 200}), encoding="utf-8")
 
+    calls = []
+
     def _boom(src, dst):
+        calls.append((src, dst))
         raise OSError("simulated replace failure")
 
-    monkeypatch.setattr(config.os, "replace", _boom)
+    monkeypatch.setattr("sonari.atomicio.os.replace", _boom)
     new_cfg = config.load_config()
     new_cfg["rate"] = 999
 
@@ -216,6 +219,7 @@ def test_save_config_is_atomic_on_replace_failure(monkeypatch, tmp_path):
     except OSError:
         pass
 
+    assert calls, "atomic_write_json's os.replace was never reached — patch is hollow"
     # original file content is untouched: os.replace never overwrote it
     on_disk = _json.loads(cfg_path.read_text(encoding="utf-8"))
     assert on_disk == {"rate": 200}

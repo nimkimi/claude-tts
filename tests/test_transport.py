@@ -1,4 +1,5 @@
 import socket, threading
+import os, stat, json
 from sonari.platform import transport
 
 
@@ -45,3 +46,12 @@ def test_acquire_singleton_is_exclusive(tmp_path):
     f2 = transport.acquire_singleton(lock)
     assert f2 is not None, "after release, acquire should win again"
     f2.close()
+
+
+def test_write_lockfile_bytes_and_mode(tmp_path):
+    p = tmp_path / "daemon.lock"
+    transport.write_lockfile(p, "127.0.0.1", 5051, "tok", 4242)
+    assert json.loads(p.read_text()) == {
+        "host": "127.0.0.1", "port": 5051, "token": "tok", "pid": 4242}
+    assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+    assert not p.read_bytes().endswith(b"\n")  # compact, no trailing newline

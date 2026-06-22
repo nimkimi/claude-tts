@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import json
-import os
 
-from sonari.paths import CONFIG_PATH, SONARI_DIR, ensure_sonari_dir
+from sonari.atomicio import atomic_write_json
+from sonari.paths import CONFIG_PATH, ensure_sonari_dir
 
 DEFAULTS = {
     "voice": None,
@@ -53,11 +53,6 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
-    """Atomically persist cfg to CONFIG_PATH (temp file in SONARI_DIR + os.replace)."""
+    """Atomically persist cfg to CONFIG_PATH."""
     ensure_sonari_dir()
-    tmp_path = SONARI_DIR / (CONFIG_PATH.name + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as fh:
-        json.dump(cfg, fh, indent=2)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp_path, CONFIG_PATH)
+    atomic_write_json(CONFIG_PATH, cfg, indent=2)
