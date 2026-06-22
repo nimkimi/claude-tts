@@ -1,5 +1,6 @@
 
 from sonari.daemon.features import lifecycle
+import sonari.install_record as install_record
 from tests.daemon_helpers import make_daemon, stream_queue
 
 
@@ -12,7 +13,7 @@ def _write_install_json(tmp_path, plugin_version="0.4.0"):
 
 def test_setup_health_not_installed_when_no_record(tmp_path, monkeypatch):
     missing = tmp_path / "install.json"  # never created
-    monkeypatch.setattr(lifecycle, "INSTALL_RECORD_PATH", str(missing))
+    monkeypatch.setattr(install_record, "INSTALL_RECORD_PATH", str(missing))
     monkeypatch.setattr(lifecycle, "_launcher_present", lambda: True)
     state, cue = lifecycle._setup_health("0.4.0")
     assert state == "not_installed"
@@ -21,7 +22,7 @@ def test_setup_health_not_installed_when_no_record(tmp_path, monkeypatch):
 
 def test_setup_health_not_installed_when_launcher_missing(tmp_path, monkeypatch):
     rec = _write_install_json(tmp_path)
-    monkeypatch.setattr(lifecycle, "INSTALL_RECORD_PATH", str(rec))
+    monkeypatch.setattr(install_record, "INSTALL_RECORD_PATH", str(rec))
     monkeypatch.setattr(lifecycle, "_launcher_present", lambda: False)
     state, cue = lifecycle._setup_health("0.4.0")
     assert state == "not_installed"
@@ -31,7 +32,7 @@ def test_setup_health_not_installed_when_launcher_missing(tmp_path, monkeypatch)
 def test_setup_health_ok_speech_only_no_hotkeyd(tmp_path, monkeypatch):
     # install.json + launcher present, hotkeyd binary ABSENT, versions match.
     rec = _write_install_json(tmp_path, plugin_version="0.4.0")
-    monkeypatch.setattr(lifecycle, "INSTALL_RECORD_PATH", str(rec))
+    monkeypatch.setattr(install_record, "INSTALL_RECORD_PATH", str(rec))
     monkeypatch.setattr(lifecycle, "_launcher_present", lambda: True)
     state, cue = lifecycle._setup_health("0.4.0")
     assert state == "ok"
@@ -40,7 +41,7 @@ def test_setup_health_ok_speech_only_no_hotkeyd(tmp_path, monkeypatch):
 
 def test_setup_health_ok_when_versions_match(tmp_path, monkeypatch):
     rec = _write_install_json(tmp_path, plugin_version="0.4.0")
-    monkeypatch.setattr(lifecycle, "INSTALL_RECORD_PATH", str(rec))
+    monkeypatch.setattr(install_record, "INSTALL_RECORD_PATH", str(rec))
     monkeypatch.setattr(lifecycle, "_launcher_present", lambda: True)
     state, cue = lifecycle._setup_health("0.4.0")
     assert state == "ok"
@@ -49,7 +50,7 @@ def test_setup_health_ok_when_versions_match(tmp_path, monkeypatch):
 
 def test_setup_health_version_drift(tmp_path, monkeypatch):
     rec = _write_install_json(tmp_path, plugin_version="0.3.0")
-    monkeypatch.setattr(lifecycle, "INSTALL_RECORD_PATH", str(rec))
+    monkeypatch.setattr(install_record, "INSTALL_RECORD_PATH", str(rec))
     monkeypatch.setattr(lifecycle, "_launcher_present", lambda: True)
     state, cue = lifecycle._setup_health("0.4.0")
     assert state == "version_drift"
@@ -59,7 +60,7 @@ def test_setup_health_version_drift(tmp_path, monkeypatch):
 
 def test_setup_health_no_drift_when_session_version_empty(tmp_path, monkeypatch):
     rec = _write_install_json(tmp_path, plugin_version="0.3.0")
-    monkeypatch.setattr(lifecycle, "INSTALL_RECORD_PATH", str(rec))
+    monkeypatch.setattr(install_record, "INSTALL_RECORD_PATH", str(rec))
     monkeypatch.setattr(lifecycle, "_launcher_present", lambda: True)
     state, cue = lifecycle._setup_health("")  # unknown session version
     assert state == "ok"
@@ -69,8 +70,8 @@ def test_setup_health_no_drift_when_session_version_empty(tmp_path, monkeypatch)
 def test_read_install_record_returns_none_on_corrupt(tmp_path, monkeypatch):
     rec = tmp_path / "install.json"
     rec.write_text("{ not json")
-    monkeypatch.setattr(lifecycle, "INSTALL_RECORD_PATH", str(rec))
-    assert lifecycle._read_install_record() is None
+    monkeypatch.setattr(install_record, "INSTALL_RECORD_PATH", str(rec))
+    assert install_record.read_install_record() is None
 
 
 from sonari.protocol import MsgType, PROTOCOL_VERSION

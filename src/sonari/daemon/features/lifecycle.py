@@ -1,19 +1,8 @@
 from __future__ import annotations
 
 from sonari.protocol import MsgType
-from sonari.paths import INSTALL_RECORD_PATH
+from sonari.install_record import read_install_record
 from sonari.daemon.registry import handler
-
-
-def _read_install_record():
-    """Return the install.json dict, or None if unreadable/absent. Never raises."""
-    import json
-    try:
-        with open(str(INSTALL_RECORD_PATH), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else None
-    except Exception:  # noqa: BLE001 - health check must never raise
-        return None
 
 
 def _launcher_present() -> bool:
@@ -32,7 +21,7 @@ def _setup_health(plugin_version: str):
     The hotkeyd binary is deliberately NOT part of this check so a deliberate
     speech-only user (no swiftc) is never nagged.
     """
-    rec = _read_install_record()
+    rec = read_install_record()
     installed = (rec is not None and _launcher_present())
     if not installed:
         return ("not_installed",
