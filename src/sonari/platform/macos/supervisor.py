@@ -34,7 +34,6 @@ def _local_bin_on_path() -> bool:
 
 
 
-
 class MacSupervisorBackend:
     # --- python resolution (verbatim move of cli._resolve_python et al.) ---
     def _probe_python_version(self, candidate: str):
