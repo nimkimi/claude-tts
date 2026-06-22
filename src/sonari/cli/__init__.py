@@ -16,9 +16,9 @@ import shutil
 import sys
 from typing import Optional
 
-from .protocol import MsgType, PROTOCOL_VERSION
-from . import paths
-from . import keymap
+from ..protocol import MsgType, PROTOCOL_VERSION
+from .. import paths
+from .. import keymap
 from sonari.platform import get_platform
 
 _PLATFORM = None
@@ -36,7 +36,7 @@ VERBOSITY_CHOICES = ("everything", "medium", "quiet")
 
 
 def _send(msg: dict, expect_reply: bool = False):
-    from . import client  # local import so tests can patch sonari.client.send
+    from .. import client  # local import so tests can patch sonari.client.send
     return client.send(msg, expect_reply=expect_reply)
 
 
@@ -209,7 +209,7 @@ def doctor() -> list:
         results.append(("SONARI_DIR writable", False, f"error: {exc}"))
 
     try:
-        from . import client
+        from .. import client
         reply = client.send({"v": PROTOCOL_VERSION, "type": MsgType.PING},
                             expect_reply=True)
         ok = bool(reply) and reply.get("ok") is True
@@ -515,7 +515,7 @@ def _cmd_voices_uninstall(_args) -> int:
 
 
 def _cmd_daemon(_args) -> int:
-    from . import daemon
+    from .. import daemon
     daemon.main()
     return 0
 
@@ -557,12 +557,8 @@ def main(argv: Optional[list] = None) -> int:
     try:
         return args.func(args)
     except OSError as exc:
-        from .client import DaemonNotRunning  # local import; client may not be loaded
+        from ..client import DaemonNotRunning  # local import; client may not be loaded
         if isinstance(exc, DaemonNotRunning):
             print(_daemon_not_running_message(), file=sys.stderr)
             return 1
         raise
-
-
-if __name__ == "__main__":
-    sys.exit(main())
