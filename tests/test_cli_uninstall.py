@@ -32,7 +32,7 @@ def test_uninstall_dispatches_and_cleans_shared_artifacts_preserving_user_files(
          mock.patch.object(cli.paths, "KEYMAP_PATH", keymap), \
          mock.patch.object(cli.paths, "INSTALL_RECORD_PATH", record), \
          mock.patch.object(cli.paths, "APP_DIR", app_dir):
-        rc = cli.uninstall()
+        rc = cli.install.uninstall()
 
     assert rc == 0
     # Backend teardown was dispatched.
@@ -47,7 +47,7 @@ def test_uninstall_dispatches_and_cleans_shared_artifacts_preserving_user_files(
 
 
 def test_uninstall_subcommand_invokes_uninstall():
-    with mock.patch("sonari.cli.uninstall", return_value=0) as un:
+    with mock.patch("sonari.cli.install.uninstall", return_value=0) as un:
         rc = cli.main(["uninstall"])
     un.assert_called_once()
     assert rc == 0
