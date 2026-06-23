@@ -22,6 +22,15 @@ def _basename(cwd) -> "str | None":
     return base or None
 
 
+def _bare_iterm_guid(s: str) -> str:
+    """iTerm2's ITERM_SESSION_ID is 'wNtNpN:GUID'; the scriptable `id of session`
+    is the bare GUID after the last ':'. Return the part after the last ':', else s."""
+    if not s:
+        return ""
+    tail = s.rpartition(":")[2]
+    return tail or s
+
+
 class SessionManager:
     def __init__(self, background_policy: str = "earcon_only") -> None:
         self.background_policy = background_policy
@@ -30,6 +39,7 @@ class SessionManager:
         self._sessions: "dict[str, str | None]" = {}
         self._foreground: "str | None" = None
         self._pinned: "str | None" = None      # None = auto (follow last prompt)
+        self._os_focused_session: "str | None" = None    # session in the OS-focused terminal
         self._identities: "dict[str, Identity]" = {}
 
     def _record(self, session: str, cwd) -> None:
@@ -62,6 +72,8 @@ class SessionManager:
             self._foreground = None
         if self._pinned == session:             # pinned session ended -> auto
             self._pinned = None
+        if self._os_focused_session == session:
+            self._os_focused_session = None
 
     def should_speak(self, session: str) -> bool:
         return self.is_foreground(session)
@@ -102,6 +114,35 @@ class SessionManager:
         self._record(session, cwd)
         self._pinned = None
         self._foreground = session
+
+    def set_os_focus(self, term_program: str = "", tty: str = "",
+                     iterm_session_id: str = "", focused: bool = True) -> None:
+        """Record which terminal currently has OS keyboard focus, resolved to a live
+        session. `focused=False` (or an unresolvable identity) clears it. Match is by
+        NON-EMPTY identity only: tty for Apple_Terminal, bare GUID for iTerm.app. This
+        is the INBOUND focus signal — distinct from focus()/foreground() (the voice)."""
+        if not focused:
+            self._os_focused_session = None
+            return
+        match = None
+        if term_program == "Apple_Terminal" and tty:
+            for sess, ident in self._identities.items():
+                if ident.tty and ident.tty == tty:
+                    match = sess
+                    break
+        elif term_program == "iTerm.app" and iterm_session_id:
+            want = _bare_iterm_guid(iterm_session_id)
+            for sess, ident in self._identities.items():
+                if ident.iterm_session_id and _bare_iterm_guid(ident.iterm_session_id) == want:
+                    match = sess
+                    break
+        self._os_focused_session = match
+
+    def focused_session(self) -> "str | None":
+        """The session whose terminal has OS keyboard focus, iff still registered.
+        Returns None when focus is unknown/unmapped — callers fall back to foreground()."""
+        s = self._os_focused_session
+        return s if (s is not None and s in self._sessions) else None
 
     def pin_toggle(self) -> "tuple[str, str | None]":
         """Toggle the pin against the RAW last-prompt foreground.

@@ -207,3 +207,60 @@ def test_focus_records_cwd_folder():
     sm = SessionManager()
     sm.focus("b", cwd="/work/backend")
     assert sm.folder("b") == "backend"
+
+
+# --- OS focus tracking (focus-aware navigation) ---------------------------
+
+
+def test_os_focus_starts_none():
+    sm = SessionManager()
+    assert sm.focused_session() is None
+
+
+def test_os_focus_resolves_terminal_by_tty():
+    sm = SessionManager()
+    sm.register("a"); sm.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
+    sm.register("b"); sm.set_identity("b", Identity(term_program="Apple_Terminal", tty="/dev/ttys002"))
+    sm.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys002")
+    assert sm.focused_session() == "b"
+
+
+def test_os_focus_empty_tty_matches_nothing():
+    sm = SessionManager()
+    sm.register("a"); sm.set_identity("a", Identity(term_program="Apple_Terminal", tty=""))
+    sm.set_os_focus(term_program="Apple_Terminal", tty="")
+    assert sm.focused_session() is None
+
+
+def test_os_focus_no_match_returns_none():
+    sm = SessionManager()
+    sm.register("a"); sm.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
+    sm.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys999")
+    assert sm.focused_session() is None
+
+
+def test_os_focus_false_clears():
+    sm = SessionManager()
+    sm.register("a"); sm.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
+    sm.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys001")
+    assert sm.focused_session() == "a"
+    sm.set_os_focus(focused=False)
+    assert sm.focused_session() is None
+
+
+def test_os_focus_resolves_iterm_by_bare_guid():
+    sm = SessionManager()
+    sm.register("a")
+    sm.set_identity("a", Identity(term_program="iTerm.app", iterm_session_id="w0t1p2:ABCD-1234"))
+    # watcher sends the BARE guid from `id of current session`
+    sm.set_os_focus(term_program="iTerm.app", iterm_session_id="ABCD-1234")
+    assert sm.focused_session() == "a"
+
+
+def test_focused_session_none_after_unregister():
+    sm = SessionManager()
+    sm.register("a"); sm.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
+    sm.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys001")
+    assert sm.focused_session() == "a"
+    sm.unregister("a")
+    assert sm.focused_session() is None
