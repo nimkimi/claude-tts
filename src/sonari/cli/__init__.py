@@ -37,14 +37,23 @@ def _send(msg: dict, expect_reply: bool = False):
 
 
 def _build_raise_helper(raise_backend) -> None:
-    """Build the sonari-raise helper. macOS asks for Automation permission the
-    first time the daemon raises a window — a one-time, per-terminal dialog with
-    a safe voice fallback — so we just note it rather than trying to pre-empt it."""
+    """Build the sonari-raise helper. macOS asks for Automation permission the first
+    time it controls a window - one-time, per app, with a safe voice fallback. Editing
+    the helper changes its cdhash and DROPS the grant, so on a recompile we tell the
+    user to re-allow it (focus-follow AND focus-aware navigation both depend on it)."""
+    from sonari import paths
     ok, detail = raise_backend.build()
     print("focus-follow helper: {0}".format(detail))
-    if ok:
+    if not ok:
+        return
+    recompiled = (detail == str(paths.RAISE_BIN_PATH))
+    if recompiled:
+        print("focus-follow + focus-aware navigation: macOS will ask to re-allow "
+              "'sonari-raise' to control Terminal/iTerm2 - click Allow (the same "
+              "one-time grant).")
+    else:
         print("focus-follow: the first time you jump into a Terminal or iTerm2 "
-              "window, macOS will ask to allow 'sonari-raise' to control it — "
+              "window, macOS will ask to allow 'sonari-raise' to control it - "
               "click Allow. One-time, per app.")
 
 
