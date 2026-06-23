@@ -34,6 +34,25 @@ class ProseAssembler:
         self._fence_lines: list[str] = []
         self._fence_opened_line = False  # have we consumed the opening info-string line?
 
+    def has_pending(self) -> bool:
+        """True while the current message block still holds UNSPOKEN streamed text:
+        a partial sentence / paragraph tail committed to `_buf` but not yet emitted
+        as a chunk, an unconsumed raw tail in `_pending`, or an open code fence whose
+        one-line summary hasn't been emitted. Mirrors `_flush_prose`: only the
+        not-yet-emitted remainder of `_buf` counts — already-spoken text retained in
+        `_buf` for paragraph-straddle handling (tracked by `_emitted`) does NOT, so a
+        deliberate session switch after the current sentence was spoken is not blocked.
+        Used to keep the voice with a session whose reply is still streaming even when
+        its queue has momentarily drained, so a background prompt can't seize the voice
+        at the leading edge of a reply (#65)."""
+        if self._in_fence or self._pending.strip():
+            return True
+        if not self._buf:
+            return False
+        cleaned = clean_markdown(self._buf)
+        start = min(self._emitted, len(cleaned))
+        return len(cleaned[start:].strip()) > 1
+
     def feed(self, delta: str, index: int, final: bool) -> list[str]:
         out: list[str] = []
         if index in self._seen:

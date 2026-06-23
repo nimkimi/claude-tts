@@ -100,16 +100,73 @@ def test_session_end_unregisters():
 
 
 # ---------------------------------------------------------------------------
-# Task 5: Cut-on-switch (new prompt)
+# Task 5 / #65: a background session's prompt must not seize the voice from an
+# ACTIVELY-SPEAKING different session. Cross-session voice ownership changes only
+# on an explicit jump/nav, or when the voice is idle. Cut-on-switch is now
+# same-session only.
 # ---------------------------------------------------------------------------
 
-def test_new_prompt_cuts_a_different_sessions_current_utterance():
+def test_new_prompt_does_not_steal_an_actively_speaking_session():
+    # #65: B's background re-invocation (UserPromptSubmit -> SET_FOREGROUND + FLUSH,
+    # as a /loop tick or a background-task completion fires) must NOT seize the voice
+    # while A is mid-utterance.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     daemon._current_item = SpeechItem(id=1, session="a", kind="prose",
                                       text="long answer.", is_decision=False)
     daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "b", cwd="/x/b"))
     daemon.handle_message(_msg(MsgType.FLUSH, "b"))
-    assert speaker.cancels == 1                          # a's sentence cut
+    assert sessions.foreground() == "a"                 # voice unchanged
+    assert speaker.cancels == 0                          # a not cut
+
+def test_new_prompt_does_not_steal_when_other_session_has_queued_backlog():
+    # A is between utterances (nothing in flight) but still has backlog queued;
+    # B's prompt must not abandon it by switching the voice mid-turn.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    _seed(daemon, "a", 3)
+    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "b", cwd="/x/b"))
+    daemon.handle_message(_msg(MsgType.FLUSH, "b"))
+    assert sessions.foreground() == "a"
+    assert len(stream_queue(daemon, "a")) == 3           # backlog preserved
+
+def test_new_prompt_does_not_steal_while_a_partial_sentence_is_streaming():
+    # Leading edge / interchunk gap: A has streamed a partial sentence (no
+    # terminator, message block still open), so its text sits in the assembler —
+    # not yet in the queue or prose buffer. A is mid-reply; B must not seize the
+    # voice (else A's continuing reply goes silent on the wrong stream).
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon.handle_message(_msg(MsgType.PROSE, "a",
+                               delta="I am still typing this", index=0, final=False))
+    assert len(stream_queue(daemon, "a")) == 0           # partial: nothing queued yet
+    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "b", cwd="/x/b"))
+    assert sessions.foreground() == "a"
+
+def test_new_prompt_takes_voice_when_idle():
+    # When nothing is being spoken, a prompt in B legitimately becomes foreground
+    # (today's behavior preserved — the hijack only matters mid-speech).
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "b", cwd="/x/b"))
+    assert sessions.foreground() == "b"
+
+def test_new_prompt_records_a_blocked_background_sessions_folder():
+    # Even when it can't take the voice, B's folder must be recorded so a later
+    # jump-to-waiting can announce it.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon._current_item = SpeechItem(id=1, session="a", kind="prose",
+                                      text="answer.", is_decision=False)
+    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "b", cwd="/x/backend"))
+    assert sessions.folder("b") == "backend"
+
+def test_session_start_does_not_steal_an_actively_speaking_session(monkeypatch):
+    # SESSION_START (a new session, or a resume/clear/compact of a background one)
+    # routes through the same gate: starting while another session is mid-utterance
+    # must not seize the voice either. It is still registered (folder recorded).
+    monkeypatch.setattr(lifecycle, "_setup_health", lambda v: ("ok", None))
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
+    daemon._current_item = SpeechItem(id=1, session="a", kind="prose",
+                                      text="answer.", is_decision=False)
+    daemon.handle_message(_msg(MsgType.SESSION_START, "b", cwd="/x/backend"))
+    assert sessions.foreground() == "a"          # voice unchanged
+    assert sessions.folder("b") == "backend"     # but b is registered for a later jump
 
 def test_new_prompt_does_not_cut_when_pinned_elsewhere():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
