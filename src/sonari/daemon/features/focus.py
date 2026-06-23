@@ -20,6 +20,19 @@ def _waiting_target(ctx, exclude):
     return ordered[0] if ordered else None
 
 
+@handler(MsgType.OS_FOCUS)
+def on_os_focus(ctx, msg):
+    """Inbound OS-focus signal from the focus-watcher. Session-less: reads the front
+    terminal's identity off the message and resolves it to a session. Fire-and-forget."""
+    ctx.host.sessions.set_os_focus(
+        term_program=msg.get("term_program", ""),
+        tty=msg.get("tty", ""),
+        iterm_session_id=msg.get("iterm_session_id", ""),
+        focused=msg.get("focused", True),
+    )
+    return None
+
+
 @handler(MsgType.JUMP_WAITING)
 def on_jump_waiting(ctx, msg):
     fg = ctx.host.sessions.foreground()
