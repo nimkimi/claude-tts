@@ -90,6 +90,67 @@ func sendMessage(_ message: String) {
     _ = line.withCString { write(fd, $0, strlen($0)) }
 }
 
+// --- Focus-watcher: report which terminal (tty / iTerm id) has OS keyboard focus.
+// Cheap NSWorkspace gate (no permission); the Apple-Event read is delegated to
+// sonari-raise (reuses its Automation grant) on a background queue so the slow read
+// never blocks the hotkey run loop. Sends only on change. ---
+let terminalBundles: [String: String] = [
+    "com.apple.Terminal": "Apple_Terminal",
+    "com.googlecode.iterm2": "iTerm.app",
+]
+let focusQueue = DispatchQueue(label: "sonari.focuswatch")
+var lastFocusLine: String? = nil   // touched only on focusQueue
+
+func raiseBinPath() -> String {
+    return (sonariDir() as NSString).appendingPathComponent("sonari-raise")
+}
+
+// Run `sonari-raise <arg>`, return trimmed stdout, or nil on non-zero/failure.
+func readFront(_ arg: String) -> String? {
+    let bin = raiseBinPath()
+    guard FileManager.default.isExecutableFile(atPath: bin) else { return nil }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: bin)
+    p.arguments = [arg]
+    let pipe = Pipe()
+    p.standardOutput = pipe
+    p.standardError = FileHandle.nullDevice
+    do { try p.run() } catch { return nil }
+    p.waitUntilExit()
+    if p.terminationStatus != 0 { return nil }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    let s = String(data: data, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return s.isEmpty ? nil : s
+}
+
+func jsonLine(_ obj: [String: Any]) -> String? {
+    guard let d = try? JSONSerialization.data(withJSONObject: obj) else { return nil }
+    return String(data: d, encoding: .utf8)
+}
+
+// Read frontmost app on the main thread (AppKit), then do the slow read off-thread.
+func pollFocus() {
+    let bundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+    let term = terminalBundles[bundle]
+    focusQueue.async {
+        var msg: [String: Any]
+        if term == "Apple_Terminal", let tty = readFront("--front-tty") {
+            msg = ["type": "os_focus", "term_program": "Apple_Terminal", "tty": tty]
+        } else if term == "iTerm.app", let gid = readFront("--front-iterm") {
+            msg = ["type": "os_focus", "term_program": "iTerm.app", "iterm_session_id": gid]
+        } else if term == nil {
+            msg = ["type": "os_focus", "focused": false]
+        } else {
+            return   // terminal frontmost but read failed -> keep last state (stale-safe)
+        }
+        guard let line = jsonLine(msg) else { return }
+        if line == lastFocusLine { return }     // change-detection: no idle traffic
+        lastFocusLine = line
+        sendMessage(line)
+    }
+}
+
 // Index entries by their hotkey id so the handler can look up the message.
 var entriesByID: [UInt32: HotkeyEntry] = [:]
 
@@ -163,4 +224,14 @@ FileHandle.standardError.write(
 // 3. Run the Carbon event loop headlessly (no Dock icon).
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+
+// Focus-watcher: app-activation events + a light poll (catches window/tab switches
+// WITHIN a terminal app, which fire no NSWorkspace notification).
+NSWorkspace.shared.notificationCenter.addObserver(
+    forName: NSWorkspace.didActivateApplicationNotification,
+    object: nil, queue: .main) { _ in pollFocus() }
+let focusTimer = Timer(timeInterval: 0.5, repeats: true) { _ in pollFocus() }
+RunLoop.main.add(focusTimer, forMode: .common)
+pollFocus()   // report initial focus
+
 app.run()
