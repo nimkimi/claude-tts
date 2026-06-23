@@ -77,6 +77,12 @@ def on_flush(ctx, msg):
     # immediately instead of finishing the old session's sentence (§4.2
     # cut-on-switch). SESSION_START sends no FLUSH, so a bare new session
     # never cuts.
+    # NOTE: since #65 gated on_set_foreground, a *background* prompt can no longer
+    # make foreground() == its own session while another session is speaking, so the
+    # cross-session disjunct is now effectively dead for background re-invocations;
+    # the same-session disjunct carries all live cut behavior. Retained (not removed)
+    # to stay correct for any future explicit-switch path that FLUSHes its own
+    # already-foreground session.
     if cur is not None and (cur.session == session
                             or ctx.host.sessions.foreground() == session):
         ctx.host.speaker.cancel()

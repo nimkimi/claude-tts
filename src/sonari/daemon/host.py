@@ -138,7 +138,8 @@ class SpeechDaemon:
         fg = self.sessions.foreground()
         if fg is not None and fg != session:
             st = self._state._streams.get(fg)
-            if st is not None and (len(st.queue) > 0 or len(st.prose_buffer) > 0):
+            if st is not None and (len(st.queue) > 0 or len(st.prose_buffer) > 0
+                                   or st.assembler.has_pending()):
                 return True                   # the voice owner still has speech to deliver
         return False
 

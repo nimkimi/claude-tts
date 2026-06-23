@@ -228,9 +228,11 @@ def test_background_reinvocation_does_not_hijack_foreground_voice():
     })
     feed_event(daemon, "Stop", {"session_id": "B"})
 
-    # Voice ownership unchanged: still A, and A was never cut.
+    # Voice ownership unchanged: still A. (Cut-prevention with a genuinely in-flight
+    # utterance is proven at the unit level by
+    # test_new_prompt_does_not_steal_an_actively_speaking_session — here nothing has
+    # been drained yet, so _current_item is None and a cancel assertion would be vacuous.)
     assert daemon.sessions.foreground() == "A"
-    assert speaker.cancelled == 0
 
     # Draining the voice plays A's whole reply in order — not B's completion.
     drain_queue(daemon, speaker)

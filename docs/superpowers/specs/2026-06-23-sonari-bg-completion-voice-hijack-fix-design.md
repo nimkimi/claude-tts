@@ -54,7 +54,12 @@ voice-owner session (`foreground()`, pin-aware) has any of:
 
 - an in-flight utterance (`_current_item.session` is that session), **or**
 - queued backlog (`len(stream.queue) > 0`), **or**
-- buffered, not-yet-flushed prose (`len(stream.prose_buffer) > 0`).
+- buffered, not-yet-flushed prose (`len(stream.prose_buffer) > 0`), **or**
+- unspoken streamed prose still held in the assembler — a partial sentence at the
+  leading edge or an interchunk gap of an open message block, before it is emitted
+  as a queueable chunk (`assembler.has_pending()`). Without this, a background
+  prompt could seize the voice in the window between a session's prompt and its
+  first complete sentence, and its continuing reply would go silent.
 
 When the voice is busy elsewhere, the incoming session is still **registered**
 (folder/cwd recorded) so it accumulates in its own stream, fires the existing
@@ -67,10 +72,21 @@ unchanged from today.
 - `host._voice_busy_elsewhere(session) -> bool` — the predicate above. Reads
   `_current_item` / `_streams` / `sessions.foreground()` under the daemon lock
   (the same lock the speak loop holds for pop+claim → race-free; no new locking).
+- `assembler.has_pending() -> bool` — accessor on `ProseAssembler` for the fourth
+  "busy" dimension. Mirrors `_flush_prose`: true while unspoken streamed text is
+  held (the not-yet-emitted remainder of `_buf` — accounting for `_emitted` so
+  already-spoken text retained for paragraph-straddle handling does NOT count —
+  plus `_pending` / an open code fence). Cleared on `final` / FLUSH.
 - `on_set_foreground` — calls `sessions.set_foreground(...)` when
   `not _voice_busy_elsewhere(session)`, else `sessions.register(...)` (record the
-  folder without taking the voice). The `SESSION_START` branch (register /
-  set_identity / setup-guidance) is unchanged.
+  folder without taking the voice). `on_set_foreground` handles **both**
+  `SET_FOREGROUND` and `SESSION_START`, and the gate runs before the
+  SESSION_START-only block — so a `SESSION_START` arriving while another session is
+  actively speaking is also gated and does **not** take the voice (correct: same
+  bug class — a background session's resume/clear/compact must not steal either).
+  The SESSION_START-only work (register / set_identity / setup-guidance) is
+  unchanged; only the foreground acquisition is now gated, symmetric with
+  `SET_FOREGROUND`.
 
 ### 4.2 What does NOT change
 
@@ -97,6 +113,10 @@ user action (jump / nav / OS-focus raise) or when the voice is idle.
   A, `cancels == 0`.
 - **Unit:** `SET_FOREGROUND(b)` while A has **queued backlog** (nothing in-flight)
   → foreground stays A.
+- **Unit:** `SET_FOREGROUND(b)` while A is **streaming a partial sentence** (held in
+  the assembler, nothing queued yet) → foreground stays A.
+- **Unit:** `SESSION_START(b)` while A's item is **in-flight** → foreground stays A,
+  b registered (the SESSION_START path shares the gate).
 - **Unit:** `SET_FOREGROUND(b)` while A is **idle/empty** → B becomes foreground
   (today's behavior preserved).
 - **Rewrite:** `test_new_prompt_cuts_a_different_sessions_current_utterance` to the
@@ -107,8 +127,10 @@ user action (jump / nav / OS-focus raise) or when the voice is idle.
 
 ## 7. Out of scope (filed separately)
 
-- **Pause-resume sibling bug:** a background session's `FLUSH` runs
-  `_paused.clear()`, so a background tick can resume a *paused* foreground voice.
-  Same root-cause family ("a background prompt event mutating foreground voice
-  state"), distinct symptom not named in #65 → separate follow-up issue.
+- **Pause-resume sibling bug (documented here; to be filed as a separate issue):**
+  a background session's `FLUSH` runs `_paused.clear()` unconditionally
+  (`prose.py` `on_flush`), so a background tick can resume a *paused* foreground
+  voice. Same root-cause family ("a background prompt event mutating foreground
+  voice state"), distinct symptom not named in #65. Suggested fix: clear `_paused`
+  only when `foreground() == session`. Not fixed here to keep the #65 diff tight.
 - OS-focus-gating of the voice; making the voice follow window focus.
