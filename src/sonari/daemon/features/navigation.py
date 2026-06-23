@@ -100,12 +100,25 @@ def _nav_response(ctx, session: str, direction: str) -> None:
 
 @handler(MsgType.NAV)
 def on_nav(ctx, msg):
-    fg = ctx.host.sessions.foreground()
-    if fg is None:
+    sessions = ctx.host.sessions
+    target = sessions.focused_session() or sessions.foreground()
+    if target is None:
         return None
+    crossed = target != sessions.foreground()     # compute BEFORE focus() moves it
+    if crossed:
+        sessions.focus(target)                     # move the voice to the navigated session
     to = msg.get("to", "prev")
     if to in ("prev_response", "next_response"):
-        _nav_response(ctx, fg, to)
+        _nav_response(ctx, target, to)             # both clear target queue, then enqueue transcript
     else:
-        _nav(ctx, fg, to)
+        _nav(ctx, target, to)
+    if crossed:
+        # Lead with a short folder cue so an eyes-free user knows the voice jumped.
+        # Enqueue AFTER _nav (its queue.clear() would drop an earlier enqueue); at_front
+        # so it still plays first. names_session claims the session, suppressing the
+        # auto folder-prefix on the following item (no double-announce) — mirrors on_jump_waiting.
+        folder = sessions.folder(target)
+        if folder:
+            ctx.host._enqueue(target, "prose", folder + ".", False,
+                              mute_exempt=True, at_front=True, names_session=True)
     return None
