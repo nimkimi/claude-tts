@@ -77,6 +77,7 @@ def test_msgtype_has_every_constant_with_exact_values():
         "PING": "ping",
         "REREAD_OPTIONS": "reread_options",
         "CYCLE_VERBOSITY": "cycle_verbosity",
+        "OS_FOCUS": "os_focus",
     }
     for name, value in expected.items():
         assert hasattr(MsgType, name), f"MsgType missing {name}"
@@ -117,6 +118,7 @@ def test_msgtype_defines_no_extra_string_constants():
         "REREAD_OPTIONS": "reread_options",
         "CYCLE_VERBOSITY": "cycle_verbosity",
         "RELOAD_KEYMAP": "reload_keymap",
+        "OS_FOCUS": "os_focus",
     }
     assert actual == expected
 

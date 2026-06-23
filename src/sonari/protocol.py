@@ -34,6 +34,7 @@ class MsgType:
     REREAD_OPTIONS = "reread_options"
     CYCLE_VERBOSITY = "cycle_verbosity"
     RELOAD_KEYMAP = "reload_keymap"   # re-read keymap.json + re-register hotkeys
+    OS_FOCUS = "os_focus"   # focus-watcher: which terminal (tty / iterm id) has OS keyboard focus
 
 
 def encode(msg: dict) -> bytes:
