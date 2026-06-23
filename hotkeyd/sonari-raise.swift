@@ -15,6 +15,12 @@
 //                        Exit: 0 raised, 1 not-found/missed, 3 denied, 4 other.
 //   sonari-raise --check-iterm  same as --check but for iTerm2's grant (separate
 //                        from Terminal's). Exit: 0 granted, 3 denied, 4 other.
+//   sonari-raise --front-tty    read the tty of Terminal's front window's selected
+//                        tab (the OS-focused tab). Prints e.g. /dev/ttys003 to
+//                        stdout + exit 0; non-zero + no stdout on failure.
+//   sonari-raise --front-iterm  read the bare GUID of iTerm2's current session
+//                        (matches the tail of ITERM_SESSION_ID after the last ':').
+//                        Prints the GUID to stdout + exit 0; non-zero on failure.
 //
 // AppleScript recipe is the empirically proven one (spec §3): match by tty,
 // `set selected` + `set index ... to 1` + `activate`. NEVER `set frontmost of
@@ -47,6 +53,28 @@ if args.count >= 2 && args[1] == "--check" {
 if args.count >= 2 && args[1] == "--check-iterm" {
     let (_, code) = runAppleScript("tell application \"iTerm2\" to count windows")
     exit(code)
+}
+
+if args.count >= 2 && args[1] == "--front-tty" {
+    // Read the selected tab's tty of Terminal's front window (the OS-focused tab).
+    let (out, code) = runAppleScript(
+        "tell application \"Terminal\" to get tty of selected tab of front window")
+    if code != 0 { exit(code) }
+    let tty = out.trimmingCharacters(in: .whitespacesAndNewlines)
+    if tty.isEmpty { exit(1) }
+    print(tty)
+    exit(0)
+}
+
+if args.count >= 2 && args[1] == "--front-iterm" {
+    // Read the bare GUID of iTerm2's current session (matches the captured ITERM_SESSION_ID tail).
+    let (out, code) = runAppleScript(
+        "tell application \"iTerm2\" to get id of current session of current tab of current window")
+    if code != 0 { exit(code) }
+    let gid = out.trimmingCharacters(in: .whitespacesAndNewlines)
+    if gid.isEmpty { exit(1) }
+    print(gid)
+    exit(0)
 }
 
 // --iterm <id>: raise the iTerm2 session matching the bare GUID of <id>. Dispatched
@@ -108,7 +136,7 @@ if args.count >= 2 && args[1] == "--iterm" {
 
 guard args.count >= 2 else {
     FileHandle.standardError.write(
-        "usage: sonari-raise <tty> | --check | --iterm <session-id> | --check-iterm\n"
+        "usage: sonari-raise <tty> | --check | --iterm <session-id> | --check-iterm | --front-tty | --front-iterm\n"
             .data(using: .utf8)!)
     exit(2)
 }
