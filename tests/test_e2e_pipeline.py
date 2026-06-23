@@ -10,7 +10,7 @@ No real audio is ever produced: the Speaker is replaced by a recorder.
 """
 import pytest
 from sonari.hooks_entry import handle_event
-from sonari.protocol import PROTOCOL_VERSION
+from sonari.protocol import PROTOCOL_VERSION, MsgType
 from sonari.sessions import SessionManager
 from sonari.daemon import SpeechDaemon
 from sonari.daemon.features import lifecycle
@@ -198,3 +198,54 @@ def test_background_session_is_earcon_only():
     # Stage 3: a "waiting" earcon now also fires when background prose first
     # reaches its queue, followed by the "choice" decision earcon.
     assert log == [("earcon", "waiting"), ("earcon", "choice")]
+
+
+def test_background_reinvocation_does_not_hijack_foreground_voice():
+    """#65: while A is mid-reply, a *different* session B's background re-invocation
+    (the agent/workflow completion or /loop tick fires UserPromptSubmit ->
+    SET_FOREGROUND + FLUSH) must NOT seize the voice. A's reply finishes
+    uninterrupted; B accumulates in its own stream as a jump-to-waiting target;
+    foreground stays A until an explicit jump."""
+    daemon, speaker, log = make_daemon()
+
+    feed_event(daemon, "SessionStart", {"session_id": "A"})
+    # A streams a long reply -> three sentences queue in A's stream, NOT yet drained
+    # (this is A "mid-speech": it still has backlog to deliver).
+    feed_event(daemon, "MessageDisplay", {
+        "session_id": "A",
+        "delta": "First part of the answer. Second part of the answer. Third part.",
+        "index": 0,
+        "final": True,
+    })
+    # Background session B re-invokes (its agent finished / a loop ticked): a
+    # programmatic UserPromptSubmit, then its completion output, then turn end.
+    feed_event(daemon, "UserPromptSubmit", {"session_id": "B"})
+    feed_event(daemon, "MessageDisplay", {
+        "session_id": "B",
+        "delta": "Background result is ready.",
+        "index": 0,
+        "final": True,
+    })
+    feed_event(daemon, "Stop", {"session_id": "B"})
+
+    # Voice ownership unchanged: still A, and A was never cut.
+    assert daemon.sessions.foreground() == "A"
+    assert speaker.cancelled == 0
+
+    # Draining the voice plays A's whole reply in order — not B's completion.
+    drain_queue(daemon, speaker)
+    spoken = [text for kind, text in log if kind == "text"]
+    assert spoken == [
+        "First part of the answer.",
+        "Second part of the answer.",
+        "Third part.",
+    ]
+    # B's completion accumulated in B's OWN stream (a waiting target), not lost.
+    assert [i.text for i in daemon._stream("B").queue._items] == [
+        "Background result is ready.",
+    ]
+
+    # And an EXPLICIT jump reaches B — the contract's sanctioned voice switch.
+    daemon.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.JUMP_WAITING,
+                           "session": "A"})
+    assert daemon.sessions.foreground() == "B"

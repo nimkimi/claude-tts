@@ -58,9 +58,17 @@ def _maybe_guide_setup(ctx, session: str, plugin_version: str) -> None:
 def on_set_foreground(ctx, msg):
     t = msg.get("type")          # KEEP LOCAL — there is NO ctx.type
     session = ctx.session
-    ctx.host.sessions.set_foreground(session, cwd=msg.get("cwd"))
+    cwd = msg.get("cwd")
+    # #65: a background session's prompt event must not seize the voice from a
+    # different session that is actively speaking. Take the voice only when it is
+    # idle (or already ours); otherwise just register — record the folder and
+    # become a jump-to-waiting target while our prose accumulates in our own stream.
+    if ctx.host._voice_busy_elsewhere(session):
+        ctx.host.sessions.register(session, cwd=cwd)
+    else:
+        ctx.host.sessions.set_foreground(session, cwd=cwd)
     if t == MsgType.SESSION_START:
-        ctx.host.sessions.register(session, cwd=msg.get("cwd"))
+        ctx.host.sessions.register(session, cwd=cwd)
         from sonari.sessions import Identity
         ctx.host.sessions.set_identity(session, Identity(
             term_program=msg.get("term_program", ""),

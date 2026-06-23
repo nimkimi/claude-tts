@@ -123,6 +123,25 @@ class SpeechDaemon:
             self._state._streams[session] = s
         return s
 
+    def _voice_busy_elsewhere(self, session: str) -> bool:
+        """True when a DIFFERENT session currently owns active speech — an in-flight
+        utterance, queued backlog, or buffered (not-yet-flushed) prose. A background
+        session's prompt event (a /loop tick or a background-task completion firing
+        UserPromptSubmit -> SET_FOREGROUND) must NOT seize the voice from such a
+        session (#65); it accumulates as a jump-to-waiting target instead. When the
+        voice is idle — or `session` already owns it — the switch is harmless and
+        proceeds as before. Read under self._lock (the handler path holds it), so the
+        snapshot is consistent with the speak loop's pop+claim."""
+        cur = self._state._current_item
+        if cur is not None and cur.session != session:
+            return True                       # an utterance from another session is in flight
+        fg = self.sessions.foreground()
+        if fg is not None and fg != session:
+            st = self._state._streams.get(fg)
+            if st is not None and (len(st.queue) > 0 or len(st.prose_buffer) > 0):
+                return True                   # the voice owner still has speech to deliver
+        return False
+
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
                  entry=None, mute_exempt: bool = False,
                  pause_exempt: bool = False, at_front: bool = False,
