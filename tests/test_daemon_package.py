@@ -112,14 +112,14 @@ def test_control_handlers_registered_in_features_control():
 
 
 def test_playback_handlers_registered_in_features_playback():
-    # Proves @handler decorators in features/playback.py ran and the six
+    # Proves @handler decorators in features/playback.py ran and the five
     # keys resolve to the feature module, not the old host thunks.
     from sonari.daemon import registry
     from sonari.protocol import MsgType
 
     expected_module = "sonari.daemon.features.playback"
     for key in (MsgType.STOP, MsgType.SKIP, MsgType.STOP_SESSION,
-                MsgType.STOP_ALL, MsgType.PIN_TOGGLE, MsgType.JUMP_DECISION):
+                MsgType.STOP_ALL, MsgType.JUMP_DECISION):
         fn = registry.HANDLERS[key]
         assert fn.__module__ == expected_module, (
             f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"

@@ -49,7 +49,7 @@ def test_action_messages_faster_has_delta_25():
 def test_default_keymap_macos_uses_ctrl_cmd(mac):
     d = keymap.default_keymap()
     assert set(d.keys()) == {"nav_prev", "nav_next", "nav_first", "nav_last",
-                             "stop_session", "stop_all", "pin_toggle", "jump_waiting",
+                             "stop_session", "stop_all", "jump_waiting",
                              "nav_prev_response", "nav_next_response"}
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
     assert d["stop_session"]["key"] == "s" and d["stop_all"]["key"] == "m"
@@ -78,7 +78,7 @@ def test_default_keymap_binds_only_nav_pause_mute():
     # The always-bound core is present on every platform; faster/slower ship UNBOUND.
     km = keymap.default_keymap()
     assert {"nav_prev", "nav_next", "nav_first", "nav_last",
-            "stop_session", "stop_all", "pin_toggle", "jump_waiting"} <= set(km.keys())
+            "stop_session", "stop_all", "jump_waiting"} <= set(km.keys())
     assert set(km.keys()) <= set(keymap.ACTION_MESSAGES.keys())
     assert "faster" in keymap.ACTION_MESSAGES and "faster" not in km
     assert "slower" in keymap.ACTION_MESSAGES and "slower" not in km
@@ -207,21 +207,6 @@ def test_write_resolved_no_tmp_leftover(monkeypatch, tmp_path):
     assert list(tmp_path.glob("*.tmp")) == []
 
 
-def test_pin_toggle_action_message():
-    from sonari.keymap import ACTION_MESSAGES
-    assert ACTION_MESSAGES["pin_toggle"] == {"type": "pin_toggle"}
-
-
-def test_pin_toggle_default_binding_is_p():
-    from sonari.keymap import default_keymap
-    km = default_keymap()
-    # 'p' = Pin. pause was moved off 'p' to 's' to free it. NOT 'f': the macOS
-    # default chord is Ctrl+Cmd and Ctrl+Cmd+F is the system "Enter Full Screen"
-    # shortcut, which the Carbon hotkeyd would swallow globally.
-    assert km["pin_toggle"]["key"] == "p"
-    assert km["stop_session"]["key"] == "s"     # stop_session no longer collides with pin
-
-
 def test_no_two_default_actions_share_a_key():
     # Default bindings may share a key only when the modifier chord differs
     # (Stage 5: nav_prev/nav_prev_response both use "left" but differ by +Shift).
@@ -229,22 +214,6 @@ def test_no_two_default_actions_share_a_key():
     from sonari.keymap import default_keymap
     chords = [(b["key"], tuple(b["mods"])) for b in default_keymap().values()]
     assert len(chords) == len(set(chords))
-
-
-def test_pin_toggle_resolves_to_its_message():
-    import json
-    from sonari.keymap import resolve_keymap, default_keymap
-    resolved = resolve_keymap(default_keymap())
-    msgs = [json.loads(e["message"]) for e in resolved]
-    assert {"type": "pin_toggle"} in msgs
-
-
-def test_pin_toggle_is_clearable():
-    # an unknown action raises; a known one does not -> proves it is registered
-    from sonari.keymap import resolve_keymap
-    from sonari.platform import get_platform
-    mods = list(get_platform().hotkey.default_mods())
-    resolve_keymap({"pin_toggle": {"key": "", "mods": mods}})   # cleared -> no raise
 
 
 def test_jump_waiting_action_message():

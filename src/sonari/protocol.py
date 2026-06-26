@@ -22,7 +22,6 @@ class MsgType:
     NAV = "nav"          # message-cursor navigation: msg["to"] in next|prev|first|last
     STOP_SESSION = "stop_session"   # ⌃⌘S: toggle a per-session stop (resume-from-spot, sticky)
     STOP_ALL = "stop_all"   # ⌃⌘M: stop EVERY session at once (one-way; return per-session via ⌃⌘S)
-    PIN_TOGGLE = "pin_toggle"   # pin/unpin the voice to the current session (#31)
     JUMP_DECISION = "jump_decision"
     JUMP_WAITING = "jump_waiting"   # switch the voice to a waiting background session
     SET_RATE = "set_rate"

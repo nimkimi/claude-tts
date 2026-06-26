@@ -46,7 +46,7 @@ def on_jump_waiting(ctx, msg):
         else:
             ctx.host.speaker.earcon("error")
         return None
-    # Explicit move: clear any pin, switch the VOICE (not OS focus) to the
+    # Explicit move: switch the VOICE (not OS focus) to the
     # target, cut the current utterance so the switch is immediate, and lead
     # with a spoken folder label. The foreground-driven loop then drains the
     # target's accumulated backlog.

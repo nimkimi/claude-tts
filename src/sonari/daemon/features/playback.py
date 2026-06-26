@@ -81,26 +81,6 @@ def on_stop_all(ctx, msg):
     return None
 
 
-@handler(MsgType.PIN_TOGGLE)
-def on_pin_toggle(ctx, msg):
-    # Pin the voice to the current (last-prompt) session, or unpin it.
-    # The pin overrides "foreground", so a later SET_FOREGROUND from another
-    # session can't steal the voice. Confirmation is mute_exempt so the user
-    # always hears it; the no-session case has nothing to speak through, so
-    # it is an error earcon only.
-    action, folder = ctx.host.sessions.pin_toggle()
-    if action == "none":
-        ctx.host.speaker.earcon("error")
-        return None
-    fg = ctx.host.sessions.foreground()
-    if action == "pinned":
-        text = "Pinned {0}.".format(folder) if folder else "Pinned."
-    else:
-        text = "Auto."
-    ctx.host._enqueue(fg, "prose", text, False, mute_exempt=True,
-                      names_session=(action == "pinned"))
-    return None
-
 
 @handler(MsgType.JUMP_DECISION)
 def on_jump_decision(ctx, msg):

@@ -38,7 +38,6 @@ class SessionManager:
         # list/cycle is stable; membership/`in`/len behave like the old set.
         self._sessions: "dict[str, str | None]" = {}
         self._foreground: "str | None" = None
-        self._pinned: "str | None" = None      # None = auto (follow last prompt)
         self._os_focused_session: "str | None" = None    # session in the OS-focused terminal
         self._identities: "dict[str, Identity]" = {}
 
@@ -54,9 +53,8 @@ class SessionManager:
         self._foreground = session
 
     def foreground(self) -> "str | None":
-        """The session that owns the voice: the pinned one if pinned, else the last
-        session to submit a prompt / start."""
-        return self._pinned if self._pinned is not None else self._foreground
+        """The session that owns the voice: the last session to submit a prompt / start."""
+        return self._foreground
 
     def is_foreground(self, session: str) -> bool:
         fg = self.foreground()
@@ -70,16 +68,11 @@ class SessionManager:
         self._identities.pop(session, None)
         if self._foreground == session:
             self._foreground = None
-        if self._pinned == session:             # pinned session ended -> auto
-            self._pinned = None
         if self._os_focused_session == session:
             self._os_focused_session = None
 
     def should_speak(self, session: str) -> bool:
         return self.is_foreground(session)
-
-    def pinned(self) -> "str | None":
-        return self._pinned
 
     def folder(self, session: str) -> "str | None":
         return self._sessions.get(session)
@@ -109,10 +102,8 @@ class SessionManager:
 
     def focus(self, session: str, cwd=None) -> None:
         """Explicitly move the voice to *session* (the jump-to-waiting hotkey):
-        clear any pin — an explicit jump overrides a pin — and set it foreground.
-        Does NOT re-pin."""
+        set it foreground."""
         self._record(session, cwd)
-        self._pinned = None
         self._foreground = session
 
     def set_os_focus(self, term_program: str = "", tty: str = "",
@@ -144,18 +135,3 @@ class SessionManager:
         s = self._os_focused_session
         return s if (s is not None and s in self._sessions) else None
 
-    def pin_toggle(self) -> "tuple[str, str | None]":
-        """Toggle the pin against the RAW last-prompt foreground.
-
-        - no foreground          -> ("none", None), no change
-        - already pinned to it   -> unpin -> ("unpinned", folder)
-        - otherwise              -> pin it -> ("pinned", folder)
-        """
-        cur = self._foreground
-        if cur is None:
-            return ("none", None)
-        if self._pinned == cur:
-            self._pinned = None
-            return ("unpinned", self._sessions.get(cur))
-        self._pinned = cur
-        return ("pinned", self._sessions.get(cur))
