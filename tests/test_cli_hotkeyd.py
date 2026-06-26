@@ -94,7 +94,7 @@ def test_keymap_subcommand_prints_the_default_bindings(capsys, tmp_path, monkeyp
         assert rc == 0
         out = capsys.readouterr().out
         for action in ("nav_next", "nav_prev", "nav_first", "nav_last",
-                       "stop_session", "mute"):
+                       "stop_session", "stop_all"):
             assert action in out
         # faster/slower are listed too, marked unbound (the keymap lists every action)
         assert "faster" in out and "slower" in out

@@ -21,7 +21,7 @@ from sonari.paths import (
 # import-time OS dispatch). The ONLY sys.platform branch stays in platform/__init__.
 
 # action -> the speechd protocol message it sends. The hotkey-bindable action set
-# is deliberately small: navigation, play/pause, mute, and speech-rate. (stop /
+# is deliberately small: navigation, stop/stop-all, pin, jump, and speech-rate. (stop /
 # skip stay reachable via the CLI; they are just not hotkey actions.)
 ACTION_MESSAGES = {
     # Message-cursor navigation over the current turn (next/prev/first/last item).
@@ -34,7 +34,7 @@ ACTION_MESSAGES = {
     "nav_prev_response": {"type": "nav", "to": "prev_response"},
     "nav_next_response": {"type": "nav", "to": "next_response"},
     "stop_session": {"type": "stop_session"},   # ⌃⌘S: per-session stop/start
-    "mute": {"type": "mute"},       # sticky per-session mute toggle
+    "stop_all": {"type": "stop_all"},   # ⌃⌘M: stop every session
     "pin_toggle": {"type": "pin_toggle"},   # pin/unpin the voice to the current session (#31)
     "jump_waiting": {"type": "jump_waiting"},  # switch voice to a waiting background session
     "faster": {"type": "set_rate", "delta": 25},
@@ -43,12 +43,12 @@ ACTION_MESSAGES = {
 
 # Shared action -> default key. The chord modifiers are platform-defaulted (macOS:
 # Ctrl+Cmd; Windows: Ctrl+Shift+Alt) via the active backend's default_mods().
-# Only navigation + play/pause + mute are bound out of the box; faster/slower are
+# Only navigation + stop/stop-all + pin + jump are bound out of the box; faster/slower are
 # valid actions but ship UNBOUND (blank by default) so the default keymap stays
 # minimal — users add a key for them in keymap.json if they want one.
 _DEFAULT_KEYS = {
     "nav_prev": "left", "nav_next": "right", "nav_first": "up", "nav_last": "down",
-    "stop_session": "s", "mute": "m", "pin_toggle": "p", "jump_waiting": "j",
+    "stop_session": "s", "stop_all": "m", "pin_toggle": "p", "jump_waiting": "j",
 }
 
 

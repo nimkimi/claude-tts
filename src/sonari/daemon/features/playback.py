@@ -62,24 +62,22 @@ def on_stop_session(ctx, msg):
     return None
 
 
-@handler(MsgType.MUTE)
-def on_mute(ctx, msg):
-    # Toggle a sticky per-session mute. Earcons still fire (alerts), and the
-    # "muted"/"unmuted" confirmation is spoken (the mute-on case is exempt).
+@handler(MsgType.STOP_ALL)
+def on_stop_all(ctx, msg):
+    # Stop EVERY session at once (the master quiet key, ⌃⌘M). One-way: bring each
+    # session back individually with ⌃⌘S. Cancels any in-flight utterance; the
+    # speak loop re-queues it at the front of its own (now stopped) stream.
+    for st in ctx.host._streams.values():
+        st.stopped = True
+    if ctx.host._current_item is not None:
+        ctx.host.speaker.cancel()
     fg = ctx.host.sessions.foreground()
-    if fg is None:
-        return None
-    st = ctx.host._stream(fg)
-    if st.muted:
-        st.muted = False
-        ctx.host._enqueue(fg, "prose", "Session unmuted.", False)
-    else:
-        st.muted = True
-        ctx.host._drop_pending(st.queue.clear())
-        cur = ctx.host._current_item
-        if cur is not None and cur.session == fg:
-            ctx.host.speaker.cancel()
-        ctx.host._enqueue(fg, "prose", "Session muted.", False, mute_exempt=True)
+    if fg is not None:
+        # Ensure the foreground stream is stopped even if it had no stream yet, then
+        # voice the confirmation (pause_exempt -> the held branch speaks it).
+        ctx.host._stream(fg).stopped = True
+        ctx.host._enqueue(fg, "prose", "All stopped.", False,
+                          mute_exempt=True, pause_exempt=True)
     return None
 
 

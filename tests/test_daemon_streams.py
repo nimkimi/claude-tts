@@ -12,25 +12,6 @@ def _prose(daemon, session, text, index=0, final=False):
     daemon.handle_message(_msg(MsgType.PROSE, session, delta=text, index=index, final=final))
 
 
-def test_flush_resets_playback_but_keeps_mute():
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
-    # mute A (sticky) and give it open/streaming + buffered state
-    daemon.handle_message(_msg(MsgType.MUTE, "A"))
-    # Raise minqueue so prose buffer accumulates instead of immediately draining
-    config["minqueue"] = 5
-    daemon.handle_message(_msg(MsgType.PROSE, "A", delta="hello there. ", index=0, final=False))
-    st = daemon._stream("A")
-    assert st.muted is True
-    # Verify buffer is non-empty before FLUSH (so post-FLUSH == [] actually tests reset)
-    assert st.prose_buffer != []
-
-    daemon.handle_message(_msg(MsgType.FLUSH, "A"))
-
-    st = daemon._stream("A")
-    assert st.prose_buffer == []
-    assert st.muted is True              # sticky preserved across a new prompt
-
-
 def test_session_end_drops_the_whole_stream():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     daemon.handle_message(_msg(MsgType.PROSE, "A", delta="some text. ", index=0, final=False))
@@ -98,16 +79,6 @@ def test_background_accumulates_then_is_heard_after_switching_foreground():
     assert speaker.spoken == ["beta-1", "beta-2"]    # heard, in order
 
 
-def test_muted_foreground_item_is_dropped_but_exempt_is_spoken():
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    daemon._stream("a").muted = True
-    daemon._enqueue("a", "prose", "silenced", False)
-    daemon._enqueue("a", "prose", "muted-cue", False, mute_exempt=True)
-    _pump_one(daemon)   # drops "silenced"
-    _pump_one(daemon)   # speaks the exempt cue
-    assert speaker.spoken == ["muted-cue"]
-
-
 # --- jump_waiting handler (Task 2) -------------------------------------------
 
 def test_jump_waiting_switches_to_background_and_announces_folder():
@@ -142,9 +113,9 @@ def test_jump_waiting_excludes_current_foreground_backlog():
     assert sessions.foreground() == "a"
     assert queue._items[-1].text == "No session waiting."
 
-def test_jump_waiting_skips_a_muted_background_session():
+def test_jump_waiting_skips_a_stopped_background_session():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    daemon._stream("b").muted = True
+    daemon._stream("b").stopped = True
     _prose(daemon, "b", "secret. ")
     daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
     assert sessions.foreground() == "a"
@@ -172,9 +143,9 @@ def test_foreground_prose_does_not_fire_waiting():
     _prose(daemon, "a", "hello. world. ")
     assert "waiting" not in speaker.earcons
 
-def test_muted_background_does_not_fire_waiting():
+def test_stopped_background_does_not_fire_waiting():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    daemon._stream("b").muted = True
+    daemon._stream("b").stopped = True
     _prose(daemon, "b", "x. y. ")
     assert "waiting" not in speaker.earcons
 

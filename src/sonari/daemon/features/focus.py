@@ -7,13 +7,13 @@ from sonari.daemon.registry import handler
 def _waiting_target(ctx, exclude):
     """The background session jump-to-waiting should switch to, or None.
 
-    Considers only streams with a non-empty, non-muted queue (live backlog —
+    Considers only streams with a non-empty, non-stopped queue (live backlog —
     Stage 3 keys off the queue, not history). A stream holding an unplayed
     decision (choice|plan|permission) ranks ahead of prose-only ones; ties break
     by session insertion order. Excludes *exclude* (the current foreground)."""
     blocked, prose = [], []
     for sess, st in ctx.host._streams.items():          # insertion-ordered
-        if sess == exclude or st.muted or len(st.queue) == 0:
+        if sess == exclude or st.stopped or len(st.queue) == 0:
             continue
         (blocked if st.queue.has_decision() else prose).append(sess)
     ordered = blocked + prose

@@ -277,19 +277,19 @@ def test_stop_resume_requeues_interrupted_utterance():
 
 
 # ---------------------------------------------------------------------------
-# Family: mute (drops speech, unmute resumes)
+# Family: stop-all (⌃⌘M holds every session; only the cue speaks, one-way)
 # ---------------------------------------------------------------------------
 
-def test_mute_drops_speech_secret_never_appears():
+def test_stop_all_holds_speech_only_the_cue_is_spoken():
     daemon, speaker, log, sessions, config = make_net(foreground="fg")
-    daemon.handle_message(msg(MsgType.MUTE, "fg"))
+    # poll_interval=0 so drain() doesn't block when held with no pause-exempt item.
+    daemon._poll_interval = 0
+    daemon.handle_message(msg(MsgType.STOP_ALL, "fg"))
     drain(daemon)
     prose(daemon, "fg", "secret. ", final=False)
     drain(daemon)
-    daemon.handle_message(msg(MsgType.MUTE, "fg"))
-    drain(daemon)
-    # "secret." must never appear; only the mute/unmute confirmation cues are spoken.
-    assert log == [("text", "Session muted."), ("text", "Session unmuted.")]
+    # "secret." must never appear; one-way, so only the "All stopped." cue is spoken.
+    assert log == [("text", "All stopped.")]
 
 
 # ---------------------------------------------------------------------------

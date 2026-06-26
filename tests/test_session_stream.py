@@ -8,7 +8,6 @@ def test_defaults_are_empty_and_unflagged():
     assert s.prose_buffer == []
     assert s.options is None
     assert s.nav_cursor is None
-    assert s.muted is False
     assert s.stopped is False
     assert s.warned_immediate is False
     assert s.guided is False
@@ -22,7 +21,6 @@ def test_reset_for_new_prompt_clears_playback_keeps_sticky():
     s.nav_cursor = 7
     old_assembler = s.assembler
     # sticky state
-    s.muted = True
     s.warned_immediate = True
     s.guided = True
 
@@ -34,7 +32,6 @@ def test_reset_for_new_prompt_clears_playback_keeps_sticky():
     assert s.nav_cursor is None
     assert s.assembler is not old_assembler   # a fresh assembler
     # sticky preserved
-    assert s.muted is True
     assert s.warned_immediate is True
     assert s.guided is True
 

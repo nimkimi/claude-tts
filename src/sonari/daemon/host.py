@@ -193,12 +193,12 @@ class SpeechDaemon:
         st.prose_buffer = []
         for text, entry in buf:
             self._enqueue(session, "prose", text, False, entry=entry)
-        # Background-backlog cue: ONCE per turn, when a NON-foreground, non-muted
+        # Background-backlog cue: ONCE per turn, when a NON-foreground, non-stopped
         # session's prose reaches its (now non-empty) queue. Debounced via the
         # per-stream flag, re-armed only by reset_for_new_prompt (a new prompt =
         # a new turn) — never per sentence. Decisions carry their own alert earcon,
         # so this is prose-only.
-        if (not st.waiting_signaled and not st.muted
+        if (not st.waiting_signaled and not st.stopped
                 and session != self.sessions.foreground()
                 and len(st.queue) > 0):
             self.speaker.earcon("waiting")
@@ -390,18 +390,10 @@ class SpeechDaemon:
             # Capture the speaker's cancel baseline atomically with the claim, so a
             # cancel() arriving during speak() is detected (M2 — the pop->speak gap).
             cancel_epoch = self.speaker.cancel_epoch()
-            ist = self._state._streams.get(item.session) if item is not None else None
-            muted = (item is not None
-                     and ist is not None and ist.muted
-                     and not item.mute_exempt)
             text = None
             # Snapshot before _attributed_text so we can roll back if a stop interrupts.
             prev = self._state._last_spoken_session
-            if muted:
-                # Muted session: drop without speaking; release the claim.
-                self._state._current_item = None
-                self._state._pending_heard.pop(item.id, None)
-            elif item is not None:
+            if item is not None:
                 # Compute the attributed text under the lock so _last_spoken_session
                 # is updated atomically with the pop — a concurrent JUMP_WAITING or
                 # SET_FOREGROUND can't race the attribution read.
@@ -410,8 +402,6 @@ class SpeechDaemon:
             # Foreground stream empty (or no foreground): wait until woken.
             self._state._wake.wait(self._poll_interval)
             self._state._wake.clear()
-            return
-        if muted:
             return
         try:
             completed = self.speaker.speak(text, cancel_epoch=cancel_epoch)
