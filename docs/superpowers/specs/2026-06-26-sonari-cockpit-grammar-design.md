@@ -198,7 +198,14 @@ Confirm against macOS defaults; swap only the offending key (the model is unaffe
   item in the foreground stream (the `jump_to_decision` queue op already exists).
 - **Approve/deny via hook:** a blocking PreToolUse permission hook + hook↔daemon IPC to surface the
   pending decision and receive ⌃⌘⏎ / ⌃⌘⎋; returns `permissionDecision`. New surface — design the IPC
-  + timeout carefully; safety-test the "only the asking session" guarantee.
+  + timeout carefully; safety-test the "only the asking session" guarantee. Two facts the later plan
+  must start from (verified against the code 2026-06-26): (a) the decision must ride a **PreToolUse
+  hook's stdout** (`hookSpecificOutput.permissionDecision`) — the `Notification(permission_prompt)`
+  event is the *spoken-prompt* channel and cannot carry an answer; (b) the round-trip can reuse the
+  existing request/reply transport (`client.send(expect_reply=True)`; the server already replies on
+  the same connection), but the connection thread must wait on a **per-decision Condition OUTSIDE the
+  daemon lock** — message handlers run under the transaction lock, so blocking there on a keypress
+  would freeze the whole daemon.
 - **Where am I:** new status interjection (barge-in + resume), spearcon for the session name.
 - **Barge-in:** every hotkey handler cancels current speech and acts; interjections enqueue at front +
   re-queue the interrupted item; **rate is the explicit exception** (no cancel).
