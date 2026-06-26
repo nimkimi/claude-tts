@@ -39,7 +39,7 @@ Scope of the "2b solid" conclusion these probes support:
 - "resumed wrong" / double-play is structurally PAUSE-only: the speak loop's requeue is
   gated on `_paused.is_set()`, so PAUSE is the sole disposition that replays an
   interrupted item — probe 5 verifies it end-to-end against the real Speaker. The other
-  8 dispositions (FLUSH/STOP/SKIP/MUTE/JUMP/JUMP_DECISION/NAV/NAV_RESPONSE) drop or
+  8 dispositions (FLUSH/STOP/SKIP/STOP_ALL/JUMP/JUMP_DECISION/NAV/NAV_RESPONSE) drop or
   mark-heard and are covered at the daemon level by the existing FakeSpeaker tests.
 - OUT of 2b scope (and intentionally excluded): speak()'s OWN fallback wait-timeout
   terminate (the say-hung safety net) — a non-cancel path; probes 4/4b/5 assert

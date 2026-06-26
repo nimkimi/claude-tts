@@ -119,7 +119,7 @@ def test_playback_handlers_registered_in_features_playback():
 
     expected_module = "sonari.daemon.features.playback"
     for key in (MsgType.STOP, MsgType.SKIP, MsgType.STOP_SESSION,
-                MsgType.MUTE, MsgType.PIN_TOGGLE, MsgType.JUMP_DECISION):
+                MsgType.STOP_ALL, MsgType.PIN_TOGGLE, MsgType.JUMP_DECISION):
         fn = registry.HANDLERS[key]
         assert fn.__module__ == expected_module, (
             f"HANDLERS[{key!r}].__module__ == {fn.__module__!r}, want {expected_module!r}"

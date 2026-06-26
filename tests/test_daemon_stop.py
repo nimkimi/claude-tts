@@ -77,3 +77,26 @@ def test_stop_is_sticky_across_a_new_prompt():
     daemon._stream("fg").stopped = True
     daemon.handle_message({"type": "flush", "session": "fg"})   # a new prompt
     assert daemon._stream("fg").stopped is True                 # NOT auto-resumed
+
+
+def test_stop_all_stops_every_session_and_confirms():
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    daemon._enqueue("A", "prose", "a", False)
+    daemon._enqueue("B", "prose", "b", False)
+    daemon.handle_message({"type": "stop_all", "session": "A"})
+    assert daemon._stream("A").stopped is True and daemon._stream("B").stopped is True
+    daemon._speak_loop_once()
+    assert speaker.spoken == ["All stopped."]
+
+
+def test_stop_all_is_one_way_each_session_returns_via_its_own_stop_key():
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    daemon._enqueue("B", "prose", "b", False)
+    daemon.handle_message({"type": "stop_all", "session": "A"})
+    sessions.set_foreground("B")
+    daemon._speak_loop_once()
+    assert "b" not in speaker.spoken          # landing on B does NOT auto-read it
+    daemon.handle_message({"type": "stop_session", "session": "B"})   # ⌃⌘S brings B back
+    daemon._speak_loop_once()                 # "Resumed."
+    daemon._speak_loop_once()                 # then B's content
+    assert "b" in speaker.spoken

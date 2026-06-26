@@ -49,10 +49,10 @@ def test_action_messages_faster_has_delta_25():
 def test_default_keymap_macos_uses_ctrl_cmd(mac):
     d = keymap.default_keymap()
     assert set(d.keys()) == {"nav_prev", "nav_next", "nav_first", "nav_last",
-                             "stop_session", "mute", "pin_toggle", "jump_waiting",
+                             "stop_session", "stop_all", "pin_toggle", "jump_waiting",
                              "nav_prev_response", "nav_next_response"}
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
-    assert d["stop_session"]["key"] == "s" and d["mute"]["key"] == "m"
+    assert d["stop_session"]["key"] == "s" and d["stop_all"]["key"] == "m"
     # Stage 5: response-level nav = Ctrl+Cmd+Shift+arrows
     assert d["nav_prev_response"] == {"key": "left", "mods": ["ctrl", "cmd", "shift"]}
     assert d["nav_next_response"] == {"key": "right", "mods": ["ctrl", "cmd", "shift"]}
@@ -78,7 +78,7 @@ def test_default_keymap_binds_only_nav_pause_mute():
     # The always-bound core is present on every platform; faster/slower ship UNBOUND.
     km = keymap.default_keymap()
     assert {"nav_prev", "nav_next", "nav_first", "nav_last",
-            "stop_session", "mute", "pin_toggle", "jump_waiting"} <= set(km.keys())
+            "stop_session", "stop_all", "pin_toggle", "jump_waiting"} <= set(km.keys())
     assert set(km.keys()) <= set(keymap.ACTION_MESSAGES.keys())
     assert "faster" in keymap.ACTION_MESSAGES and "faster" not in km
     assert "slower" in keymap.ACTION_MESSAGES and "slower" not in km
@@ -89,7 +89,7 @@ def test_default_keymap_binds_nav_pause_mute():
     ACTION_MESSAGES but absent from _DEFAULT_KEYS, so no hotkey was ever
     registered for them on a default install."""
     km = keymap.default_keymap()
-    for action in ("nav_next", "nav_prev", "nav_first", "nav_last", "stop_session", "mute"):
+    for action in ("nav_next", "nav_prev", "nav_first", "nav_last", "stop_session", "stop_all"):
         assert action in km, f"{action} has no default binding"
         assert km[action]["key"], f"{action} default binding has no key"
 
@@ -115,9 +115,9 @@ def test_resolve_skips_unbound_entries():
     # 'ctrl' is valid on both macOS and Windows keytables (the modifier is
     # incidental here — the point is that the keyless 'stop_session' entry is skipped).
     resolved = keymap.resolve_keymap({"stop_session": {"key": None, "mods": ["ctrl"]},
-                                      "mute": {"key": "m", "mods": ["ctrl"]}})
+                                      "stop_all": {"key": "m", "mods": ["ctrl"]}})
     actions = {e["action"] for e in resolved}
-    assert "stop_session" not in actions and "mute" in actions
+    assert "stop_session" not in actions and "stop_all" in actions
 
 
 def test_unbind_action_default_writes_unbound_override(monkeypatch, tmp_path):
