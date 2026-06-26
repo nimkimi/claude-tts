@@ -20,6 +20,7 @@ class SessionStream:
         self.nav_turn = None                # two-level nav anchor: the turn being navigated
                                             # (None == the live turn); a new prompt snaps it back
         self.muted = False                  # sticky per-session mute
+        self.stopped = False                # per-session stop (⌃⌘S); sticky across prompts
         self.warned_immediate = False       # warned once about immediate selection
         self.guided = False                 # received the setup-guidance cue once
         self.waiting_signaled = False       # background "waiting" earcon fired this turn

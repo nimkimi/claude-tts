@@ -9,6 +9,7 @@ def test_defaults_are_empty_and_unflagged():
     assert s.options is None
     assert s.nav_cursor is None
     assert s.muted is False
+    assert s.stopped is False
     assert s.warned_immediate is False
     assert s.guided is False
 
@@ -36,6 +37,16 @@ def test_reset_for_new_prompt_clears_playback_keeps_sticky():
     assert s.muted is True
     assert s.warned_immediate is True
     assert s.guided is True
+
+
+def test_reset_for_new_prompt_keeps_stopped_sticky():
+    # Per-session stop survives a new prompt: a session you stopped stays silent
+    # until you ⌃⌘S it again (spec §6.1) — a background re-invocation must not
+    # resurrect it.
+    s = SessionStream()
+    s.stopped = True
+    s.reset_for_new_prompt()
+    assert s.stopped is True
 
 
 def test_new_stream_has_its_own_empty_speech_queue():
