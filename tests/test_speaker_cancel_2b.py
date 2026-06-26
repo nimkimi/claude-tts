@@ -36,11 +36,12 @@ Window coverage notes:
 Scope of the "2b solid" conclusion these probes support:
 - The cancel-epoch mechanism is the path-agnostic 2b root cause; all 9 production
   cancel() sites invoke the identical epoch-bump + terminate, locked by probes 2-4/4b.
-- "resumed wrong" / double-play is structurally PAUSE-only: the speak loop's stopped-branch
-  re-queue is the sole disposition that replays an
-  interrupted item — probe 5 verifies it end-to-end against the real Speaker. The other
-  8 dispositions (FLUSH/STOP/SKIP/STOP_ALL/JUMP/JUMP_DECISION/NAV/NAV_RESPONSE) drop or
-  mark-heard and are covered at the daemon level by the existing FakeSpeaker tests.
+- "resumed wrong" / double-play: the speak loop's stopped-branch re-queue is the sole
+  disposition that replays an interrupted item — probe 5 verifies it end-to-end against
+  the real Speaker. Both STOP_SESSION and STOP_ALL set `stopped` and replay via the
+  stopped-branch. The other 7 dispositions (FLUSH/STOP/SKIP/JUMP/JUMP_DECISION/NAV/
+  NAV_RESPONSE) drop or mark-heard and are covered at the daemon level by the existing
+  FakeSpeaker tests.
 - OUT of 2b scope (and intentionally excluded): speak()'s OWN fallback wait-timeout
   terminate (the say-hung safety net) — a non-cancel path; probes 4/4b/5 assert
   `wait_timed_out is False` precisely to prove the CANCEL, not the timeout, did the work.
