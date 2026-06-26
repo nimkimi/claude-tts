@@ -49,7 +49,6 @@ def test_sessionstate_owns_the_global_ledger():
     assert s._next_id == 0
     assert s._current_item is None
     assert s._last_spoken_session is None
-    assert not s._paused.is_set()
     assert not s._wake.is_set()
 
 
@@ -58,7 +57,6 @@ def test_host_ledger_shims_delegate_to_state():
     # read-only shims return the SAME live object as state
     assert daemon._streams is daemon._state._streams
     assert daemon._pending_heard is daemon._state._pending_heard
-    assert daemon._paused is daemon._state._paused
     assert daemon._wake is daemon._state._wake
     # read/write shims write through to state
     daemon._current_item = "sentinel"

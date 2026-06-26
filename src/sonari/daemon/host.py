@@ -52,7 +52,7 @@ class SpeechDaemon:
     # (speak loop + kernel ops) goes through self._state._X directly; these
     # properties bridge the self._X name for cold-path callers (tests, the
     # concurrency guards, feature modules on the connection thread). 3 are
-    # read/write (rebindable scalars); 4 are read-only (mutated in place). ---
+    # read/write (rebindable scalars); 3 are read-only (mutated in place). ---
     @property
     def _streams(self):
         return self._state._streams
@@ -60,10 +60,6 @@ class SpeechDaemon:
     @property
     def _pending_heard(self):
         return self._state._pending_heard
-
-    @property
-    def _paused(self):
-        return self._state._paused
 
     @property
     def _wake(self):
@@ -289,13 +285,6 @@ class SpeechDaemon:
                 get_platform().hotkey.reload(self._dispatch_hotkey)
             except Exception:  # noqa: BLE001 - hotkeys are non-essential; speech must run
                 pass
-
-    def _resume(self) -> None:
-        """Clear pause and wake the speak loop. The interrupted utterance was
-        already re-queued at the front by the speak loop when its speak() returned
-        not-completed during the pause, so resume picks back up where it stopped."""
-        self._state._paused.clear()
-        self._state._wake.set()
 
     def _dispatch_hotkey(self, message: dict) -> None:
         """A hotkey fire is handled exactly like an inbound socket message.

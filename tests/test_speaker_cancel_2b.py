@@ -36,8 +36,8 @@ Window coverage notes:
 Scope of the "2b solid" conclusion these probes support:
 - The cancel-epoch mechanism is the path-agnostic 2b root cause; all 9 production
   cancel() sites invoke the identical epoch-bump + terminate, locked by probes 2-4/4b.
-- "resumed wrong" / double-play is structurally PAUSE-only: the speak loop's requeue is
-  gated on `_paused.is_set()`, so PAUSE is the sole disposition that replays an
+- "resumed wrong" / double-play is structurally PAUSE-only: the speak loop's stopped-branch
+  re-queue is the sole disposition that replays an
   interrupted item — probe 5 verifies it end-to-end against the real Speaker. The other
   8 dispositions (FLUSH/STOP/SKIP/STOP_ALL/JUMP/JUMP_DECISION/NAV/NAV_RESPONSE) drop or
   mark-heard and are covered at the daemon level by the existing FakeSpeaker tests.
