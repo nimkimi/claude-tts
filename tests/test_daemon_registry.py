@@ -98,17 +98,19 @@ def test_assert_complete_raises_on_missing_type():
 # ------------------------------------------------------------------ #
 # Task 3.5 pins — all 27 MsgType keys present + negative guard        #
 # ------------------------------------------------------------------ #
+# NOTE: "pins" here = test fixtures pinned to the protocol, unrelated to the
+# (now-removed) pin_toggle feature.
 
 # Use MsgType attributes directly — the values are opaque strings; spelling them
 # by attribute name ensures the pin tracks protocol changes automatically.
 from sonari.protocol import MsgType as _MsgType
 
-ALL_28 = [
+ALL_27 = [
     _MsgType.PROSE, _MsgType.CHOICE, _MsgType.PLAN, _MsgType.PERMISSION,
     _MsgType.EARCON, _MsgType.FLUSH, _MsgType.TOOL,
     _MsgType.SESSION_START, _MsgType.SESSION_END, _MsgType.SET_FOREGROUND,
     _MsgType.STOP, _MsgType.SKIP, _MsgType.NAV, _MsgType.STOP_SESSION,
-    _MsgType.STOP_ALL, _MsgType.PIN_TOGGLE,
+    _MsgType.STOP_ALL,
     _MsgType.JUMP_DECISION, _MsgType.JUMP_WAITING,
     _MsgType.SET_RATE, _MsgType.SET_VERBOSITY, _MsgType.SET_VOICE,
     _MsgType.SET_MINQUEUE, _MsgType.STATUS, _MsgType.PING,
@@ -117,11 +119,11 @@ ALL_28 = [
 ]
 
 
-def test_all_28_msgtypes_registered():
+def test_all_27_msgtypes_registered():
     """Every known MsgType must have a handler after the package is imported."""
     import sonari.daemon  # noqa: F401 — side-effect: registers all @handler thunks
     import sonari.daemon.registry as reg
-    missing = [t for t in ALL_28 if t not in reg.HANDLERS]
+    missing = [t for t in ALL_27 if t not in reg.HANDLERS]
     assert missing == [], "Missing handlers: {0}".format(missing)
 
 
@@ -133,7 +135,7 @@ def test_negative_assert_complete_names_missing_type():
     popped = reg.HANDLERS.pop("ping")
     try:
         with pytest.raises(AssertionError) as exc_info:
-            reg.assert_complete(ALL_28)
+            reg.assert_complete(ALL_27)
         assert "ping" in str(exc_info.value)
     finally:
         reg.HANDLERS["ping"] = popped

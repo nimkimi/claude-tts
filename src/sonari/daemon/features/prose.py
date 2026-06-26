@@ -73,7 +73,7 @@ def on_flush(ctx, msg):
     cur = ctx.host._current_item
     # Cut the current utterance on a new prompt: same-session (the new prompt
     # supersedes the old reply) OR a cross-session switch where this prompt's
-    # session is now the foreground (pin-aware) — so the voice moves to it
+    # session is now the foreground — so the voice moves to it
     # immediately instead of finishing the old session's sentence (§4.2
     # cut-on-switch). SESSION_START sends no FLUSH, so a bare new session
     # never cuts.

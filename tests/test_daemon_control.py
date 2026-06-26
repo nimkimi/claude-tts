@@ -168,15 +168,6 @@ def test_session_start_does_not_steal_an_actively_speaking_session(monkeypatch):
     assert sessions.foreground() == "a"          # voice unchanged
     assert sessions.folder("b") == "backend"     # but b is registered for a later jump
 
-def test_new_prompt_does_not_cut_when_pinned_elsewhere():
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    daemon.handle_message(_msg(MsgType.PIN_TOGGLE, "a"))   # pin a
-    daemon._current_item = SpeechItem(id=1, session="a", kind="prose",
-                                      text="answer.", is_decision=False)
-    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "b", cwd="/x/b"))
-    daemon.handle_message(_msg(MsgType.FLUSH, "b"))
-    assert speaker.cancels == 0                          # a stays — pinned
-
 def test_new_prompt_same_session_still_cuts():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     daemon._current_item = SpeechItem(id=1, session="a", kind="prose",

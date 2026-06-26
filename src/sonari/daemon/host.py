@@ -216,7 +216,7 @@ class SpeechDaemon:
         Called under self._lock from the speak loop."""
         text = item.text
         if item.names_session:
-            # Self-naming cue (e.g. "Jumping to backend." / "Pinned backend."):
+            # Self-naming cue (e.g. "Jumping to backend."):
             # claim this session as last-spoken so the NEXT item from it is
             # NOT prefixed again — suppresses the double-announce.
             self._state._last_spoken_session = item.session

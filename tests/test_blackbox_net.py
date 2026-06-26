@@ -293,18 +293,6 @@ def test_stop_all_holds_speech_only_the_cue_is_spoken():
 
 
 # ---------------------------------------------------------------------------
-# Family: pin (speaks folder name)
-# ---------------------------------------------------------------------------
-
-def test_pin_toggle_speaks_folder_name():
-    daemon, speaker, log, sessions, config = make_net(foreground="fg")
-    sessions.set_foreground("fg", cwd="/home/me/myapp")
-    daemon.handle_message(msg(MsgType.PIN_TOGGLE, "fg"))
-    drain(daemon)
-    assert log == [("text", "Pinned myapp.")]
-
-
-# ---------------------------------------------------------------------------
 # Family: jump-waiting target order (blocked outranks prose-only)
 # ---------------------------------------------------------------------------
 

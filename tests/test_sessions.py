@@ -141,65 +141,21 @@ def test_empty_cwd_does_not_clobber_known_folder():
     assert sm.folder("s1") == "myapp"     # keep the good name
 
 
-# --- pin toggle ----------------------------------------------------------
+# --- focus ---------------------------------------------------------------
 
-def test_pin_toggle_no_foreground_returns_none():
+def test_foreground_returns_last_set_foreground():
+    # No pin: foreground() is always the raw last set_foreground session.
     sm = SessionManager()
-    assert sm.pin_toggle() == ("none", None)
-    assert sm.pinned() is None
+    sm.set_foreground("s1")
+    sm.set_foreground("s2")
+    assert sm.foreground() == "s2"
 
 
-def test_pin_toggle_pins_current_foreground():
-    sm = SessionManager()
-    sm.set_foreground("s1", cwd="/x/myapp")
-    assert sm.pin_toggle() == ("pinned", "myapp")
-    assert sm.pinned() == "s1"
-
-
-def test_pin_toggle_same_session_again_unpins():
-    sm = SessionManager()
-    sm.set_foreground("s1", cwd="/x/myapp")
-    sm.pin_toggle()                       # pin
-    assert sm.pin_toggle() == ("unpinned", "myapp")   # toggle off
-    assert sm.pinned() is None
-
-
-def test_pin_holds_foreground_when_another_session_submits():
-    sm = SessionManager()
-    sm.set_foreground("s1", cwd="/x/a")
-    sm.pin_toggle()                       # pin s1
-    sm.set_foreground("s2", cwd="/x/b")   # another session submits a prompt
-    assert sm.foreground() == "s1"        # pin holds
-    assert sm.is_foreground("s1") is True
-    assert sm.is_foreground("s2") is False
-
-
-def test_pin_moves_when_toggled_while_another_is_foreground():
-    sm = SessionManager()
-    sm.set_foreground("s1", cwd="/x/a")
-    sm.pin_toggle()                       # pin s1
-    sm.set_foreground("s2", cwd="/x/b")   # s2 now last-prompt (but s1 pinned)
-    # NOTE: pin_toggle acts on the RAW last-prompt foreground (s2), so it moves the pin
-    assert sm.pin_toggle() == ("pinned", "b")
-    assert sm.pinned() == "s2"
-
-
-def test_unregister_pinned_session_falls_back_to_auto():
-    sm = SessionManager()
-    sm.set_foreground("s1", cwd="/x/a")
-    sm.pin_toggle()                       # pin s1
-    sm.unregister("s1")
-    assert sm.pinned() is None
-    assert sm.foreground() is None
-
-
-def test_focus_clears_pin_and_sets_foreground():
+def test_focus_moves_voice_to_target():
+    # focus() sets the target as foreground (no pin involved).
     sm = SessionManager()
     sm.set_foreground("a")
-    sm.pin_toggle()                       # pin a
-    assert sm.pinned() == "a"
     sm.focus("b")
-    assert sm.pinned() is None            # explicit jump overrides the pin
     assert sm.foreground() == "b"
 
 

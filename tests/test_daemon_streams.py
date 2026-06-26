@@ -121,16 +121,6 @@ def test_jump_waiting_skips_a_stopped_background_session():
     assert sessions.foreground() == "a"
     assert queue._items[-1].text == "No session waiting."
 
-def test_jump_waiting_clears_an_active_pin():
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    daemon.handle_message(_msg(MsgType.PIN_TOGGLE, "a"))   # pin a
-    sessions.register("b", cwd="/x/backend")
-    _prose(daemon, "b", "ready. ")
-    daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
-    assert sessions.pinned() is None
-    assert sessions.foreground() == "b"
-
-
 # --- waiting earcon (Task 3) --------------------------------------------------
 
 def test_background_prose_fires_one_waiting_earcon():

@@ -73,7 +73,6 @@ def test_within_focused_session_nav_no_voice_move_no_cue():
     sessions.register("fg", cwd="/work/frontend")
     sessions.set_identity("fg", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
     sessions.set_foreground("fg")
-    sessions.pin_toggle()                              # pin fg
     _seed(daemon, "fg")
     sessions.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys001")  # focus == voice
     daemon.handle_message({"type": "nav", "to": "prev"})
@@ -81,18 +80,4 @@ def test_within_focused_session_nav_no_voice_move_no_cue():
     # _seed records 2 messages; prev from latest steps to m0 and seek-and-plays forward.
     # Exact-equality confirms no "frontend." cue was prepended (within-session, not crossed).
     assert texts == ["fg-m0", "fg-m1"]
-    assert sessions.pinned() == "fg"                   # within-session nav preserves the pin
-
-
-def test_cross_session_nav_overrides_pin():
-    daemon, _q, _s, sessions, _c = make_daemon(foreground="b")
-    sessions.register("a", cwd="/work/frontend")
-    sessions.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
-    sessions.register("b", cwd="/work/api")
-    sessions.set_foreground("b"); sessions.pin_toggle()   # pin b
-    assert sessions.pinned() == "b"
-    _seed(daemon, "a")
-    sessions.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys001")
-    daemon.handle_message({"type": "nav", "to": "prev"})
-    assert sessions.foreground() == "a"
-    assert sessions.pinned() is None                   # cross-session nav clears the pin (like jump)
+    assert sessions.foreground() == "fg"               # within-session nav keeps the voice on fg
