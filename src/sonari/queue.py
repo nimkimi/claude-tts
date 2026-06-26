@@ -11,8 +11,8 @@ class SpeechItem:
     kind: str          # one of prose|choice|plan|permission|tool_announce
     text: str
     is_decision: bool  # True for choice|plan|permission
-    mute_exempt: bool = False  # spoken even when the session is muted (e.g. "muted")
-    pause_exempt: bool = False  # spoken even while the loop is paused (e.g. "Paused.")
+    mute_exempt: bool = False  # control cue: never folder-prefixed (jump/stop/nav/status cues)
+    pause_exempt: bool = False  # voiced by the held branch even while the session is stopped (e.g. "Stopped.")
     names_session: bool = False  # text already speaks the session's folder (jump cue)
 
 

@@ -2,7 +2,7 @@
 into the form the Swift hotkeyd reads)."""
 
 KEY_CODES = {
-    "s": 1, "r": 15, "d": 2, "l": 37, "v": 9, "o": 31,   # 's' = pause
+    "s": 1, "r": 15, "d": 2, "l": 37, "v": 9, "o": 31,   # 's' = stop_session
     "f": 3, "p": 35, "m": 46, "j": 38,  # 'p' free, 'm' = stop_all, 'j' = jump_waiting (kVK_ANSI_J)
     "period": 47, ".": 47,
     "rightbracket": 30, "]": 30,

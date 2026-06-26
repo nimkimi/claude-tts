@@ -74,7 +74,7 @@ def test_resolve_faster_message_is_json_with_delta(mac):
     assert json.loads(entry["message"]) == {"type": "set_rate", "delta": 25}
 
 
-def test_default_keymap_binds_only_nav_pause_mute():
+def test_default_keymap_binds_only_nav_stop_keys():
     # The always-bound core is present on every platform; faster/slower ship UNBOUND.
     km = keymap.default_keymap()
     assert {"nav_prev", "nav_next", "nav_first", "nav_last",
@@ -84,8 +84,8 @@ def test_default_keymap_binds_only_nav_pause_mute():
     assert "slower" in keymap.ACTION_MESSAGES and "slower" not in km
 
 
-def test_default_keymap_binds_nav_pause_mute():
-    """Regression: nav_next/prev/first/last, stop_session and mute were defined in
+def test_default_keymap_binds_nav_stop_keys():
+    """Regression: nav_next/prev/first/last, stop_session and stop_all were defined in
     ACTION_MESSAGES but absent from _DEFAULT_KEYS, so no hotkey was ever
     registered for them on a default install."""
     km = keymap.default_keymap()
