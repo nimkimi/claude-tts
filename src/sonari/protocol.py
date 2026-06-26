@@ -20,7 +20,7 @@ class MsgType:
     STOP = "stop"
     SKIP = "skip"
     NAV = "nav"          # message-cursor navigation: msg["to"] in next|prev|first|last
-    PAUSE = "pause"      # toggle play/pause of the whole speak loop
+    STOP_SESSION = "stop_session"   # ⌃⌘S: toggle a per-session stop (resume-from-spot, sticky)
     MUTE = "mute"        # toggle a sticky per-session mute (earcons still fire)
     PIN_TOGGLE = "pin_toggle"   # pin/unpin the voice to the current session (#31)
     JUMP_DECISION = "jump_decision"

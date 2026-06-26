@@ -107,7 +107,7 @@ ALL_28 = [
     _MsgType.PROSE, _MsgType.CHOICE, _MsgType.PLAN, _MsgType.PERMISSION,
     _MsgType.EARCON, _MsgType.FLUSH, _MsgType.TOOL,
     _MsgType.SESSION_START, _MsgType.SESSION_END, _MsgType.SET_FOREGROUND,
-    _MsgType.STOP, _MsgType.SKIP, _MsgType.NAV, _MsgType.PAUSE,
+    _MsgType.STOP, _MsgType.SKIP, _MsgType.NAV, _MsgType.STOP_SESSION,
     _MsgType.MUTE, _MsgType.PIN_TOGGLE,
     _MsgType.JUMP_DECISION, _MsgType.JUMP_WAITING,
     _MsgType.SET_RATE, _MsgType.SET_VERBOSITY, _MsgType.SET_VOICE,

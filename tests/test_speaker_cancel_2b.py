@@ -345,7 +345,7 @@ def _make_real_daemon(runner, foreground="fg"):
     return daemon, speaker
 
 
-def test_real_pause_requeues_once_and_replays_without_double_play():
+def test_real_stop_requeues_once_and_replays_without_double_play():
     runner = GatedRunner(gate_synth=False)
     daemon, speaker = _make_real_daemon(runner)
     entry = daemon.history.record("fg", "prose", "interrupted sentence")
@@ -357,13 +357,16 @@ def test_real_pause_requeues_once_and_replays_without_double_play():
     q = daemon._stream("fg").queue
     assert len(q) == 2
 
-    # --- a pause lands mid-utterance while the real speak() is in playback ---
+    # --- a stop lands mid-utterance while the real speak() is in playback ---
     t, out = _run(daemon._speak_loop_once)   # pops + plays "interrupted sentence"
     runner.wait_until_proc_count(1)
     proc = runner.procs[0]
     proc.wait_until_playing()               # daemon blocked in REAL speak() playback
-    daemon._paused.set()                     # PAUSE handler sets the flag...
-    speaker.cancel()                         # ...and cancels: real terminate -> speak False
+    # Set stopped directly (bypassing the handler) so we don't inject the "Stopped."
+    # pause-exempt cue into the queue — the queue-count assertions below assume only
+    # the original two items exist after re-queue.
+    daemon._stream("fg").stopped = True      # stop flag set mid-synthesis...
+    speaker.cancel()                         # ...and cancel: real terminate -> speak False
     _join(t)
     assert "error" not in out, out.get("error")
 
@@ -379,8 +382,8 @@ def test_real_pause_requeues_once_and_replays_without_double_play():
     assert proc.wait_timed_out is False      # the cancel cut it, not speak()'s fallback
     assert len(runner.calls) == 1            # synthesized once so far — no double-synth
 
-    # --- resume: clear pause, let the replay complete cleanly ---
-    daemon._paused.clear()
+    # --- resume: clear stopped flag, let the replay complete cleanly ---
+    daemon._stream("fg").stopped = False
     t2, out2 = _run(daemon._speak_loop_once)
     runner.wait_until_proc_count(2)
     proc2 = runner.procs[1]

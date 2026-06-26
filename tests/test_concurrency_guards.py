@@ -142,7 +142,7 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
                 return
 
     def hammer(sess):
-        ops = [MsgType.PAUSE, MsgType.FLUSH, MsgType.SET_FOREGROUND,
+        ops = [MsgType.STOP_SESSION, MsgType.FLUSH, MsgType.SET_FOREGROUND,
                MsgType.JUMP_WAITING]
         n = 0
         while not stop.is_set():
@@ -197,12 +197,14 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
 
 
 class _ReentrantSpeaker:
-    """Deterministic re-entrant FakeSpeaker: its speak() fires PAUSE then FLUSH
-    (in that order) BEFORE returning not-completed, exactly reproducing the L2
-    race — a FLUSH landing between speak() returning and the pause re-queue. The
-    interrupted item must NOT be resurrected into the flushed queue; because FLUSH
-    (not a bare PAUSE) wins, the re-queue/rollback branch (daemon.py:1011) is
-    skipped, so _last_spoken_session stays committed (no rollback)."""
+    """Deterministic re-entrant FakeSpeaker: its speak() fires STOP_SESSION then
+    FLUSH (in that order) BEFORE returning not-completed, exactly reproducing the
+    L2 race — a FLUSH landing between speak() returning and the stop re-queue.
+    STOP_SESSION sets stream.stopped (sticky); FLUSH clears the queue but NOT
+    stopped. The L2 re-queue check inside the lock sees stopped=True and re-queues
+    the interrupted item (stop wins; sticky resume-from-spot). The queue has only
+    the one re-queued item — FLUSH's clear ran first, so there is no duplication.
+    _last_spoken_session is rolled back (the item will be re-attributed on resume)."""
 
     def __init__(self, daemon):
         self.daemon = daemon
@@ -214,8 +216,9 @@ class _ReentrantSpeaker:
         self.log.append(text)
         if not self._fired:
             self._fired = True
-            # PAUSE sets _paused; FLUSH then clears it AND flushes the queue.
-            self.daemon.handle_message(_msg(MsgType.PAUSE, "fg"))
+            # STOP_SESSION sets stream.stopped and enqueues "Stopped." (pause_exempt);
+            # FLUSH then clears the queue (including "Stopped.") but leaves stopped=True.
+            self.daemon.handle_message(_msg(MsgType.STOP_SESSION, "fg"))
             self.daemon.handle_message(_msg(MsgType.FLUSH, "fg"))
         return False  # interrupted
 
@@ -235,13 +238,15 @@ class _ReentrantSpeaker:
         pass
 
 
-def test_reentrant_flush_does_not_resurrect_paused_item():
-    """L2 (deterministic): speak() fires PAUSE then FLUSH before returning
-    not-completed. The re-queue-on-pause check is INSIDE the lock and re-reads
-    _paused, so the FLUSH (which cleared pause) wins — the item is NOT
-    resurrected, and because FLUSH cleared pause the re-queue/rollback branch
-    (daemon.py:1011) is skipped, so _last_spoken_session stays at its committed
-    value (no rollback)."""
+def test_reentrant_stop_flush_requeues_item_exactly_once():
+    """L2 (deterministic): speak() fires STOP_SESSION then FLUSH before returning
+    not-completed. STOP_SESSION sets stream.stopped (sticky); FLUSH clears the
+    queue but NOT stopped. The re-queue check is INSIDE the lock: it sees stopped=True
+    and re-queues the interrupted item into the now-empty (flushed) queue. The item
+    is held (not spoken) because stopped=True. _last_spoken_session is rolled back
+    so the resumed utterance re-gets its attribution prefix. No duplication: the
+    item appears exactly once because the FLUSH clear and the re-queue run under
+    the same lock — they cannot interleave."""
     sessions = SessionManager()
     sessions.set_foreground("fg")
     config = {k: (v.copy() if isinstance(v, dict) else v)
@@ -255,8 +260,9 @@ def test_reentrant_flush_does_not_resurrect_paused_item():
     daemon._enqueue("fg", "prose", "interrupted", False)
     daemon._speak_loop_once()
 
-    assert speaker.log == ["interrupted"]            # spoken once, not replayed
-    assert not daemon._paused.is_set()                # FLUSH cleared the pause
-    assert len(daemon._stream("fg").queue) == 0       # NOT resurrected
-    assert daemon._current_item is None               # claim released
-    assert daemon._last_spoken_session == "fg"        # NOT rolled back: FLUSH cleared pause, so the re-queue branch (daemon.py:1011) is skipped — no resurrect, no rollback
+    assert speaker.log == ["interrupted"]              # spoken once, not replayed yet
+    assert daemon._stream("fg").stopped is True        # sticky: FLUSH did NOT clear it
+    assert len(daemon._stream("fg").queue) == 1        # re-queued exactly once (no dup)
+    assert daemon._stream("fg").queue._items[0].text == "interrupted"
+    assert daemon._current_item is None                # claim released
+    assert daemon._last_spoken_session is None         # rolled back to pre-speak baseline

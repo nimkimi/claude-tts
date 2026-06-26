@@ -280,8 +280,8 @@ def test_backlog_cap_evicts_oldest_prose_and_drops_its_pending_heard():
     assert entries[2] in daemon._pending_heard.values()      # survivor retained
 
 
-def test_attribution_survives_pause_on_switch():
-    # Regression: if a PAUSE interrupts the first post-switch utterance, the
+def test_attribution_survives_stop_on_switch():
+    # Regression: if a STOP interrupts the first post-switch utterance, the
     # _last_spoken_session commit must be rolled back so the resumed utterance
     # still carries the folder prefix.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
@@ -293,25 +293,25 @@ def test_attribution_survives_pause_on_switch():
     # Switch foreground to b, enqueue prose that should be attributed "backend."
     daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "b", cwd="/x/backend"))
     _prose(daemon, "b", "beta. ")
-    # Monkeypatch speaker so that the utterance from b causes a mid-speech pause,
-    # exactly mirroring test_pause_during_speech_requeues_interrupted_item.
+    # Monkeypatch speaker so that the utterance from b causes a mid-speech stop,
+    # exactly mirroring test_stop_during_speech_requeues_interrupted_item.
     original_speak = speaker.speak
 
     def interrupted_speak(text, cancel_epoch=None):
         speaker.spoken.append(text)
-        daemon._paused.set()   # pause arrives mid-synthesis
-        return False           # not completed
+        daemon._stream("b").stopped = True   # stop arrives mid-synthesis
+        return False                         # not completed
 
     speaker.speak = interrupted_speak
     daemon._speak_loop_once()   # pops "beta." (prefixed as "backend. beta."), but interrupted
-    # Restore normal speak and clear the paused flag (direct clear, no PAUSE handler
-    # so we don't inject "Resumed." into spoken)
-    daemon._paused.clear()
+    # Restore normal speak and clear the stopped flag (direct clear, no STOP_SESSION
+    # handler so we don't inject "Resumed." into spoken)
+    daemon._stream("b").stopped = False
     speaker.spoken.clear()      # only care about what the RESUMED speak produces
     speaker.speak = lambda t, cancel_epoch=None: (speaker.spoken.append(t) or True)
     daemon._speak_loop_once()   # re-pops the re-queued item; must be prefixed again
     assert "backend. beta." in speaker.spoken, (
-        "Attribution dropped after pause-on-switch: got {0}".format(speaker.spoken)
+        "Attribution dropped after stop-on-switch: got {0}".format(speaker.spoken)
     )
 
 
