@@ -92,7 +92,5 @@ def on_flush(ctx, msg):
     # already cleared live playback (queue, assembler, nav_cursor -> snap to
     # live edge); history is no longer wiped here. SESSION_END still clears it.
     ctx.host.history.start_turn(session)
-    # A new prompt is a user action -> auto-resume from pause.
-    ctx.host._paused.clear()
     ctx.host._wake.set()
     return None

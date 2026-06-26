@@ -10,7 +10,7 @@ class SessionState:
     Holds the cross-thread fields the speak loop, the connection threads, and the
     hotkey thread all touch under the one lock: the per-session stream registry,
     the pending-heard markers, the in-flight claim, the folder-attribution cursor,
-    the id counter, and the pause/wake Events. The host reads/writes these directly
+    the id counter, and the wake Event. The host reads/writes these directly
     as ``self._state._X`` on the hot path; property shims on the host bridge the old
     ``self._X`` names for cold-path callers (tests, guards, feature modules).
     """
@@ -21,7 +21,6 @@ class SessionState:
         self._next_id = 0
         self._wake = threading.Event()
         self._pending_heard: "dict" = {}
-        self._paused = threading.Event()
         self._current_item = None
         self._last_spoken_session = None
 

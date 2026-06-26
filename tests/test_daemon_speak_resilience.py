@@ -85,10 +85,11 @@ def test_speak_failure_fires_error_earcon_and_notes_not_completed(monkeypatch):
 def test_speak_failure_on_pause_exempt_cue_fires_error_earcon(monkeypatch):
     daemon, queue, speaker, *_ = make_daemon(foreground="fg")
     monkeypatch.setattr(speaker, "speak", _raise(RuntimeError("synth blew up")))
-    daemon._paused.set()
-    daemon._enqueue("fg", "prose", "Paused.", False, pause_exempt=True)
+    # Simulate the stopped state (per-session stop replaces the old global pause).
+    daemon._stream("fg").stopped = True
+    daemon._enqueue("fg", "prose", "Stopped.", False, pause_exempt=True)
 
-    daemon._speak_loop_once()                    # paused-branch failure, contained
+    daemon._speak_loop_once()                    # stopped-branch failure, contained
 
     assert speaker.earcons == ["error"]
 

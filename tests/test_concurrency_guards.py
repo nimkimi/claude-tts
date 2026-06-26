@@ -93,7 +93,7 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     pending-heard marker survives the storm. It does NOT bound queue length (cap-
     exempt cues exceed _backlog_cap by design — see the assertion note). Lost/
     duplicated/resurrected TRACKED items are pinned deterministically by
-    test_reentrant_flush_does_not_resurrect_paused_item. Probabilistic by design."""
+    test_reentrant_stop_flush_requeues_item_exactly_once. Probabilistic by design."""
     runner = _FastRunner()
     daemon, speaker = _make_real_daemon(runner, foreground="s0")
     sessions = daemon.sessions
@@ -182,7 +182,7 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     # synthetic cue-storm a stream legitimately exceeds the cap (verified: ~50% of
     # isolated runs reach len up to ~1000). Those cues drain and carry no pending-
     # heard marker, so it is not a leak. The real leak/resurrection invariant lives
-    # in test_reentrant_flush_does_not_resurrect_paused_item. Here, in the quiescent
+    # in test_reentrant_stop_flush_requeues_item_exactly_once. Here, in the quiescent
     # end state (storm over, speak thread joined), assert only that every pending-
     # heard marker still maps to a LIVE queued item or the in-flight claim — no
     # ORPHANED markers. Cue-volume-independent, so it keeps its teeth no matter how
