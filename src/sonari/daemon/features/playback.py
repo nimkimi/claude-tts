@@ -28,33 +28,37 @@ def on_skip(ctx, msg):
     return None
 
 
-@handler(MsgType.PAUSE)
-def on_pause(ctx, msg):
-    # Temporary play/pause. Pause stops the current utterance and holds the
-    # loop; resume re-speaks the interrupted item so it picks back up. Also
-    # auto-cleared by a new prompt (see the FLUSH handler).
+@handler(MsgType.STOP_SESSION)
+def on_stop_session(ctx, msg):
+    # Per-session stop/start (⌃⌘S). Toggles the FOREGROUND session — the track you
+    # are currently flying; switch with ⌃⌘Tab / ⌃⌘J first to stop another. Stopping
+    # holds this session's stream and re-reads from the interrupted item on resume;
+    # the state is sticky across new prompts (a stopped session stays silent until
+    # ⌃⌘S'd again).
     fg = ctx.host.sessions.foreground()
-    if ctx.host._paused.is_set():
-        # Resuming: voice "Resumed." FIRST (at the front, ahead of the
-        # interrupted utterance that was re-queued there on pause), then
-        # continue. mute_exempt so the control cue is always heard.
-        if fg is not None:
-            ctx.host._enqueue(fg, "prose", "Resumed.", False,
-                              mute_exempt=True, at_front=True)
-        ctx.host._resume()
+    if fg is None:
+        ctx.host.speaker.earcon("error")
+        return None
+    st = ctx.host._stream(fg)
+    if st.stopped:
+        # Resuming: "Resumed." FIRST (at the front, ahead of the interrupted item the
+        # speak loop re-queued there on stop), then clear the flag. _enqueue wakes
+        # the loop. mute_exempt so the control cue is never folder-prefixed.
+        st.stopped = False
+        ctx.host._enqueue(fg, "prose", "Resumed.", False,
+                          mute_exempt=True, at_front=True)
     else:
-        ctx.host._paused.set()
-        # cancel() bumps the speaker's epoch, so even an utterance still
-        # mid-synthesis aborts. The speak loop re-queues the interrupted
-        # item (it sees completed=False while paused), so we don't capture
-        # it here — which also avoids replaying an already-finished item.
-        ctx.host.speaker.cancel()
-        # The hold silences the queue, so "Paused." is pause_exempt (the
-        # paused branch of the speak loop voices it) and mute_exempt (always
-        # heard). pop_pause_exempt finds it past the re-queued interrupted item.
-        if fg is not None:
-            ctx.host._enqueue(fg, "prose", "Paused.", False,
-                              mute_exempt=True, pause_exempt=True)
+        st.stopped = True
+        # Cancel only if THIS session is the one in flight, so stopping never cuts
+        # another session's utterance (the loop only plays the foreground, so a live
+        # claim is the foreground's — the session check is belt-and-suspenders).
+        cur = ctx.host._current_item
+        if cur is not None and cur.session == fg:
+            ctx.host.speaker.cancel()
+        # "Stopped." is pause_exempt (the held branch voices it past the re-queued
+        # item) and mute_exempt (a control cue, never folder-prefixed).
+        ctx.host._enqueue(fg, "prose", "Stopped.", False,
+                          mute_exempt=True, pause_exempt=True)
     return None
 
 

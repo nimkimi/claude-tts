@@ -353,11 +353,14 @@ class SpeechDaemon:
 
         The voice plays the FOREGROUND session's stream: every pop reads the
         foreground stream's own queue. Background streams accumulate untouched
-        until they become foreground."""
-        if self._state._paused.is_set():
-            # Play/pause: the loop is held, but a pause-exempt cue ("Paused.") must
-            # still be voiced. Scan the foreground stream's queue for one; otherwise
-            # hold. Pop+claim under the lock, mirroring the normal branch.
+        until they become foreground. When the foreground stream is per-session
+        STOPPED (⌃⌘S / ⌃⌘M), the loop is held — only a pause-exempt cue
+        ("Stopped." / "All stopped.") is voiced — until it is started again."""
+        fg0 = self.sessions.foreground()
+        st0 = self._state._streams.get(fg0)
+        if st0 is not None and st0.stopped:
+            # Held: scan the foreground stream for a pause-exempt cue; otherwise
+            # wait. Pop+claim under the lock, mirroring the normal branch.
             with self._lock:
                 fg = self.sessions.foreground()
                 st = self._state._streams.get(fg)
@@ -370,15 +373,15 @@ class SpeechDaemon:
                 return
             try:
                 completed = self.speaker.speak(item.text, cancel_epoch=cancel_epoch)
-            except Exception:  # noqa: BLE001 - one bad cue must not wedge the pause
+            except Exception:  # noqa: BLE001 - one bad cue must not wedge the hold
                 self._signal_speak_failure()
                 completed = False
             self.note_spoken(item, completed)
             return
         # Pop and CLAIM the foreground stream's next item atomically under the lock.
         # foreground() is read here too, so a switch arriving on another connection
-        # (also under the lock) is observed consistently. PAUSE/MUTE/FLUSH run under
-        # this lock, so they can't slip into the gap between pop and claim.
+        # (also under the lock) is observed consistently. STOP/FLUSH run under this
+        # lock, so they can't slip into the gap between pop and claim.
         with self._lock:
             fg = self.sessions.foreground()
             st = self._state._streams.get(fg)
@@ -392,7 +395,7 @@ class SpeechDaemon:
                      and ist is not None and ist.muted
                      and not item.mute_exempt)
             text = None
-            # Snapshot before _attributed_text so we can roll back if pause interrupts.
+            # Snapshot before _attributed_text so we can roll back if a stop interrupts.
             prev = self._state._last_spoken_session
             if muted:
                 # Muted session: drop without speaking; release the claim.
@@ -417,16 +420,12 @@ class SpeechDaemon:
             completed = False
         requeued = False
         with self._lock:
-            # Re-check pause INSIDE the lock (L2). A FLUSH also runs under this lock
-            # and clears pause + the stream's queue; checking pause outside let a
-            # FLUSH land between check and enqueue_front, resurrecting a flushed item.
-            if not completed and self._state._paused.is_set():
-                # A pause interrupted this utterance: re-queue it at the front of ITS
-                # OWN stream so resume picks back up here, and KEEP its _pending_heard
-                # entry (don't note_spoken) so the eventual replay records it as heard.
-                # Roll back the _last_spoken_session commit from _attributed_text so
-                # the re-popped item on resume sees the pre-switch state and re-adds
-                # the folder prefix correctly (pause-attribution-drop regression).
+            # Re-check INSIDE the lock (L2). A FLUSH also runs under this lock and
+            # clears the stream's queue; checking outside let a FLUSH land between
+            # check and enqueue_front, resurrecting a flushed item. Re-queue when the
+            # spoken item's OWN session got stopped mid-utterance (⌃⌘S on the
+            # foreground, or ⌃⌘M) so resume picks back up here.
+            if not completed and self._stream(item.session).stopped:
                 self._state._current_item = None
                 self._stream(item.session).queue.enqueue_front(item)
                 self._state._last_spoken_session = prev

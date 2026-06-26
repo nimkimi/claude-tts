@@ -33,7 +33,7 @@ ACTION_MESSAGES = {
     # `to` values on the existing NAV message (no new protocol type).
     "nav_prev_response": {"type": "nav", "to": "prev_response"},
     "nav_next_response": {"type": "nav", "to": "next_response"},
-    "pause": {"type": "pause"},     # play/pause toggle
+    "stop_session": {"type": "stop_session"},   # ⌃⌘S: per-session stop/start
     "mute": {"type": "mute"},       # sticky per-session mute toggle
     "pin_toggle": {"type": "pin_toggle"},   # pin/unpin the voice to the current session (#31)
     "jump_waiting": {"type": "jump_waiting"},  # switch voice to a waiting background session
@@ -48,7 +48,7 @@ ACTION_MESSAGES = {
 # minimal — users add a key for them in keymap.json if they want one.
 _DEFAULT_KEYS = {
     "nav_prev": "left", "nav_next": "right", "nav_first": "up", "nav_last": "down",
-    "pause": "s", "mute": "m", "pin_toggle": "p", "jump_waiting": "j",
+    "stop_session": "s", "mute": "m", "pin_toggle": "p", "jump_waiting": "j",
 }
 
 

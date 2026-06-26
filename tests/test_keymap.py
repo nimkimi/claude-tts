@@ -49,10 +49,10 @@ def test_action_messages_faster_has_delta_25():
 def test_default_keymap_macos_uses_ctrl_cmd(mac):
     d = keymap.default_keymap()
     assert set(d.keys()) == {"nav_prev", "nav_next", "nav_first", "nav_last",
-                             "pause", "mute", "pin_toggle", "jump_waiting",
+                             "stop_session", "mute", "pin_toggle", "jump_waiting",
                              "nav_prev_response", "nav_next_response"}
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
-    assert d["pause"]["key"] == "s" and d["mute"]["key"] == "m"
+    assert d["stop_session"]["key"] == "s" and d["mute"]["key"] == "m"
     # Stage 5: response-level nav = Ctrl+Cmd+Shift+arrows
     assert d["nav_prev_response"] == {"key": "left", "mods": ["ctrl", "cmd", "shift"]}
     assert d["nav_next_response"] == {"key": "right", "mods": ["ctrl", "cmd", "shift"]}
@@ -61,10 +61,10 @@ def test_default_keymap_macos_uses_ctrl_cmd(mac):
 # --- resolve_keymap ---------------------------------------------------------
 
 def test_resolve_macos_carbon_codes(mac):
-    resolved = keymap.resolve_keymap({"pause": {"key": "p", "mods": ["ctrl", "cmd"]}})
+    resolved = keymap.resolve_keymap({"stop_session": {"key": "p", "mods": ["ctrl", "cmd"]}})
     assert resolved == [{
-        "action": "pause", "keyCode": 35, "modifiers": 4352,  # 4096 | 256
-        "message": '{"type": "pause"}'}]
+        "action": "stop_session", "keyCode": 35, "modifiers": 4352,  # 4096 | 256
+        "message": '{"type": "stop_session"}'}]
 
 
 def test_resolve_faster_message_is_json_with_delta(mac):
@@ -78,30 +78,30 @@ def test_default_keymap_binds_only_nav_pause_mute():
     # The always-bound core is present on every platform; faster/slower ship UNBOUND.
     km = keymap.default_keymap()
     assert {"nav_prev", "nav_next", "nav_first", "nav_last",
-            "pause", "mute", "pin_toggle", "jump_waiting"} <= set(km.keys())
+            "stop_session", "mute", "pin_toggle", "jump_waiting"} <= set(km.keys())
     assert set(km.keys()) <= set(keymap.ACTION_MESSAGES.keys())
     assert "faster" in keymap.ACTION_MESSAGES and "faster" not in km
     assert "slower" in keymap.ACTION_MESSAGES and "slower" not in km
 
 
 def test_default_keymap_binds_nav_pause_mute():
-    """Regression: nav_next/prev/first/last, pause and mute were defined in
+    """Regression: nav_next/prev/first/last, stop_session and mute were defined in
     ACTION_MESSAGES but absent from _DEFAULT_KEYS, so no hotkey was ever
     registered for them on a default install."""
     km = keymap.default_keymap()
-    for action in ("nav_next", "nav_prev", "nav_first", "nav_last", "pause", "mute"):
+    for action in ("nav_next", "nav_prev", "nav_first", "nav_last", "stop_session", "mute"):
         assert action in km, f"{action} has no default binding"
         assert km[action]["key"], f"{action} default binding has no key"
 
 
 def test_resolve_unknown_key_raises():
     with pytest.raises(ValueError):
-        keymap.resolve_keymap({"pause": {"key": "zzz", "mods": ["ctrl"]}})
+        keymap.resolve_keymap({"stop_session": {"key": "zzz", "mods": ["ctrl"]}})
 
 
 def test_resolve_unknown_mod_raises():
     with pytest.raises(ValueError):
-        keymap.resolve_keymap({"pause": {"key": "p", "mods": ["hyper"]}})
+        keymap.resolve_keymap({"stop_session": {"key": "p", "mods": ["hyper"]}})
 
 
 def test_resolve_unknown_action_raises():
@@ -113,11 +113,11 @@ def test_resolve_skips_unbound_entries():
     # An entry with no key is UNBOUND -> skipped (not an error), so an action with
     # a default binding can be explicitly cleared in keymap.json.
     # 'ctrl' is valid on both macOS and Windows keytables (the modifier is
-    # incidental here — the point is that the keyless 'pause' entry is skipped).
-    resolved = keymap.resolve_keymap({"pause": {"key": None, "mods": ["ctrl"]},
+    # incidental here — the point is that the keyless 'stop_session' entry is skipped).
+    resolved = keymap.resolve_keymap({"stop_session": {"key": None, "mods": ["ctrl"]},
                                       "mute": {"key": "m", "mods": ["ctrl"]}})
     actions = {e["action"] for e in resolved}
-    assert "pause" not in actions and "mute" in actions
+    assert "stop_session" not in actions and "mute" in actions
 
 
 def test_unbind_action_default_writes_unbound_override(monkeypatch, tmp_path):
@@ -153,9 +153,9 @@ def test_load_keymap_returns_defaults_when_missing(monkeypatch, tmp_path):
 
 def test_load_keymap_merges_user_override(monkeypatch, tmp_path):
     km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
-    km.write_text(json.dumps({"pause": {"key": "x", "mods": ["cmd"]}}), encoding="utf-8")
+    km.write_text(json.dumps({"stop_session": {"key": "x", "mods": ["cmd"]}}), encoding="utf-8")
     loaded = keymap.load_keymap()
-    assert loaded["pause"] == {"key": "x", "mods": ["cmd"]}
+    assert loaded["stop_session"] == {"key": "x", "mods": ["cmd"]}
     assert loaded["nav_next"] == keymap.default_keymap()["nav_next"]
 
 
@@ -164,10 +164,10 @@ def test_load_keymap_drops_unknown_actions(monkeypatch, tmp_path):
     # the whole keymap (resolve_keymap would otherwise raise on the unknown action).
     km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
     km.write_text(json.dumps({"stop": {"key": "s", "mods": ["ctrl"]},
-                              "pause": {"key": "p", "mods": ["ctrl"]}}), encoding="utf-8")
+                              "stop_session": {"key": "p", "mods": ["ctrl"]}}), encoding="utf-8")
     loaded = keymap.load_keymap()
     assert "stop" not in loaded
-    assert loaded["pause"] == {"key": "p", "mods": ["ctrl"]}
+    assert loaded["stop_session"] == {"key": "p", "mods": ["ctrl"]}
     keymap.resolve_keymap(loaded)   # must not raise
 
 
@@ -219,7 +219,7 @@ def test_pin_toggle_default_binding_is_p():
     # default chord is Ctrl+Cmd and Ctrl+Cmd+F is the system "Enter Full Screen"
     # shortcut, which the Carbon hotkeyd would swallow globally.
     assert km["pin_toggle"]["key"] == "p"
-    assert km["pause"]["key"] == "s"     # pause no longer collides with pin
+    assert km["stop_session"]["key"] == "s"     # stop_session no longer collides with pin
 
 
 def test_no_two_default_actions_share_a_key():

@@ -118,7 +118,7 @@ def test_playback_handlers_registered_in_features_playback():
     from sonari.protocol import MsgType
 
     expected_module = "sonari.daemon.features.playback"
-    for key in (MsgType.STOP, MsgType.SKIP, MsgType.PAUSE,
+    for key in (MsgType.STOP, MsgType.SKIP, MsgType.STOP_SESSION,
                 MsgType.MUTE, MsgType.PIN_TOGGLE, MsgType.JUMP_DECISION):
         fn = registry.HANDLERS[key]
         assert fn.__module__ == expected_module, (

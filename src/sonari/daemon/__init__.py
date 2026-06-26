@@ -22,7 +22,7 @@ assert_complete([
     MsgType.STOP,
     MsgType.SKIP,
     MsgType.NAV,
-    MsgType.PAUSE,
+    MsgType.STOP_SESSION,
     MsgType.MUTE,
     MsgType.PIN_TOGGLE,
     MsgType.JUMP_DECISION,
