@@ -76,6 +76,11 @@ def on_set_foreground(ctx, msg):
             iterm_session_id=msg.get("iterm_session_id", ""),
         ))
         _maybe_guide_setup(ctx, session, msg.get("plugin_version", ""))
+        if ctx.host._spearcons is not None:
+            # Pre-render spearcons for the known roster in the background (Popen,
+            # non-blocking); skips already-cached labels. Never on the hot path.
+            ctx.host._spearcons.pregenerate(
+                [ctx.host.sessions.folder(s) for s in ctx.host.sessions.session_ids()])
     return None
 
 

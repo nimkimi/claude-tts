@@ -63,12 +63,24 @@ def on_jump_waiting(ctx, msg):
     # slow raise(A) would yank focus back to A while the voice is on B (spec
     # §4.5 lines 191-201).
     gen = ctx.host._raise().bump_generation()
-    base = ("Jumping to {0}.".format(folder) if folder
-            else "Jumping to another session.")
-    if not will_raise:
-        base += " Bring it forward to type."
-    ctx.host._enqueue(target, "prose", base, False,
-                      mute_exempt=True, at_front=True, names_session=True)
+    spearcon = ctx.host._spearcon_path(folder)
+    if spearcon:
+        # Spearcon names the destination (replaces the spoken "Jumping to {folder}.");
+        # the actionable "Bring it forward to type." stays speech when not raising.
+        # Enqueue the suffix FIRST (at_front), then the spearcon (at_front) so the
+        # head order is: spearcon, [suffix].
+        if not will_raise:
+            ctx.host._enqueue(target, "prose", "Bring it forward to type.", False,
+                              mute_exempt=True, at_front=True)
+        ctx.host._enqueue(target, "prose", folder, False, audio_path=spearcon,
+                          mute_exempt=True, at_front=True, names_session=True)
+    else:
+        base = ("Jumping to {0}.".format(folder) if folder
+                else "Jumping to another session.")
+        if not will_raise:
+            base += " Bring it forward to type."
+        ctx.host._enqueue(target, "prose", base, False,
+                          mute_exempt=True, at_front=True, names_session=True)
     if will_raise:
         ctx.host._raise().raise_async(
             identity, gen,
@@ -96,5 +108,6 @@ def on_cycle_session(ctx, msg):
     folder = sessions.folder(target)
     cue = folder + "." if folder else "Another session."
     ctx.host._enqueue(target, "prose", cue, False,
+                      audio_path=ctx.host._spearcon_path(folder),
                       mute_exempt=True, at_front=True, names_session=True)
     return None

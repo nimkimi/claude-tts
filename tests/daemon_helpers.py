@@ -4,6 +4,35 @@ from sonari.daemon import SpeechDaemon
 from sonari.config import DEFAULTS
 
 
+class FakeSpearconCache:
+    """In-memory stand-in for SpearconCache. `available` maps a folder -> a fake
+    cached audio path (a HIT); everything else is a MISS (returns None and records
+    the request as a generation kick)."""
+
+    def __init__(self):
+        self.available: dict[str, str] = {}
+        self.requested: list[str] = []
+        self.generated: list[str] = []
+        self.pregenerated: list[str] = []
+        self.cleaned = None
+
+    def get(self, label):
+        self.requested.append(label)
+        hit = self.available.get(label)
+        if hit is None:
+            self.generated.append(label)
+        return hit
+
+    def generate(self, label):
+        self.generated.append(label)
+
+    def pregenerate(self, labels):
+        self.pregenerated.extend(labels)
+
+    def cleanup(self, max_files=256):
+        self.cleaned = max_files
+
+
 class FakeSpeaker:
     """Records every Speaker call instead of touching audio."""
 
@@ -53,7 +82,7 @@ def make_daemon(verbosity: str = "everything", foreground: "str | None" = "fg"):
         sessions.set_foreground(foreground)
     config = {k: (v.copy() if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
     config["verbosity"] = verbosity
-    daemon = SpeechDaemon(speaker, sessions, config)
+    daemon = SpeechDaemon(speaker, sessions, config, spearcons=FakeSpearconCache())
     queue = daemon._stream(foreground).queue if foreground is not None else SpeechQueue()
     return daemon, queue, speaker, sessions, config
 
