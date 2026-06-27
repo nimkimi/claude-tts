@@ -124,5 +124,6 @@ def on_nav(ctx, msg):
         folder = sessions.folder(target)
         if folder:
             ctx.host._enqueue(target, "prose", folder + ".", False,
+                              audio_path=ctx.host._spearcon_path(folder),
                               mute_exempt=True, at_front=True, names_session=True)
     return None

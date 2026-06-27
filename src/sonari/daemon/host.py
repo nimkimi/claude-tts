@@ -29,7 +29,8 @@ from sonari.daemon.features import hotkeys  # noqa: F401
 
 
 class SpeechDaemon:
-    def __init__(self, speaker, sessions, config, raise_service=None) -> None:
+    def __init__(self, speaker, sessions, config, raise_service=None,
+                 spearcons=None) -> None:
         self.speaker = speaker
         self.sessions = sessions
         self.config = config
@@ -49,6 +50,7 @@ class SpeechDaemon:
         self._backlog_cap = int(config.get("backlog_cap", 200))
         self._reload_lock = threading.Lock()      # serializes off-lock hotkey reloads
         self.raise_service = raise_service        # lazily built on first jump
+        self._spearcons = spearcons              # SpearconCache, or None (no spearcons)
         # Pending permission decisions: session_id -> {"event": Event, "behavior": str|None}.
         # Mutated ONLY under self._lock (handlers); the Event is waited on ONLY outside
         # the lock (in _handle_message_guarded, after the transaction exits).
@@ -210,6 +212,15 @@ class SpeechDaemon:
     def _drop_pending(self, items) -> None:
         for it in items:
             self._state._pending_heard.pop(it.id, None)
+
+    def _spearcon_path(self, folder) -> "str | None":
+        """The cached spearcon audio file for *folder*'s short label, or None when no
+        cache is wired or the file isn't generated yet (the caller then falls back to
+        plain speech and the cache kicks off background generation for next time).
+        Never blocks; never on the hot path."""
+        if not folder or self._spearcons is None:
+            return None
+        return self._spearcons.get(folder)
 
     def _attributed_text(self, item) -> str:
         """item.text, prefixed with the session's folder name when the voice switches

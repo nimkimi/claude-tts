@@ -138,20 +138,28 @@ def on_where_am_i(ctx, msg):
     # Waiting = background sessions with live, non-stopped backlog (mirrors _waiting_target).
     waiting = sum(1 for sess, s in host._streams.items()
                   if sess != fg and not s.stopped and len(s.queue) > 0)
-    text = "{0}. {1}. {2} waiting.".format(folder, state, waiting)
     host.speaker.cancel()                          # barge-in: cut the current utterance
-    # Resume-after-interjection: re-queue the interrupted item at the front (BEHIND the
-    # status cue), carrying its pending-heard entry on a FRESH item id so the speak
-    # loop's note_spoken (which pops the OLD id with completed=False) can't lose it.
+    # Resume-after-interjection: re-queue the interrupted item FIRST so it ends up
+    # DEEPEST (the status cue / spearcon are appendleft'd in front of it below).
     if cur is not None:
         host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
                       entry=entry, mute_exempt=cur.mute_exempt,
                       pause_exempt=cur.pause_exempt, names_session=cur.names_session,
-                      at_front=True)
-    # Status cue at the very front (plays FIRST). pause_exempt so ⌃⌘W speaks even when the
-    # foreground session is stopped; mute_exempt so it is never folder-prefixed.
-    host._enqueue(fg, "prose", text, False,
-                  mute_exempt=True, pause_exempt=True, at_front=True)
+                      audio_path=cur.audio_path, at_front=True)
+    spearcon = host._spearcon_path(folder)
+    if spearcon:
+        # Spearcon names the session (replaces the spoken folder); state + count stay
+        # speech. Enqueue state FIRST (at_front), then the spearcon (at_front) so the
+        # head order is: spearcon, state, [resumed item].
+        host._enqueue(fg, "prose", "{0}. {1} waiting.".format(state, waiting),
+                      False, mute_exempt=True, pause_exempt=True, at_front=True)
+        host._enqueue(fg, "prose", folder, False, audio_path=spearcon,
+                      mute_exempt=True, pause_exempt=True, at_front=True,
+                      names_session=True)
+    else:
+        host._enqueue(fg, "prose",
+                      "{0}. {1}. {2} waiting.".format(folder, state, waiting),
+                      False, mute_exempt=True, pause_exempt=True, at_front=True)
     return None
 
 

@@ -73,11 +73,20 @@ def main() -> None:
         voice=cfg.get("voice"),
         rate=cfg.get("rate", 200),
         say_runner=_backend.tts.run,
+        afplay_runner=_backend.earcon.play,   # spearcon audio_path playback (same afplay)
         earcon_player=_backend.earcon.play,
         earcons=cfg.get("earcons"),
     )
     sessions = SessionManager(background_policy=cfg.get("background_policy", "earcon_only"))
-    daemon = SpeechDaemon(speaker, sessions, cfg)
+    from sonari.spearcon import SpearconCache
+    from sonari.paths import SONARI_DIR
+    spearcons = SpearconCache(
+        SONARI_DIR / "spearcons",
+        voice=cfg.get("spearcon_voice", "Samantha"),
+        rate=cfg.get("spearcon_rate", 525),
+    )
+    spearcons.cleanup()                       # prune stale cache files at daemon start
+    daemon = SpeechDaemon(speaker, sessions, cfg, spearcons=spearcons)
     daemon.run()
 
 
