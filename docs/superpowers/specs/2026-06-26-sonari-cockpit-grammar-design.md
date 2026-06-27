@@ -286,3 +286,104 @@ in sync.
 
 **Out of scope for B** (later sub-projects): the answer-via-hook channel ⌃⌘⏎/⎋ (C); spearcon synthesis +
 pitch-direction sound language (D) — B's ⌃⌘W speaks plain terse status.
+
+## 16. Sub-project C — answer-via-hook: verified architecture & implementation decisions (2026-06-27)
+
+A + B shipped (PRs #70/#71 → main @ a862bdc). This section records **sub-project C (answer permission
+prompts by hotkey)**, resolved from a code-recon + an **empirical verification pass against a live Claude
+Code session**. §6.4's intent stands ("permissions are answered through a hook that blocks for ⌃⌘⏎/⎋");
+the mechanism below **corrects this design's earlier recorded facts**, which were made on incomplete info.
+
+### 16.1 Architecture correction (the load-bearing change)
+§6.4 and §12 said the decision rides a **PreToolUse** hook's `permissionDecision`. **That is wrong on both
+the hook and the schema.** Verified end-to-end in a real interactive Claude Code session (CC v2.1.187/195)
+driven under a PTY, observed via files (not the TUI):
+- **The correct hook is `PermissionRequest`, not PreToolUse.** PreToolUse fires for *every* tool call (so a
+  blocking PreToolUse hook would freeze all normal tool use, and it cannot tell whether a given call would
+  even prompt). `PermissionRequest` fires **only when a permission dialog would appear** — proven: it did
+  NOT fire for an allowlisted Bash command, and DID fire for a non-allowlisted one.
+- **The output schema is `hookSpecificOutput.decision.behavior = "allow" | "deny"`** (with
+  `hookEventName="PermissionRequest"`, optional `decision.updatedInput`) — **not** `permissionDecision`
+  (that is the PreToolUse field).
+- **It can block:** the hook slept **5.0s** (FIRED → RESUME) and Claude Code waited. Hook execution timeout
+  is **600s** default, per-hook configurable — a keypress-wait is well within budget.
+- **`deny` actually stops the tool** (the command never ran) — fail-closed proven.
+- **Returning no decision falls through** to Claude Code's normal permission dialog, and *then*
+  `Notification(permission_prompt)` fires.
+- **`Notification(permission_prompt)` does NOT fire when PermissionRequest resolves** (allow/deny). So the
+  answer-hook must **both speak the prompt and block for the answer** — the old Notification speak-channel
+  cannot carry the spoken prompt in the answered case.
+- **Payload** carries `session_id`, `cwd`, `permission_mode`, `tool_name`, `tool_input{command,description}`,
+  `permission_suggestions` (no `tool_use_id`). `session_id` identifies the asking session — the safety key.
+
+**Division of labor (mutually exclusive in time, no double-speak):**
+
+| Path | Fires | Speaks |
+|---|---|---|
+| You answer by hotkey | `PermissionRequest` (speaks + blocks + answers) | the new C hook |
+| You're away → ~2 min timeout | PermissionRequest returns nothing → dialog → `Notification(permission_prompt)` | the *existing* speak-hook (now the fallback announcer) |
+
+### 16.2 The blocking IPC (outside the daemon lock)
+- **Hook** `bin/sonari-hook PermissionRequest`: build a `PERMISSION_REQUEST` message (session, tool, summary)
+  → `client.send(msg, expect_reply=True, timeout=~130s)` → **block** for the reply → print the decision JSON
+  to stdout, or **print nothing** (fall through). ANY failure (daemon down, send error, socket timeout) →
+  print nothing → fall through (graceful degradation to the normal terminal prompt).
+- **Daemon `on_permission_request`** (runs UNDER the lock): play the `permission` earcon + enqueue the spoken
+  prompt on the **asking** session as a decision item (`is_decision=True`, so ⌃⌘D lands on it); register a
+  pending decision `self._pending_decisions[session_id] = {event: threading.Event(), behavior: None}`; return
+  an **AWAIT sentinel**.
+- **`_handle_message_guarded`** (host.py): after the `with self._state.transaction()` block EXITS (lock
+  **released**), if the handler returned the AWAIT sentinel, call `_await_permission_decision(sid, ~120s)`
+  which does `event.wait(timeout)` **outside the lock** and returns the reply `{decision: "allow"|"deny"|None}`.
+  The daemon wait (~120s) is **strictly shorter** than the client socket timeout (~130s), so a timeout returns
+  a fall-through reply BEFORE the socket closes. `server.py` is unchanged (it still just sends what dispatch
+  returns — the wait lives in the host's guarded dispatch, on the connection thread, lock-free).
+- **`on_answer_permission`** (UNDER the lock, from the ⌃⌘⏎/⎋ hotkey): `target = sessions.focused_session()
+  or foreground()`; `pd = self._pending_decisions.get(target)`; if present → set `pd.behavior` + `pd.event.set()`
+  + barge-in confirmation ("Approved."/"Denied."); if **absent** → `error` earcon (always-confirm-fired). The
+  pending dict is mutated only under the lock; the `Event` is waited on only outside it — no deadlock with the
+  speak loop or hotkey thread.
+
+### 16.3 Safety — "only the focused session can be answered" (load-bearing)
+A keypress resolves **only the focused session's own** pending decision. Pending decisions are keyed by the
+asking `session_id` (== sonari's session key); the answer routes to `focused_session()`'s entry. Focused on a
+session with no pending decision → no-op + error earcon, **never** an answer routed to another session. The
+permission prompt does **not** auto-steal focus (that would re-introduce a focus-steal race right before a
+keypress); the user navigates deliberately (⌃⌘D jumps to the decision, since the prompt is a decision item).
+Single-session (the common case): focused == asking, so ⌃⌘⏎/⎋ "just works" with no nav.
+
+### 16.4 Timeout (owner decision, Nima 2026-06-27): **fall through to the terminal**
+On the daemon's own-wait expiry (~2 min) the hook returns **no decision** → Claude Code shows its normal
+permission prompt for terminal answering (and `Notification` speaks it via the existing fallback). Nothing is
+lost; **timeout never auto-allows.** (Verified: return-nothing → dialog appears + Notification fires.)
+
+### 16.5 Bindings, collision-vet, protocol
+- **Collision-vet (macOS, adversarial agent + web): ⌃⌘⏎ and ⌃⌘⎋ are both clear.** Force Quit is ⌘⌥⎋
+  (Option, not Control); the Sequoia ⌃⏎ contextual menu lacks ⌘; neither chord is in Apple's reserved set;
+  Carbon `RegisterEventHotKey` wins the chord. **KEEP both** as specced.
+- **Keytables:** add `return`=36 and `escape`=53 to `keytables.py` KEY_CODES + the `hotkeys.py` display map
+  ("Return"/"Esc"). Both use the standard ⌃⌘ chord → bind in `_DEFAULT_KEYS`.
+- **Keymap actions:** `approve` → `{type: answer_permission, behavior: "allow"}`, `deny` →
+  `{type: answer_permission, behavior: "deny"}` (one MsgType + a `behavior` field, mirroring `cycle_session`'s
+  `direction`). Defaults: `approve`→"return", `deny`→"escape".
+- **Protocol inventory 29 → 31** (`PERMISSION_REQUEST`, `ANSWER_PERMISSION`). Keep `assert_complete([...])` +
+  its count comment + `test_daemon_registry` (ALL_29→ALL_31 + fn names) + `test_protocol` (BOTH dicts) in sync.
+- **hooks.json:** add a `PermissionRequest` entry (empty matcher = all permission-eligible tools) →
+  `${CLAUDE_PLUGIN_ROOT}/bin/sonari-hook PermissionRequest`.
+
+### 16.6 Testing & validation boundary
+Daemon + hook + blocking-IPC + safety keying are fully unit-testable behind the existing fakes
+(`make_daemon`), including the threaded round-trip (request blocks on one thread; ⌃⌘⏎ answers on another →
+reply returned) and the only-focused-session guarantee. The **sacrificial-HOME dogfood** exercises the FULL
+round-trip by invoking `bin/sonari-hook PermissionRequest` directly against a real daemon (NOT via
+`claude -p`, which bypasses PermissionRequest) and driving ⌃⌘⏎/⎋ over the socket. The **CC↔hook seam** (Claude
+Code honors the printed decision and blocks for it) is verified empirically (2026-06-27) + the on-hardware
+human gate.
+
+### 16.7 Still owed (spec §9)
+File the upstream Claude Code feature request: a hook/IPC that fires on **AskUserQuestion / ExitPlanMode** and
+accepts the chosen option / approval from an external tool (PermissionRequest only covers allow/deny on a
+tool — option-select and plan approval still have no safe channel). Draft + file as part of C.
+
+**Out of scope for C** (sub-project D): spearcon synthesis + pitch-direction sound language — C uses the
+existing earcons + plain spoken confirmations ("Approved."/"Denied.").
