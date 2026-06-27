@@ -90,5 +90,44 @@ def test_cleanup_keeps_newest_by_mtime(tmp_path):
 def test_generate_swallows_popen_error(tmp_path):
     def boom(cmd):
         raise OSError("say missing")
-    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=boom)
+    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=boom,
+                          voice_lister=lambda: "Samantha  en_US  # Hi.\n")
     assert cache.generate("backend") is None                # never raises
+
+
+# ---------------------------------------------------------------------------
+# Voice-availability fallback tests (spec §17.1)
+# ---------------------------------------------------------------------------
+
+_VOICE_LIST_WITH_SAMANTHA = "Samantha            en_US    # Hello, I'm Samantha.\nAlex                en_US    # Hi.\n"
+_VOICE_LIST_WITHOUT_SAMANTHA = "Alex                en_US    # Hi.\nFred                en_US    # Hello.\n"
+
+
+def test_generate_includes_voice_flag_when_voice_available(tmp_path):
+    """Voice found in `say -v '?'` → command carries -v <voice>."""
+    calls, popen = _recording()
+    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen,
+                          voice_lister=lambda: _VOICE_LIST_WITH_SAMANTHA)
+    cache.generate("backend")
+    assert calls[0] == ["say", "-v", "Samantha", "-r", "525",
+                         "-o", str(cache.path_for("backend")), "backend"]
+
+
+def test_generate_omits_voice_flag_when_voice_not_in_list(tmp_path):
+    """Voice absent from `say -v '?'` → command uses system default (no -v)."""
+    calls, popen = _recording()
+    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen,
+                          voice_lister=lambda: _VOICE_LIST_WITHOUT_SAMANTHA)
+    cache.generate("backend")
+    assert calls[0] == ["say", "-r", "525", "-o", str(cache.path_for("backend")), "backend"]
+
+
+def test_generate_omits_voice_flag_when_voice_lister_raises(tmp_path):
+    """voice_lister error (e.g. `say` missing) → fall back to system default."""
+    calls, popen = _recording()
+    def boom():
+        raise OSError("say not found")
+    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen,
+                          voice_lister=boom)
+    cache.generate("backend")
+    assert calls[0] == ["say", "-r", "525", "-o", str(cache.path_for("backend")), "backend"]
