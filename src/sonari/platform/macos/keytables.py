@@ -4,9 +4,13 @@ into the form the Swift hotkeyd reads)."""
 KEY_CODES = {
     "s": 1, "r": 15, "d": 2, "l": 37, "v": 9, "o": 31,   # 's' = stop_session
     "f": 3, "p": 35, "m": 46, "j": 38,  # 'p' free, 'm' = stop_all, 'j' = jump_waiting (kVK_ANSI_J)
+    "w": 13,                            # 'w' = where_am_i (kVK_ANSI_W)
     "period": 47, ".": 47,
     "rightbracket": 30, "]": 30,
     "leftbracket": 33, "[": 33,
+    "equal": 24, "+": 24,               # rate faster (kVK_ANSI_Equal; '+' alias, same physical key)
+    "minus": 27, "-": 27,               # rate slower (kVK_ANSI_Minus; '-' alias)
+    "tab": 48,                          # cycle sessions (kVK_Tab)
     # Arrow keys (Carbon virtual key codes), with aliases.
     "left": 123, "leftarrow": 123,
     "right": 124, "rightarrow": 124,

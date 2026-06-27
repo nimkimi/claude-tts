@@ -33,9 +33,10 @@ def _patch_keymap_paths(monkeypatch, tmp_path):
 
 def test_macos_keytables_via_backend(mac):
     kc, mm = keymap._keytables()
-    for k in ("s", "r", "d", "l", "v", "o", ".", "]", "["):
+    for k in ("s", "r", "d", "l", "v", "o", ".", "]", "[", "w", "tab", "equal", "minus"):
         assert k in kc
     assert kc["s"] == 1 and kc["."] == 47 and kc["]"] == 30 and kc["["] == 33
+    assert kc["w"] == 13 and kc["tab"] == 48 and kc["equal"] == 24 and kc["minus"] == 27
     assert mm["cmd"] == 256 and mm["shift"] == 512 and mm["ctrl"] == 4096
 
 
@@ -48,14 +49,23 @@ def test_action_messages_faster_has_delta_25():
 
 def test_default_keymap_macos_uses_ctrl_cmd(mac):
     d = keymap.default_keymap()
-    assert set(d.keys()) == {"nav_prev", "nav_next", "nav_first", "nav_last",
-                             "stop_session", "stop_all", "jump_waiting",
-                             "nav_prev_response", "nav_next_response"}
+    assert set(d.keys()) == {
+        "nav_prev", "nav_next",
+        "stop_session", "stop_all", "jump_waiting",
+        "jump_decision", "where_am_i", "faster", "slower",
+        "nav_prev_response", "nav_next_response",
+        "cycle_session_next", "cycle_session_prev",
+    }
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
     assert d["stop_session"]["key"] == "s" and d["stop_all"]["key"] == "m"
-    # Stage 5: response-level nav = Ctrl+Cmd+Shift+arrows
-    assert d["nav_prev_response"] == {"key": "left", "mods": ["ctrl", "cmd", "shift"]}
-    assert d["nav_next_response"] == {"key": "right", "mods": ["ctrl", "cmd", "shift"]}
+    assert d["jump_decision"]["key"] == "d" and d["where_am_i"]["key"] == "w"
+    assert d["faster"]["key"] == "equal" and d["slower"]["key"] == "minus"
+    # Sub-project B: nav_first/nav_last lose their default keys so ⌃⌘↑/↓ can own response-nav.
+    assert "nav_first" not in d and "nav_last" not in d
+    assert d["nav_prev_response"] == {"key": "up", "mods": ["ctrl", "cmd"]}
+    assert d["nav_next_response"] == {"key": "down", "mods": ["ctrl", "cmd"]}
+    assert d["cycle_session_next"] == {"key": "tab", "mods": ["ctrl", "cmd"]}
+    assert d["cycle_session_prev"] == {"key": "tab", "mods": ["ctrl", "cmd", "shift"]}
 
 
 # --- resolve_keymap ---------------------------------------------------------
@@ -75,21 +85,18 @@ def test_resolve_faster_message_is_json_with_delta(mac):
 
 
 def test_default_keymap_binds_only_nav_stop_keys():
-    # The always-bound core is present on every platform; faster/slower ship UNBOUND.
     km = keymap.default_keymap()
-    assert {"nav_prev", "nav_next", "nav_first", "nav_last",
+    assert {"nav_prev", "nav_next",
             "stop_session", "stop_all", "jump_waiting"} <= set(km.keys())
     assert set(km.keys()) <= set(keymap.ACTION_MESSAGES.keys())
-    assert "faster" in keymap.ACTION_MESSAGES and "faster" not in km
-    assert "slower" in keymap.ACTION_MESSAGES and "slower" not in km
+    # nav_first/nav_last remain valid actions but ship UNBOUND after sub-project B.
+    assert "nav_first" in keymap.ACTION_MESSAGES and "nav_first" not in km
+    assert "nav_last" in keymap.ACTION_MESSAGES and "nav_last" not in km
 
 
 def test_default_keymap_binds_nav_stop_keys():
-    """Regression: nav_next/prev/first/last, stop_session and stop_all were defined in
-    ACTION_MESSAGES but absent from _DEFAULT_KEYS, so no hotkey was ever
-    registered for them on a default install."""
     km = keymap.default_keymap()
-    for action in ("nav_next", "nav_prev", "nav_first", "nav_last", "stop_session", "stop_all"):
+    for action in ("nav_next", "nav_prev", "stop_session", "stop_all"):
         assert action in km, f"{action} has no default binding"
         assert km[action]["key"], f"{action} default binding has no key"
 
@@ -122,18 +129,20 @@ def test_resolve_skips_unbound_entries():
 
 def test_unbind_action_default_writes_unbound_override(monkeypatch, tmp_path):
     km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
-    keymap.unbind_action("nav_first")            # nav_first HAS a default binding
+    keymap.unbind_action("nav_prev")             # nav_prev HAS a default binding
     user = json.loads(km.read_text(encoding="utf-8"))
-    assert user["nav_first"]["key"] is None      # explicit unbound override
+    assert user["nav_prev"]["key"] is None       # explicit unbound override
     resolved = keymap.resolve_keymap(keymap.load_keymap())
-    assert "nav_first" not in {e["action"] for e in resolved}
+    assert "nav_prev" not in {e["action"] for e in resolved}
 
 
 def test_unbind_action_non_default_just_drops(monkeypatch, tmp_path):
+    # nav_first is a valid action that ships UNBOUND after sub-project B, so
+    # unbinding it just drops any user binding (no explicit null override needed).
     km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
-    km.write_text(json.dumps({"faster": {"key": "]", "mods": ["alt"]}}), encoding="utf-8")
-    keymap.unbind_action("faster")               # no default -> remove the binding
-    assert "faster" not in json.loads(km.read_text(encoding="utf-8"))
+    km.write_text(json.dumps({"nav_first": {"key": "]", "mods": ["alt"]}}), encoding="utf-8")
+    keymap.unbind_action("nav_first")            # no default -> remove the binding
+    assert "nav_first" not in json.loads(km.read_text(encoding="utf-8"))
 
 
 def test_unbind_unknown_action_raises():
@@ -193,7 +202,7 @@ def test_write_resolved_emits_array_of_bindings(monkeypatch, tmp_path):
     keymap.write_resolved()
     data = json.loads((tmp_path / "hotkeyd.resolved.json").read_text(encoding="utf-8"))
     # len must match the platform's full default_keymap (not just _DEFAULT_KEYS) because
-    # Stage 5 adds extra_default_bindings() on macOS (response-nav Ctrl+Cmd+Shift+arrows).
+    # extra_default_bindings() adds the macOS response-nav (⌃⌘↑/↓) and cycle (⌃⌘Tab/⌃⌘⇧Tab) bindings.
     assert isinstance(data, list) and len(data) == len(keymap.default_keymap())
     for entry in data:
         assert isinstance(entry["keyCode"], int)
@@ -209,7 +218,7 @@ def test_write_resolved_no_tmp_leftover(monkeypatch, tmp_path):
 
 def test_no_two_default_actions_share_a_key():
     # Default bindings may share a key only when the modifier chord differs
-    # (Stage 5: nav_prev/nav_prev_response both use "left" but differ by +Shift).
+    # (sub-project B: cycle_session_next/cycle_session_prev both use "tab" but differ by +Shift).
     # The invariant is no two actions resolve to the same *hotkey* (key + mods pair).
     from sonari.keymap import default_keymap
     chords = [(b["key"], tuple(b["mods"])) for b in default_keymap().values()]
@@ -225,7 +234,7 @@ def test_default_keymap_binds_jump_waiting_to_j():
     assert km["jump_waiting"]["key"] == "j"
 
 
-# --- Stage 5: response-nav actions + macOS Ctrl+Cmd+Shift+arrows defaults ----
+# --- response-nav actions + macOS Ctrl+Cmd+arrow defaults (sub-project B) ----
 
 def test_response_nav_action_messages():
     assert keymap.ACTION_MESSAGES["nav_prev_response"] == {"type": "nav", "to": "prev_response"}
@@ -247,3 +256,36 @@ def test_unbind_response_nav_on_macos_writes_unbound_override(mac, monkeypatch, 
     keymap.unbind_action("nav_prev_response")    # mac-defaulted -> explicit null override
     user = json.loads(km.read_text(encoding="utf-8"))
     assert user["nav_prev_response"]["key"] is None
+
+
+# --- Sub-project B: cockpit grammar (cycle/where-am-i/jump/rate) -------------
+
+def test_response_nav_default_is_ctrl_cmd_arrows_no_shift(mac):
+    d = keymap.default_keymap()
+    assert d["nav_prev_response"] == {"key": "up", "mods": ["ctrl", "cmd"]}
+    assert d["nav_next_response"] == {"key": "down", "mods": ["ctrl", "cmd"]}
+
+
+def test_cycle_session_default_bindings_on_macos(mac):
+    d = keymap.default_keymap()
+    assert d["cycle_session_next"] == {"key": "tab", "mods": ["ctrl", "cmd"]}
+    assert d["cycle_session_prev"] == {"key": "tab", "mods": ["ctrl", "cmd", "shift"]}
+
+
+def test_b_action_messages_present():
+    assert keymap.ACTION_MESSAGES["jump_decision"] == {"type": "jump_decision"}
+    assert keymap.ACTION_MESSAGES["where_am_i"] == {"type": "where_am_i"}
+    assert keymap.ACTION_MESSAGES["cycle_session_next"] == {
+        "type": "cycle_session", "direction": "next"}
+    assert keymap.ACTION_MESSAGES["cycle_session_prev"] == {
+        "type": "cycle_session", "direction": "prev"}
+
+
+def test_full_default_keymap_resolves_without_duplicate_hotkeys(mac):
+    resolved = keymap.resolve_keymap(keymap.default_keymap())
+    pairs = [(e["keyCode"], e["modifiers"]) for e in resolved]
+    assert len(pairs) == len(set(pairs)), "duplicate (keyCode, modifiers) in default keymap"
+    actions = {e["action"] for e in resolved}
+    assert {"jump_decision", "where_am_i", "faster", "slower",
+            "cycle_session_next", "cycle_session_prev",
+            "nav_prev_response", "nav_next_response"} <= actions

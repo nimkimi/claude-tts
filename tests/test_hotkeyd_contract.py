@@ -3,10 +3,9 @@ whether from a hotkey (keymap.ACTION_MESSAGES) or the CLI. Feeding each command
 straight into handle_message must produce the intended effect, proving the bytes
 the hotkeyd / CLI send are real protocol commands.
 
-Note: stop/skip/cycle_verbosity/reread_options/jump_decision are no longer hotkey
-actions (removed from ACTION_MESSAGES), but the daemon still handles those protocol
-commands (stop/skip ship via the CLI), so they are exercised here with literal
-messages."""
+Note: stop/skip/cycle_verbosity/reread_options are no longer hotkey actions (removed
+from ACTION_MESSAGES), but the daemon still handles those protocol commands (stop/skip
+ship via the CLI), so they are exercised here with literal messages."""
 
 from sonari import keymap
 from sonari.protocol import MsgType

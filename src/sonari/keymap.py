@@ -36,18 +36,24 @@ ACTION_MESSAGES = {
     "stop_session": {"type": "stop_session"},   # ⌃⌘S: per-session stop/start
     "stop_all": {"type": "stop_all"},   # ⌃⌘M: stop every session
     "jump_waiting": {"type": "jump_waiting"},  # switch voice to a waiting background session
+    "jump_decision": {"type": "jump_decision"},   # ⌃⌘D: jump to the question/decision
+    "cycle_session_next": {"type": "cycle_session", "direction": "next"},  # ⌃⌘Tab
+    "cycle_session_prev": {"type": "cycle_session", "direction": "prev"},  # ⌃⌘⇧Tab
+    "where_am_i": {"type": "where_am_i"},          # ⌃⌘W: terse spoken status
     "faster": {"type": "set_rate", "delta": 25},
     "slower": {"type": "set_rate", "delta": -25},
 }
 
 # Shared action -> default key. The chord modifiers are platform-defaulted (macOS:
 # Ctrl+Cmd; Windows: Ctrl+Shift+Alt) via the active backend's default_mods().
-# Only navigation + stop/stop-all + jump are bound out of the box; faster/slower are
-# valid actions but ship UNBOUND (blank by default) so the default keymap stays
-# minimal — users add a key for them in keymap.json if they want one.
+# nav_first/nav_last remain valid actions but ship UNBOUND so ⌃⌘↑/↓ can own
+# response-nav (extra_default_bindings). Per-platform extras (cycle, response-nav)
+# are NOT listed here — they live in extra_default_bindings().
 _DEFAULT_KEYS = {
-    "nav_prev": "left", "nav_next": "right", "nav_first": "up", "nav_last": "down",
+    "nav_prev": "left", "nav_next": "right",
     "stop_session": "s", "stop_all": "m", "jump_waiting": "j",
+    "jump_decision": "d", "where_am_i": "w",
+    "faster": "equal", "slower": "minus",
 }
 
 
@@ -63,8 +69,8 @@ def default_keymap() -> dict:
 
     The `_DEFAULT_KEYS` actions all share the platform's `default_mods()` chord.
     `extra_default_bindings()` adds any per-platform binding that the uniform chord
-    can't express (response-nav = arrows +Shift on macOS's Ctrl+Cmd; on Windows the base
-    chord already spends Shift, so response-nav gets distinct keys [ / ] under it)."""
+    can't express (on macOS's Ctrl+Cmd: response-nav = ↑/↓ and cycle = Tab/⇧Tab; on
+    Windows the base chord already spends Shift, so response-nav gets distinct keys)."""
     from sonari.platform import get_platform
     hk = get_platform().hotkey
     mods = hk.default_mods()
