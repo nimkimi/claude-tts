@@ -19,10 +19,11 @@ LAUNCH_AGENT_PATH = os.path.expanduser(
 # Single-letter keys → uppercase; symbolic names → their symbol.
 _KEY_DISPLAY_BY_NAME = {
     "s": "S", "r": "R", "d": "D", "l": "L", "v": "V", "o": "O",
-    "f": "F", "p": "P", "m": "M", "j": "J",
+    "f": "F", "p": "P", "m": "M", "j": "J", "w": "W",
     "period": ".", ".": ".",
     "rightbracket": "]", "]": "]",
     "leftbracket": "[", "[": "[",
+    "equal": "=", "minus": "-", "tab": "Tab",
     "left": "Left", "right": "Right", "up": "Up", "down": "Down",
 }
 
@@ -107,12 +108,15 @@ class MacHotkeyBackend:
         return list(keytables.DEFAULT_MODS)
 
     def extra_default_bindings(self) -> dict:
-        # Stage 5: response-level nav = Ctrl+Cmd+Shift+arrows (the base Ctrl+Cmd chord
-        # has room for +Shift, which differentiates it from within-response ←/→).
-        mods = list(self.default_mods()) + ["shift"]
+        # Sub-project B nav grammar (Ctrl+Cmd base chord):
+        #  - between-response nav = ⌃⌘↑ / ⌃⌘↓ (frees the old ⌃⌘⇧←/→ chord),
+        #  - cycle sessions      = ⌃⌘Tab (next) / ⌃⌘⇧Tab (prev).
+        base = list(self.default_mods())
         return {
-            "nav_prev_response": {"key": "left", "mods": mods},
-            "nav_next_response": {"key": "right", "mods": mods},
+            "nav_prev_response": {"key": "up", "mods": list(base)},
+            "nav_next_response": {"key": "down", "mods": list(base)},
+            "cycle_session_next": {"key": "tab", "mods": list(base)},
+            "cycle_session_prev": {"key": "tab", "mods": base + ["shift"]},
         }
 
     def reload(self, dispatch=None) -> None:
