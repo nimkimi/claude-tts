@@ -220,3 +220,25 @@ def test_focused_session_none_after_unregister():
     assert sm.focused_session() == "a"
     sm.unregister("a")
     assert sm.focused_session() is None
+
+
+# --- roster (cycle-session) ----------------------------------------------
+
+def test_session_ids_empty_initially():
+    assert SessionManager().session_ids() == []
+
+
+def test_session_ids_returns_insertion_order():
+    sm = SessionManager()
+    sm.register("a")
+    sm.register("b")
+    sm.set_foreground("c")          # set_foreground also records the session
+    assert sm.session_ids() == ["a", "b", "c"]
+
+
+def test_session_ids_excludes_unregistered():
+    sm = SessionManager()
+    sm.register("a")
+    sm.register("b")
+    sm.unregister("a")
+    assert sm.session_ids() == ["b"]
