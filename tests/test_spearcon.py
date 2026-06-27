@@ -26,10 +26,15 @@ def _recording():
     return calls, (lambda cmd: calls.append(cmd))
 
 
+def _fake_voice_lister():
+    """Return a fake voice list with Samantha available (hermetic, no real say shell-out)."""
+    return "Samantha            en_US    # Hello, I'm Samantha.\nAlex                en_US    # Hi.\n"
+
+
 def test_key_is_stable_and_voice_rate_sensitive(tmp_path):
-    a = SpearconCache(tmp_path, voice="Samantha", rate=525)
-    b = SpearconCache(tmp_path, voice="Alex", rate=525)
-    c = SpearconCache(tmp_path, voice="Samantha", rate=300)
+    a = SpearconCache(tmp_path, voice="Samantha", rate=525, voice_lister=_fake_voice_lister)
+    b = SpearconCache(tmp_path, voice="Alex", rate=525, voice_lister=_fake_voice_lister)
+    c = SpearconCache(tmp_path, voice="Samantha", rate=300, voice_lister=_fake_voice_lister)
     assert a.path_for("backend") == a.path_for("backend")     # deterministic
     assert a.path_for("backend") != b.path_for("backend")     # voice in key
     assert a.path_for("backend") != c.path_for("backend")     # rate in key
@@ -38,7 +43,7 @@ def test_key_is_stable_and_voice_rate_sensitive(tmp_path):
 
 def test_get_miss_kicks_background_generation_and_returns_none(tmp_path):
     calls, popen = _recording()
-    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen)
+    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen, voice_lister=_fake_voice_lister)
     assert cache.get("backend") is None                       # not generated yet
     assert calls == [["say", "-v", "Samantha", "-r", "525",
                       "-o", str(cache.path_for("backend")), "backend"]]
@@ -46,7 +51,7 @@ def test_get_miss_kicks_background_generation_and_returns_none(tmp_path):
 
 def test_get_hit_returns_path_and_does_not_regenerate(tmp_path):
     calls, popen = _recording()
-    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen)
+    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen, voice_lister=_fake_voice_lister)
     p = cache.path_for("backend")
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b"FORM....AIFF")                            # simulate a cached file
@@ -56,14 +61,14 @@ def test_get_hit_returns_path_and_does_not_regenerate(tmp_path):
 
 def test_generate_uses_truncated_label_as_say_text(tmp_path):
     calls, popen = _recording()
-    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen)
+    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen, voice_lister=_fake_voice_lister)
     cache.generate("my project here")
     assert calls[0][-1] == "my"                               # spearcon_label applied
 
 
 def test_pregenerate_skips_already_cached(tmp_path):
     calls, popen = _recording()
-    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen)
+    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen, voice_lister=_fake_voice_lister)
     hit = cache.path_for("backend")
     hit.parent.mkdir(parents=True, exist_ok=True)
     hit.write_bytes(b"x")
@@ -73,7 +78,7 @@ def test_pregenerate_skips_already_cached(tmp_path):
 
 def test_cleanup_keeps_newest_by_mtime(tmp_path):
     import os
-    cache = SpearconCache(tmp_path, voice="Samantha", rate=525)
+    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, voice_lister=_fake_voice_lister)
     d = tmp_path
     d.mkdir(parents=True, exist_ok=True)
     paths = []
