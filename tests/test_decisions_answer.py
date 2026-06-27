@@ -52,7 +52,10 @@ def test_answer_sets_behavior_and_confirms_for_focused_session():
     assert ev.is_set()
     assert speaker.cancels > 0          # barge-in happened
     st = daemon._stream("S1")
-    assert any("Approved." in it.text for it in st.queue._items)
+    confirm = next(it for it in st.queue._items if "Approved." in it.text)
+    # always-confirm-fired: the cue must pierce a ⌃⌘S-stopped session (pause_exempt)
+    # and never be folder-prefixed (mute_exempt) — matches the ⌃⌘W status-cue grammar.
+    assert confirm.pause_exempt and confirm.mute_exempt
 
 
 def test_answer_on_session_without_pending_is_error_no_route():
