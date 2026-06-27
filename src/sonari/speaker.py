@@ -97,6 +97,22 @@ class Speaker:
         if proc is not None and hasattr(proc, "poll"):
             self._earcon_procs.append(proc)
 
+    def pitch(self, direction: str) -> None:
+        """Play a pitch-direction chirp (up = next/yes, down = prev/no), fire-and-
+        forget. The asset is resolved DIRECTLY from the package (not the configurable
+        earcons dict) so the cue can never be silently disabled by an existing user's
+        `earcons` config (bootstrap merges with a whole-key guard). Reuses the earcon
+        player (afplay) and the same non-blocking reap as earcon()."""
+        if self._earcon_player is None or direction not in ("up", "down"):
+            return
+        self._reap_earcon_procs()
+        from pathlib import Path
+        path = str(Path(__file__).resolve().parent
+                   / "assets" / "pitch_{0}.wav".format(direction))
+        proc = self._earcon_player(path)
+        if proc is not None and hasattr(proc, "poll"):
+            self._earcon_procs.append(proc)
+
     def set_voice(self, v) -> None:
         self._voice = v
 

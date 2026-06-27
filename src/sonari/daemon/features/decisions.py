@@ -189,6 +189,7 @@ def on_answer_permission(ctx, msg):
         return None
     pd["behavior"] = behavior
     pd["event"].set()
+    host.speaker.pitch("up" if behavior == "allow" else "down")   # directional chirp first
     host.speaker.cancel()                     # barge-in: confirm immediately
     host._enqueue(target, "prose",
                   "Approved." if behavior == "allow" else "Denied.",
