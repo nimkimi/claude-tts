@@ -74,3 +74,26 @@ def on_jump_waiting(ctx, msg):
             identity, gen,
             on_failure=lambda s=target, f=folder: ctx.host._raise_failed(s, f))
     return None
+
+
+@handler(MsgType.CYCLE_SESSION)
+def on_cycle_session(ctx, msg):
+    # ⌃⌘Tab / ⌃⌘⇧Tab: cycle the VOICE through the session roster in insertion order,
+    # wrapping at the ends. A SOFT switch (no terminal-raise, unlike jump-to-waiting):
+    # focus the target, cut the current utterance, lead with a self-naming folder cue.
+    sessions = ctx.host.sessions
+    ids = sessions.session_ids()
+    if len(ids) < 2:
+        ctx.host.speaker.earcon("error")          # <2 sessions: confirm fired, no silent no-op
+        return None
+    fg = sessions.foreground()
+    cur = ids.index(fg) if fg in ids else 0
+    step = 1 if msg.get("direction", "next") == "next" else -1
+    target = ids[(cur + step) % len(ids)]
+    sessions.focus(target)
+    ctx.host.speaker.cancel()
+    folder = sessions.folder(target)
+    cue = folder + "." if folder else "Another session."
+    ctx.host._enqueue(target, "prose", cue, False,
+                      mute_exempt=True, at_front=True, names_session=True)
+    return None
