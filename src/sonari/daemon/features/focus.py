@@ -90,6 +90,7 @@ def on_cycle_session(ctx, msg):
     cur = ids.index(fg) if fg in ids else 0
     step = 1 if msg.get("direction", "next") == "next" else -1
     target = ids[(cur + step) % len(ids)]
+    ctx.host.speaker.pitch("up" if step == 1 else "down")   # directional chirp first
     sessions.focus(target)
     ctx.host.speaker.cancel()
     folder = sessions.folder(target)

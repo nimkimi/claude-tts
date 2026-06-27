@@ -108,6 +108,10 @@ def on_nav(ctx, msg):
     if crossed:
         sessions.focus(target)                     # move the voice to the navigated session
     to = msg.get("to", "prev")
+    _chirp = {"next": "up", "prev": "down",
+              "next_response": "up", "prev_response": "down"}.get(to)
+    if _chirp:
+        ctx.host.speaker.pitch(_chirp)             # directional chirp first; first/last get none
     if to in ("prev_response", "next_response"):
         _nav_response(ctx, target, to)             # both clear target queue, then enqueue transcript
     else:

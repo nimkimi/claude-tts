@@ -27,5 +27,8 @@ kokoro = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+sonari = ["assets/*.wav"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

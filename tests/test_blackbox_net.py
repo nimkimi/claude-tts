@@ -50,6 +50,11 @@ class FakeSpeaker:
     def earcon(self, kind):
         self.log.append(("earcon", kind))
 
+    def pitch(self, direction: str) -> None:
+        # Chirps are parallel audio outside the speech queue; not mixed into
+        # the ordering log so characterization tests don't need updating.
+        pass
+
     def set_voice(self, v):
         self.voice = v
 
