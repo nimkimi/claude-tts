@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from sonari import hooks_entry
-from sonari.hooks_entry import handle_event
+from sonari.hooks_entry import handle_event, permission_decision_stdout
 from sonari.protocol import PROTOCOL_VERSION, MsgType
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -340,3 +340,30 @@ def test_session_start_missing_env_yields_empty_strings(monkeypatch):
     assert m["term_program"] == ""
     assert m["tty"] == ""
     assert m["iterm_session_id"] == ""
+
+
+def test_permission_request_maps_to_blocking_message():
+    msgs = handle_event("PermissionRequest", {
+        "session_id": "S1", "tool_name": "Bash",
+        "tool_input": {"command": "rm -rf build", "description": "clean"}})
+    assert len(msgs) == 1
+    m = msgs[0]
+    assert m["type"] == MsgType.PERMISSION_REQUEST
+    assert m["session"] == "S1"
+    assert m["tool"] == "Bash"
+    assert "rm -rf build" in m["summary"]
+
+
+def test_permission_decision_stdout_allow_and_deny():
+    out = json.loads(permission_decision_stdout({"decision": "allow"}))
+    assert out == {"hookSpecificOutput": {
+        "hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
+    out = json.loads(permission_decision_stdout({"decision": "deny"}))
+    assert out["hookSpecificOutput"]["decision"]["behavior"] == "deny"
+
+
+def test_permission_decision_stdout_fallthrough_cases():
+    assert permission_decision_stdout({"decision": None}) is None
+    assert permission_decision_stdout({}) is None
+    assert permission_decision_stdout(None) is None
+    assert permission_decision_stdout({"decision": "ask"}) is None

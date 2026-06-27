@@ -1,6 +1,7 @@
 """Pure mapping from Claude Code hook events to protocol message dicts."""
 from __future__ import annotations
 
+import json
 import os
 
 from sonari import ttyutil
@@ -119,4 +120,24 @@ def handle_event(event: str, payload: dict) -> list[dict]:
     if event == "SessionEnd":
         return [_msg(type=MsgType.SESSION_END, session=session)]
 
+    if event == "PermissionRequest":
+        tool = payload.get("tool_name")
+        ti = payload.get("tool_input", {})
+        return [
+            _msg(type=MsgType.PERMISSION_REQUEST, session=session,
+                 tool=tool, summary=_tool_summary(tool, ti)),
+        ]
+
     return []
+
+
+def permission_decision_stdout(reply) -> "str | None":
+    """Render the PermissionRequest hook's stdout JSON from the daemon reply, or None
+    to fall through to Claude Code's normal terminal prompt. Fail-closed: anything that
+    is not an explicit allow/deny -> None (never auto-allow)."""
+    behavior = reply.get("decision") if isinstance(reply, dict) else None
+    if behavior in ("allow", "deny"):
+        return json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": behavior}}})
+    return None
