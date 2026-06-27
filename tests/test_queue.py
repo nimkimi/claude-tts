@@ -161,3 +161,12 @@ def test_enqueue_front_is_not_subject_to_cap():
     q.enqueue_front(_cap_item(0))                 # resume-requeue: re-inserts a just-popped item
     assert [it.id for it in list(q._items)] == [0, 1, 2]
 
+
+def test_speech_item_audio_path_defaults_none_and_is_settable():
+    from sonari.queue import SpeechItem
+    a = SpeechItem(id=1, session="s", kind="prose", text="hi", is_decision=False)
+    assert a.audio_path is None
+    b = SpeechItem(id=2, session="s", kind="prose", text="hi", is_decision=False,
+                   audio_path="/cache/x.aiff")
+    assert b.audio_path == "/cache/x.aiff"
+

@@ -6,6 +6,8 @@ from sonari.speaker import Speaker
 class FakePopen:
     """Stand-in for subprocess.Popen exposing wait()/terminate()."""
 
+    returncode = 0  # FakePopen always "exits 0"; mirrors _DoneProc so speak() returns True
+
     def __init__(self):
         self.wait_calls = 0
         self.terminate_calls = 0
@@ -369,3 +371,51 @@ def test_speak_without_external_epoch_uses_current_baseline():
     sp.speak("hello")                      # next speak starts clean
     assert made[0].wait_calls == 1         # played, not retroactively cancelled
     assert made[0].terminate_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# audio_path / afplay_runner tests (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def test_speak_audio_path_uses_afplay_runner_not_say():
+    say = RecordingRunner()
+    played = []
+    afplay = lambda path: played.append(path) or FakePopen()
+    sp = Speaker(say_runner=say, afplay_runner=afplay)
+    assert sp.speak("ignored", audio_path="/cache/x.aiff") is True
+    assert played == ["/cache/x.aiff"]
+    assert say.calls == []                     # say not invoked for an audio item
+
+
+def test_speak_audio_path_tracks_proc_and_cancel_terminates_it():
+    captured = {}
+
+    class CancelOnWait(FakePopen):
+        def wait(self, timeout=None):
+            captured["sp"].cancel()            # barge-in mid-afplay
+            return super().wait(timeout=timeout)
+
+    sp = Speaker(afplay_runner=lambda path: CancelOnWait())
+    captured["sp"] = sp
+    sp.speak(audio_path="/cache/x.aiff")
+    # the tracked afplay proc was terminated by cancel() — barge-in parity with say
+
+
+def test_speak_audio_path_honors_external_cancel_epoch_baseline():
+    made = []
+
+    def afplay(path):
+        p = FakePopen(); made.append(p); return p
+
+    sp = Speaker(afplay_runner=afplay)
+    epoch0 = sp.cancel_epoch()
+    sp.cancel()                                # lands in the claim->speak gap
+    assert sp.speak(audio_path="/x.aiff", cancel_epoch=epoch0) is False
+    assert made[0].terminate_calls == 1
+    assert made[0].wait_calls == 0
+
+
+def test_speak_audio_path_runner_returns_none_is_false():
+    sp = Speaker(afplay_runner=lambda path: None)
+    assert sp.speak(audio_path="/missing.aiff") is False        # never derefs None

@@ -12,6 +12,7 @@ class Speaker:
         voice=None,
         rate=200,
         say_runner=None,
+        afplay_runner=None,
         earcon_player=None,
         earcons=None,
         _wait_timeout: float = _DEFAULT_WAIT_TIMEOUT,
@@ -19,6 +20,7 @@ class Speaker:
         self._voice = voice
         self._rate = rate
         self._say_runner = say_runner
+        self._afplay_runner = afplay_runner
         self._earcon_player = earcon_player
         self._earcons = dict(earcons) if earcons else {}
         self._current = None
@@ -34,27 +36,34 @@ class Speaker:
         with self._current_lock:
             return self._cancel_epoch
 
-    def speak(self, text: str, cancel_epoch=None) -> bool:
-        """Speak text, blocking. Return True iff the utterance COMPLETED
-        (say exited 0). A cancelled/terminated utterance returns False so the
-        caller can leave it marked unheard (sentence-granular replay).
+    def speak(self, text=None, audio_path=None, cancel_epoch=None) -> bool:
+        """Play an utterance, blocking. When *audio_path* is set, afplay that file
+        (a spearcon); otherwise say *text*. Return True iff it COMPLETED (exit 0).
+        A cancelled/terminated/failed-to-spawn utterance returns False so the caller
+        leaves it marked unheard (sentence-granular replay).
 
-        *cancel_epoch* is the baseline to compare against. The daemon captures it
-        at the moment it claims the item (under its lock) and passes it here; a
-        cancel() arriving between the claim and this call bumps the live epoch past
-        the captured baseline, so we still detect it. When None, the baseline is the
-        epoch read here (the prior single-call behavior)."""
-        if self._say_runner is None:
+        *cancel_epoch* is the baseline to compare against (see cancel_epoch()); a
+        cancel arriving between the daemon's claim and this call is detected. The
+        afplay proc is tracked as _current exactly like say, so cancel() interrupts
+        it identically (barge-in parity)."""
+        if audio_path is not None:
+            runner = self._afplay_runner
+        else:
+            runner = self._say_runner
+        if runner is None:
             return False
-        # Establish the baseline epoch BEFORE synthesis. say_runner (TTS synthesis)
-        # can take tens-hundreds of ms, during which there is no proc to cancel —
-        # a cancel() arriving in that window used to be a silent no-op and the
-        # utterance played anyway. If the epoch advanced past the baseline while we
-        # synthesized, a cancel landed: honor it by terminating immediately and
+        # Establish the baseline epoch BEFORE synthesis/spawn. say_runner (TTS
+        # synthesis) can take tens-hundreds of ms, during which there is no proc to
+        # cancel — a cancel() arriving in that window used to be a silent no-op and
+        # the utterance played anyway. If the epoch advanced past the baseline while
+        # we synthesized, a cancel landed: honor it by terminating immediately and
         # reporting the utterance as NOT completed (so the caller replays it).
         with self._current_lock:
             epoch = self._cancel_epoch if cancel_epoch is None else cancel_epoch
-        proc = self._say_runner(text, self._voice, self._rate)
+        proc = (runner(audio_path) if audio_path is not None
+                else runner(text, self._voice, self._rate))
+        if proc is None:
+            return False                # afplay could not spawn / the file vanished
         with self._current_lock:
             interrupted = self._cancel_epoch != epoch
             if not interrupted:
