@@ -206,9 +206,7 @@ def test_notification_permission_prompt_via_matcher_fallback():
 
 def test_notification_idle_prompt():
     payload = {"session_id": "sess-1", "notification_type": "idle_prompt"}
-    assert handle_event("Notification", payload) == [
-        {"v": PROTOCOL_VERSION, "type": MsgType.EARCON, "kind": "ready"}
-    ]
+    assert handle_event("Notification", payload) == []
 
 
 def test_notification_permission_prompt_from_fixture():
@@ -222,8 +220,7 @@ def test_notification_permission_prompt_from_fixture():
 
 def test_notification_idle_prompt_from_fixture():
     payload = _load("Notification-idle_prompt.json")
-    msgs = handle_event("Notification", payload)
-    assert msgs == [{"v": PROTOCOL_VERSION, "type": MsgType.EARCON, "kind": "ready"}]
+    assert handle_event("Notification", payload) == []
 
 
 def test_unknown_notification_type_is_empty():
