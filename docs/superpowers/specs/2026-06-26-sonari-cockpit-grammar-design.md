@@ -387,3 +387,70 @@ tool — option-select and plan approval still have no safe channel). Draft + fi
 
 **Out of scope for C** (sub-project D): spearcon synthesis + pitch-direction sound language — C uses the
 existing earcons + plain spoken confirmations ("Approved."/"Denied.").
+
+## 17. Sub-project D — sound language: resolved design & ear co-design (2026-06-27)
+
+A + B + C shipped (PRs #70/#71/#72 → main @ 403e2a1). This is **sub-project D (sound language)** — the last
+cockpit sub-project, implementing §8. Resolved from a recon workflow (sound-layer + feasibility) and an **ear
+co-design with Nima** (he auditioned candidates via live `say`/`afplay` and chose). Zero new dependencies —
+system `say` + `afplay` only (the same stack the daemon already uses).
+
+### 17.1 Spearcons (time-compressed spoken session names)
+Recon empirically confirmed macOS `say` is **pitch-preserving across rate** (F0 is a voice-model property, not
+rate-dependent): `say -r 525 -o x.aiff "backend"` → ~0.23s vs ~0.78s at the default 175 WPM (~3.4×), same pitch.
+- **Owner choices (by ear):** **rate = 525 WPM (~3.4×)**; **voice = a FIXED crisp voice** (config
+  `spearcon_voice`, default "Samantha") so a spearcon reads as a recognizable "system" texture distinct from the
+  reading voice. (If the configured voice is unavailable, fall back gracefully — session voice or no `-v`.)
+- **Synthesis + cache:** `say -v <spearcon_voice> -r 525 -o <cache>.aiff "<label>"`, cached at
+  `~/.sonari/spearcons/`, key = `sha256(voice|rate|label)[:16]` (avoids path injection from arbitrary names).
+  **Pre-generate in the background** (`subprocess.Popen`, non-blocking) on SessionStart for known labels; generate
+  on first need for a new label. Cleanup orphaned/stale files at daemon start. Generation **never** on the hot path.
+- **Playback = queue-integrated** (NOT bare fire-and-forget), so the cue keeps its at_front ordering,
+  `names_session` attribution-suppression, and barge-in: the standalone name cue remains a queued at_front item
+  but carries an `audio_path`; the speak loop plays it via `afplay` (with the SAME `cancel_epoch` barge-in as
+  `say`) instead of `say`. Generalize `Speaker.speak(text=None, audio_path=None, cancel_epoch=...)` — `audio_path`
+  set → afplay that file; else say `text`. The afplay proc is the tracked `_current` proc, so `cancel()` interrupts
+  it identically.
+- **Scope:** spearcons replace the **standalone "which session" name cues** — `on_cycle_session` (⌃⌘Tab),
+  `on_jump_waiting`, `on_jump_decision`'s folder cue (⌃⌘D), `on_where_am_i`'s folder part (⌃⌘W), and `on_nav`'s
+  crossed-session folder cue. **The `_attributed_text` prefix** ("{folder}. {content}", spoken when the voice
+  switches sessions mid-content) **stays full speech** — clarity before content outweighs speed there (controller
+  merit call; flip later if wanted). Long-name truncation (first word, or ~12 chars) is a sensible default,
+  ear-tunable at the live gate.
+
+### 17.2 Pitch-direction cues
+Two pre-baked WAV assets (Python `aifc` was removed in 3.13 → WAV, not AIFF), played fire-and-forget via `afplay`.
+- **Owner choice (by ear): Set A — rising `pitch_up` 440→880 Hz, falling `pitch_down` 880→440 Hz, 200 ms** linear
+  chirp, 5 ms cosine fades, 44100 Hz / 16-bit mono.
+- **Assets + generator:** a committed `scripts/gen_pitch_tones.py` (stdlib `wave`+`struct`+`math`, no deps)
+  produces `src/sonari/assets/pitch_up.wav` + `pitch_down.wav` (both committed).
+- **Playback path:** resolve the asset path from the package (`importlib.resources` / `Path(__file__).parent`)
+  and `afplay` it **directly** — NOT through the configurable earcons dict (`bootstrap.py` merges earcons with a
+  whole-key guard, so new keys would silently no-op for any existing user who already has an `earcons` config key).
+  Pitch cues are inherent to the direction grammar, not user-tunable, so direct asset playback is correct.
+- **Directional call sites (4):** `on_cycle_session` (next→up / prev→down), `on_nav` within-response (next→up /
+  prev→down; `first`/`last` get none — unbound per §15), `on_nav_response` between-responses (next_response→up /
+  prev_response→down), `on_answer_permission` (allow→up / deny→down). **Composition:** the chirp fires first
+  (establishes direction), the spearcon/spoken content follows (names the destination). Non-directional events
+  (jump_decision, jump_waiting, where-am-i, stop_session/all) get **no** chirp.
+
+### 17.3 Earcon set — shrink (§8) with one owner deviation
+§8 keeps only `waiting` / `error` (blocked) / decision-alerts (`choice`/`plan`/`permission`). Applied:
+- **DROP `ready`** (Glass, on `Notification` `idle_prompt`) — not a decision alert; the next prompt is its own cue.
+  Remove it from the earcon map + the `idle_prompt` branch.
+- **KEEP `turn_done`** (Tink, end-of-turn) — **owner decision (Nima 2026-06-27)**: a genuinely useful eyes-free
+  turn-boundary marker. This deviates from §8's literal 3-category set; owner-approved. (Its prose-flush in
+  `prose.py` rides the protocol message, independent of the earcon, so keeping the earcon is orthogonal.)
+- Keep `waiting`, `error`, `choice`, `plan`, `permission`.
+
+### 17.4 Testing & validation boundary
+Daemon-side is fully unit-testable behind the fakes: spearcon cache-key + generation invocation (mocked `say`),
+the queue-integrated `audio_path` playback path + its barge-in (cancel_epoch), the chirp dispatch at the 4
+directional sites, and the earcon-shrink. The 2 permanent concurrency guards + barge-in tests must stay green
+(the speak-loop `audio_path` change is concurrency-sensitive). The **sacrificial-HOME dogfood** exercises real
+`say -r`/`afplay` generation + playback. The **sound itself** (does 525 feel right while cycling; chirp character;
+long-name intelligibility) is Nima's **on-hardware listening gate** — candidates were auditioned during the
+co-design; the live gate confirms them in context.
+
+**Out of scope for D:** per-session distinct pitch offsets for similar-sounding names (defer — needs an
+AVFoundation helper); afplay `-r` time-compression (unverified pitch behavior — `say -r` is the chosen path).
