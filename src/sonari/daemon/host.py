@@ -14,6 +14,8 @@ from sonari.daemon.context import Ctx
 from sonari.daemon.registry import handler, dispatch
 from sonari.daemon.server import Server
 from sonari.daemon.limits import RATE_MIN, RATE_MAX, MINQUEUE_MIN, MINQUEUE_MAX
+
+PERMISSION_WAIT_TIMEOUT = 120.0   # daemon's own wait; MUST be < the hook's client send timeout (130s)
 # Side-effect imports: importing each feature module runs its @handler
 # decorators, populating the registry (assert_complete in __init__ guards it).
 from sonari.daemon.features import control  # noqa: F401
@@ -47,6 +49,10 @@ class SpeechDaemon:
         self._backlog_cap = int(config.get("backlog_cap", 200))
         self._reload_lock = threading.Lock()      # serializes off-lock hotkey reloads
         self.raise_service = raise_service        # lazily built on first jump
+        # Pending permission decisions: session_id -> {"event": Event, "behavior": str|None}.
+        # Mutated ONLY under self._lock (handlers); the Event is waited on ONLY outside
+        # the lock (in _handle_message_guarded, after the transaction exits).
+        self._pending_decisions: dict = {}
 
     # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
     # (speak loop + kernel ops) goes through self._state._X directly; these
@@ -234,6 +240,22 @@ class SpeechDaemon:
             if entry is not None and completed:
                 entry.heard = True
 
+    def _await_permission_decision(self, session: str, timeout: float) -> dict:
+        """Block (OUTSIDE the daemon lock) until the focused-session answer arrives
+        or the wait expires. Returns {"decision": "allow"|"deny"|None}; None means the
+        hook falls through to Claude Code's normal terminal prompt (fail-closed)."""
+        with self._lock:
+            pd = self._pending_decisions.get(session)
+        if pd is None:
+            return {"decision": None}
+        got = pd["event"].wait(timeout)
+        with self._lock:
+            behavior = pd["behavior"] if got else None
+            # Pop only if still ours (a newer request for the same session may have replaced it).
+            if self._pending_decisions.get(session) is pd:
+                self._pending_decisions.pop(session, None)
+        return {"decision": behavior}
+
     def handle_message(self, msg):
         self._ctx.bind(msg)
         return dispatch(self._ctx, msg)
@@ -413,17 +435,28 @@ class SpeechDaemon:
             self.note_spoken(item, completed)
 
     def _handle_message_guarded(self, msg):
-        """Dispatch one socket message under the lock, contained so a malformed or
-        buggy message logs a traceback instead of silently killing the connection
-        thread (mirrors the _dispatch_hotkey guard). Returns the reply or None."""
+        """Dispatch one socket message under the lock; if the handler asks to block
+        for a permission decision, do that AFTER the lock is released. Contained so a
+        malformed/buggy message logs a traceback instead of killing the connection
+        thread. Returns the reply or None."""
         try:
             with self._state.transaction():
-                return self.handle_message(msg)
+                result = self.handle_message(msg)
         except Exception:  # noqa: BLE001 - one bad message must not drop the connection
             import sys
             import traceback
             traceback.print_exc(file=sys.stderr)
             return None
+        if isinstance(result, dict) and result.get("__await_decision__"):
+            try:
+                return self._await_permission_decision(
+                    result["session"], PERMISSION_WAIT_TIMEOUT)
+            except Exception:  # noqa: BLE001 - the wait must never auto-allow on error
+                import sys
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                return {"decision": None}   # fail-closed: fall through to terminal
+        return result
 
     def run(self) -> None:
         ensure_sonari_dir()
