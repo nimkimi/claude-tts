@@ -56,6 +56,11 @@ class SessionManager:
         """The session that owns the voice: the last session to submit a prompt / start."""
         return self._foreground
 
+    def session_ids(self) -> "list[str]":
+        """All registered session ids in insertion order — the cycle roster (⌃⌘Tab).
+        Encapsulates the private _sessions dict so handlers don't poke it directly."""
+        return list(self._sessions.keys())
+
     def is_foreground(self, session: str) -> bool:
         fg = self.foreground()
         return fg is not None and session == fg
