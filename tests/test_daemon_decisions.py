@@ -181,7 +181,8 @@ def test_bare_earcon_message_plays_kind():
 
 def test_jump_decision_targets_the_focused_session_not_foreground():
     # ⌃⌘D acts on the OS-focused session (like on_nav), not the voice's foreground —
-    # so a decision-jump fired while looking at another terminal jumps THAT session.
+    # so a decision-jump fired while looking at another terminal jumps THAT session AND
+    # moves the voice to it (crossed → focus()).
     from sonari.sessions import Identity
     from tests.daemon_helpers import stream_queue
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
@@ -192,5 +193,30 @@ def test_jump_decision_targets_the_focused_session_not_foreground():
     daemon._enqueue("B", "prose", "skip me", False)
     daemon._enqueue("B", "choice", "decide now", True)
     daemon.handle_message({"type": "jump_decision"})
+    assert sessions.foreground() == "B"               # voice MOVED to B (crossed→focus)
     assert stream_queue(daemon, "B").pop_next().text == "decide now"   # B jumped, not A
     assert speaker.cancels == 1
+
+
+def test_jump_decision_crossed_with_folder_enqueues_folder_cue():
+    # When the voice crosses to the focused session AND that session has a folder,
+    # a folder-name cue is enqueued at_front (after jump_to_decision so it plays first).
+    from sonari.sessions import Identity
+    from tests.daemon_helpers import stream_queue
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.register("B", cwd="/x/bravo")
+    sessions.set_identity("B", Identity(term_program="Apple_Terminal", tty="/dev/ttys10"))
+    sessions.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys10")
+    assert sessions.focused_session() == "B"
+    assert sessions.folder("B") == "bravo"        # _record stores basename only
+    daemon._enqueue("B", "prose", "skip me", False)
+    daemon._enqueue("B", "choice", "decide later", True)
+    daemon.handle_message({"type": "jump_decision"})
+    assert sessions.foreground() == "B"               # voice moved
+    assert speaker.cancels == 1
+    bq = stream_queue(daemon, "B")
+    # Queue should be: folder cue at front, then the decision
+    folder_item = bq.pop_next()
+    assert folder_item.text == "bravo."
+    decision_item = bq.pop_next()
+    assert decision_item.text == "decide later"
