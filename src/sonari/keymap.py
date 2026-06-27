@@ -40,6 +40,8 @@ ACTION_MESSAGES = {
     "cycle_session_next": {"type": "cycle_session", "direction": "next"},  # ⌃⌘Tab
     "cycle_session_prev": {"type": "cycle_session", "direction": "prev"},  # ⌃⌘⇧Tab
     "where_am_i": {"type": "where_am_i"},          # ⌃⌘W: terse spoken status
+    "approve": {"type": "answer_permission", "behavior": "allow"},     # ⌃⌘Return: approve permission prompt
+    "deny": {"type": "answer_permission", "behavior": "deny"},         # ⌃⌘Escape: deny permission prompt
     "faster": {"type": "set_rate", "delta": 25},
     "slower": {"type": "set_rate", "delta": -25},
 }
@@ -53,6 +55,7 @@ _DEFAULT_KEYS = {
     "nav_prev": "left", "nav_next": "right",
     "stop_session": "s", "stop_all": "m", "jump_waiting": "j",
     "jump_decision": "d", "where_am_i": "w",
+    "approve": "return", "deny": "escape",
     "faster": "equal", "slower": "minus",
 }
 

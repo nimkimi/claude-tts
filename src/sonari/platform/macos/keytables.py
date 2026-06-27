@@ -11,6 +11,8 @@ KEY_CODES = {
     "equal": 24, "+": 24,               # rate faster (kVK_ANSI_Equal; '+' alias, same physical key)
     "minus": 27, "-": 27,               # rate slower (kVK_ANSI_Minus; '-' alias)
     "tab": 48,                          # cycle sessions (kVK_Tab)
+    "return": 36, "enter": 36,          # approve answer_permission (kVK_Return; 'enter' alias)
+    "escape": 53, "esc": 53,            # deny answer_permission (kVK_Escape; 'esc' alias)
     # Arrow keys (Carbon virtual key codes), with aliases.
     "left": 123, "leftarrow": 123,
     "right": 124, "rightarrow": 124,

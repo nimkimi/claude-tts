@@ -24,6 +24,7 @@ _KEY_DISPLAY_BY_NAME = {
     "rightbracket": "]", "]": "]",
     "leftbracket": "[", "[": "[",
     "equal": "=", "minus": "-", "tab": "Tab",
+    "return": "Return", "escape": "Esc",
     "left": "Left", "right": "Right", "up": "Up", "down": "Down",
 }
 
