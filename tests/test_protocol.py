@@ -78,6 +78,7 @@ def test_msgtype_has_every_constant_with_exact_values():
         "CYCLE_VERBOSITY": "cycle_verbosity",
         "OS_FOCUS": "os_focus",
         "CYCLE_SESSION": "cycle_session",
+        "WHERE_AM_I": "where_am_i",
     }
     for name, value in expected.items():
         assert hasattr(MsgType, name), f"MsgType missing {name}"
@@ -119,6 +120,7 @@ def test_msgtype_defines_no_extra_string_constants():
         "RELOAD_KEYMAP": "reload_keymap",
         "OS_FOCUS": "os_focus",
         "CYCLE_SESSION": "cycle_session",
+        "WHERE_AM_I": "where_am_i",
     }
     assert actual == expected
 
