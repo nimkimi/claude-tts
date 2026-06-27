@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
 
@@ -134,6 +136,63 @@ def on_permission(ctx, msg):
     # The flip: enqueue unconditionally into this session's own stream.
     ctx.host._flush_prose_buffer(session)   # prose before the permission ask
     ctx.host._enqueue(session, "permission", text, True, entry=entry)
+    return None
+
+
+def _permission_request_text(msg) -> str:
+    # Render the spoken prompt for a blocking PermissionRequest. The payload carries the
+    # tool name + a short summary (Bash command / file). Prefer an explicit action/message
+    # if present (forward-compatible), else "{tool}: {summary}".
+    action = (msg.get("action") or "").strip()
+    if action:
+        return action
+    tool = (msg.get("tool") or "").strip()
+    summary = (msg.get("summary") or "").strip()
+    if tool and summary and summary != tool:
+        return "{0}: {1}".format(tool, summary)
+    return summary or tool or "Permission needed."
+
+
+@handler(MsgType.PERMISSION_REQUEST)
+def on_permission_request(ctx, msg):
+    # BLOCKING permission ask from the PermissionRequest hook. Speak the prompt on the
+    # ASKING session as a decision item (so ⌃⌘D lands on it), register a pending decision,
+    # and return the AWAIT sentinel — _handle_message_guarded then blocks OUTSIDE the lock.
+    host = ctx.host
+    session = ctx.session
+    text = _permission_request_text(msg)
+    host.speaker.earcon("permission")
+    entry = host.history.record(session, "permission", text)
+    host.history.end_message(session)
+    host._flush_prose_buffer(session)        # prose before the permission ask
+    host._enqueue(session, "permission", text, True, entry=entry)
+    # We are under the daemon lock here, so mutate the store directly.
+    prev = host._pending_decisions.get(session)
+    if prev is not None:
+        prev["event"].set()                  # release any stale waiter for this session
+    host._pending_decisions[session] = {"event": threading.Event(), "behavior": None}
+    return {"__await_decision__": True, "session": session}
+
+
+@handler(MsgType.ANSWER_PERMISSION)
+def on_answer_permission(ctx, msg):
+    # ⌃⌘⏎ approve / ⌃⌘⎋ deny. Answer ONLY the focused session's own pending decision.
+    host = ctx.host
+    behavior = msg.get("behavior")
+    if behavior not in ("allow", "deny"):
+        host.speaker.earcon("error")
+        return None
+    target = host.sessions.focused_session() or host.sessions.foreground()
+    pd = host._pending_decisions.get(target) if target is not None else None
+    if pd is None:
+        host.speaker.earcon("error")         # nothing to answer on the focused session
+        return None
+    pd["behavior"] = behavior
+    pd["event"].set()
+    host.speaker.cancel()                     # barge-in: confirm immediately
+    host._enqueue(target, "prose",
+                  "Approved." if behavior == "allow" else "Denied.",
+                  False, mute_exempt=True, at_front=True)
     return None
 
 

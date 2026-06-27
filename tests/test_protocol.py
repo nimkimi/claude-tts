@@ -76,9 +76,12 @@ def test_msgtype_has_every_constant_with_exact_values():
         "PING": "ping",
         "REREAD_OPTIONS": "reread_options",
         "CYCLE_VERBOSITY": "cycle_verbosity",
+        "RELOAD_KEYMAP": "reload_keymap",
         "OS_FOCUS": "os_focus",
         "CYCLE_SESSION": "cycle_session",
         "WHERE_AM_I": "where_am_i",
+        "PERMISSION_REQUEST": "permission_request",
+        "ANSWER_PERMISSION": "answer_permission",
     }
     for name, value in expected.items():
         assert hasattr(MsgType, name), f"MsgType missing {name}"
@@ -121,6 +124,8 @@ def test_msgtype_defines_no_extra_string_constants():
         "OS_FOCUS": "os_focus",
         "CYCLE_SESSION": "cycle_session",
         "WHERE_AM_I": "where_am_i",
+        "PERMISSION_REQUEST": "permission_request",
+        "ANSWER_PERMISSION": "answer_permission",
     }
     assert actual == expected
 
