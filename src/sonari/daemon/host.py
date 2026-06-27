@@ -148,7 +148,7 @@ class SpeechDaemon:
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
                  entry=None, mute_exempt: bool = False,
                  pause_exempt: bool = False, at_front: bool = False,
-                 names_session: bool = False) -> None:
+                 names_session: bool = False, audio_path=None) -> None:
         item = SpeechItem(
             id=self._alloc_id(),
             session=session,
@@ -158,6 +158,7 @@ class SpeechDaemon:
             mute_exempt=mute_exempt,
             pause_exempt=pause_exempt,
             names_session=names_session,
+            audio_path=audio_path,
         )
         st = self._stream(session)
         if entry is not None:
@@ -383,7 +384,11 @@ class SpeechDaemon:
                 self._state._wake.clear()
                 return
             try:
-                completed = self.speaker.speak(item.text, cancel_epoch=cancel_epoch)
+                if item.audio_path:
+                    completed = self.speaker.speak(
+                        item.text, audio_path=item.audio_path, cancel_epoch=cancel_epoch)
+                else:
+                    completed = self.speaker.speak(item.text, cancel_epoch=cancel_epoch)
             except Exception:  # noqa: BLE001 - one bad cue must not wedge the hold
                 self._signal_speak_failure()
                 completed = False
@@ -415,7 +420,11 @@ class SpeechDaemon:
             self._state._wake.clear()
             return
         try:
-            completed = self.speaker.speak(text, cancel_epoch=cancel_epoch)
+            if item.audio_path:
+                completed = self.speaker.speak(
+                    text, audio_path=item.audio_path, cancel_epoch=cancel_epoch)
+            else:
+                completed = self.speaker.speak(text, cancel_epoch=cancel_epoch)
         except Exception:  # noqa: BLE001 - one bad utterance must not abort the item
             self._signal_speak_failure()
             completed = False

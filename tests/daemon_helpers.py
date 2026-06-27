@@ -9,6 +9,7 @@ class FakeSpeaker:
 
     def __init__(self):
         self.spoken: list[str] = []
+        self.audio_paths: list = []
         self.earcons: list[str] = []
         self.cancels: int = 0
         self.rates: list[int] = []
@@ -17,8 +18,9 @@ class FakeSpeaker:
         self._epoch = 0
         self.pitches: list[str] = []  # pitch(direction) calls
 
-    def speak(self, text: str, cancel_epoch=None) -> bool:
+    def speak(self, text=None, audio_path=None, cancel_epoch=None) -> bool:
         self.spoken.append(text)
+        self.audio_paths.append(audio_path)
         return self.complete
 
     def cancel_epoch(self) -> int:

@@ -14,6 +14,7 @@ class SpeechItem:
     mute_exempt: bool = False  # control cue: never folder-prefixed (jump/stop/nav/status cues)
     pause_exempt: bool = False  # voiced by the held branch even while the session is stopped (e.g. "Stopped.")
     names_session: bool = False  # text already speaks the session's folder (jump cue)
+    audio_path: "str | None" = None  # when set, the speak loop afplays this file (spearcon) instead of say
 
 
 class SpeechQueue:

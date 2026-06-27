@@ -100,6 +100,15 @@ def test_speak_loop_fifo_order_including_items_added_after_start():
     assert speaker.spoken == ["first", "second", "third (wake)"]
 
 
+def test_speak_loop_afplays_an_audio_path_item():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    queue.enqueue(SpeechItem(id=1, session="fg", kind="prose", text="backend.",
+                             is_decision=False, audio_path="/cache/b.aiff"))
+    daemon._speak_loop_once()
+    assert speaker.audio_paths == ["/cache/b.aiff"]      # routed to afplay path
+    assert speaker.spoken == ["backend."]                # text carried (fallback label)
+
+
 def _make_inet_daemon(tmp_path):
     """Start a daemon with its accept + speak loops on a localhost TCP port.
 
