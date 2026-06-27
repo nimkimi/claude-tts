@@ -91,8 +91,9 @@ def on_jump_decision(ctx, msg):
         entry = ctx.host._pending_heard.get(cur.id)
         if entry is not None:
             entry.heard = True
-    fg = ctx.host.sessions.foreground()
-    st = ctx.host._streams.get(fg)
+    sessions = ctx.host.sessions
+    target = sessions.focused_session() or sessions.foreground()
+    st = ctx.host._streams.get(target)
     if st is not None:
         ctx.host._drop_pending(st.queue.jump_to_decision())
     ctx.host.speaker.cancel()

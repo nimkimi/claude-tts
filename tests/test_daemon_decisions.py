@@ -177,3 +177,20 @@ def test_bare_earcon_message_plays_kind():
     daemon.handle_message(_msg(MsgType.EARCON, "fg", kind="turn_done"))
     assert speaker.earcons == ["turn_done"]
     assert len(queue) == 0
+
+
+def test_jump_decision_targets_the_focused_session_not_foreground():
+    # ⌃⌘D acts on the OS-focused session (like on_nav), not the voice's foreground —
+    # so a decision-jump fired while looking at another terminal jumps THAT session.
+    from sonari.sessions import Identity
+    from tests.daemon_helpers import stream_queue
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.register("B")
+    sessions.set_identity("B", Identity(term_program="Apple_Terminal", tty="/dev/ttys9"))
+    sessions.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys9")
+    assert sessions.focused_session() == "B"          # B is OS-focused; A owns the voice
+    daemon._enqueue("B", "prose", "skip me", False)
+    daemon._enqueue("B", "choice", "decide now", True)
+    daemon.handle_message({"type": "jump_decision"})
+    assert stream_queue(daemon, "B").pop_next().text == "decide now"   # B jumped, not A
+    assert speaker.cancels == 1
