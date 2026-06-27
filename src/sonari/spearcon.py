@@ -10,16 +10,20 @@ next time. Zero deps — system `say` only.
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 from pathlib import Path
 
 
 def spearcon_label(folder: str) -> str:
-    """The short label spoken as a spearcon for *folder*: the first whitespace word,
-    capped at 12 chars. Sensible default, ear-tunable at the live gate (§17.1)."""
+    """The short, recognizable label a folder is spoken as in a spearcon: the first
+    component on a hyphen/underscore/whitespace split, capped at 12 chars. Real folder
+    names are hyphen/underscore-separated, so 'invoice-generator' -> 'invoice', not a
+    mid-word 'invoice-gene'. Empty/falsy -> ''. (Exact truncation is ear-tunable later.)"""
     if not folder:
         return ""
-    return folder.split()[0][:12]
+    parts = re.split(r"[-_\s]+", str(folder).strip())
+    return parts[0][:12] if parts else ""
 
 
 class SpearconCache:
@@ -74,7 +78,8 @@ class SpearconCache:
         no sessions are registered yet). Bounds disk; never raises."""
         try:
             files = sorted(self._dir.glob("*.aiff"),
-                           key=lambda p: p.stat().st_mtime, reverse=True)
+                           key=lambda p: p.stat().st_mtime if p.exists() else 0.0,
+                           reverse=True)
         except OSError:
             return
         for f in files[max_files:]:
