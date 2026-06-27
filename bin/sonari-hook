@@ -79,6 +79,25 @@ def main() -> None:
         client.ensure_daemon()
     except Exception:
         pass
+
+    if event == "PermissionRequest":
+        # Blocking ask: send ONE message, wait for the daemon's decision (its own
+        # ~120s wait < this 130s socket timeout), print the decision to stdout. Any
+        # failure -> print nothing -> Claude Code shows its normal terminal prompt.
+        from sonari.hooks_entry import permission_decision_stdout
+        reply = None
+        try:
+            reply = client.send(msgs[0], expect_reply=True, timeout=130.0)
+        except Exception:
+            reply = None
+        out = permission_decision_stdout(reply)
+        if out:
+            try:
+                sys.stdout.write(out)
+            except Exception:
+                pass
+        return
+
     for m in msgs:
         try:
             client.send(m)
