@@ -230,3 +230,59 @@ prefer no persistent modes (we removed the leader), P4 a small composable gramma
 P5 confirmation hierarchy (speech + spearcons + pitch over abstract earcons), P6 pull terse state on
 demand (⌃⌘W), P7 always confirm the action fired. Sources: OSARA/Reaper, Vim, Emacs/Emacspeak,
 VoiceOver/NVDA/JAWS, tmux, and the auditory-display literature (Nees & Liebman 2023; Gaver; Brewster).
+
+## 15. Sub-project B — resolved bindings, collision-vet & implementation decisions (2026-06-27)
+
+Sub-project A (per-session control core) shipped (PR #70 → main). This section records the
+implementation-grain decisions for **sub-project B (navigation & session grammar)**, resolved from a
+code-recon + collision-vet pass and one owner decision. The §4 bindings stand; the deltas below are how
+they land on the post-A code.
+
+**Collision-vet outcome (macOS defaults, adversarial agent + web check):**
+- **⌃⌘+ / ⌃⌘− → clear** (zoom is ⌥⌘+/−, a different modifier). **⌃⌘S → clear** (Finder sidebar is ⌥⌘S).
+- **⌃⌘D → collides** with the macOS system **"Look Up / Dictionary"** shortcut. **Owner decision (Nima,
+  2026-06-27): KEEP ⌃⌘D.** Rationale: Look Up is a *visual* popover the eyes-free audience does not use;
+  Carbon `RegisterEventHotKey` wins the chord (sonari fires correctly); it only shadows Look Up while
+  sonari runs; D=Decision is the strongest mnemonic. Accepted cost: a sighted user loses Look Up while
+  sonari is running.
+- **⌃⌘← / → / ↑ / ↓, ⌃⌘Tab, ⌃⌘⇧Tab, ⌃⌘W, ⌃⌘M → "verify on hardware"**: no documented system binding
+  found, but not affirmatively provable-free; ⌃⌘←/→ shadow Xcode's app-level editor back/forward (Carbon
+  wins — acceptable). These are cleared at the on-device human-acceptance gate (§13), not a blocker.
+
+**Binding deltas (post-A → B), by physical key position:**
+- Within-response nav ⌃⌘← / → — **binding already correct** (nav_prev/nav_next = left/right). ← = "hear
+  again" falls out of the existing `prev` (re-reads current/prior item); no handler change.
+- Between-response nav — **rebind** from ⌃⌘⇧←/→ to **⌃⌘↑ / ↓** (the handler `_nav_response` is unchanged;
+  ⌃⌘↓-to-newest = live edge already works). This frees the shift+arrow chord.
+- **Collision to resolve atomically:** ⌃⌘↑/↓ are today `nav_first`/`nav_last` defaults. Those two lose
+  their default keys (they remain as actions, just unbound) so ⌃⌘↑/↓ can own between-response nav. Must
+  happen in one change or `test_no_two_default_actions_share_a_key` fails on an intermediate state.
+- **⌃⌘D** jump-to-decision — add the keymap binding (the `JUMP_DECISION` handler + `jump_to_decision`
+  queue op already exist). Plus a 1-line consistency fix: `on_jump_decision` targets `foreground()` today;
+  make it `focused_session() or foreground()` to match `on_nav` (so ⌃⌘D acts on the OS-focused session
+  like every other nav key).
+- **⌃⌘Tab / ⌃⌘⇧Tab** cycle sessions — **new.** One new `MsgType.CYCLE_SESSION` carrying a `direction`
+  field ("next"/"prev"); a `SessionManager.session_ids()` roster accessor; an `on_cycle_session` handler
+  (mirrors `on_jump_waiting`: pick next/prev in insertion order with wrap, `sessions.focus(target)`,
+  cancel, folder cue at_front/mute_exempt/names_session — no terminal-raise). Edge: <2 sessions → an
+  "error" earcon (no silent no-op).
+- **⌃⌘W** where-am-i — **new, and the one genuinely new mechanism.** A new `MsgType.WHERE_AM_I` + spoken
+  handler (NOT the CLI `STATUS` dict path). It must implement the §7 **interjection-resume**: capture the
+  in-flight `_current_item` under the lock, `cancel()` (barge-in), enqueue the terse status cue at_front
+  (mute_exempt + pause_exempt), then **re-queue the interrupted item at_front behind the cue** so reading
+  resumes from its start. NOTE the post-A speak loop only auto-re-queues an interrupted item when the
+  session is *stopped*; a non-stopping interjection must re-queue the item explicitly, preserving its
+  `pending_heard` entry (so it isn't silently marked unheard/lost). Spoken text (plain for B; spearcon/
+  pitch polish is sub-project D): "{folder}. {Playing|Stopped}. {N} waiting." — folder from
+  `sessions.folder(fg)`, stopped from the stream, N from a count loop mirroring `_waiting_target`.
+- **⌃⌘+ / ⌃⌘−** rate — **bind** the existing `faster`/`slower` actions (no handler change; `on_set_rate`
+  already does NOT cancel → rate is the §7 no-cut exception, the "Rate N." cue is its feedback). Add the
+  `=`/`−` Carbon keyCodes. Norwegian +/− physical position is **verified at the hardware gate**, not
+  assumed — ship the ANSI positions (equal/minus) as the default and flag for on-device confirmation.
+
+**Protocol inventory:** 27 → **29** (`CYCLE_SESSION`, `WHERE_AM_I`; `JUMP_DECISION` already exists). Keep
+`assert_complete([...])` + its count comment + `test_daemon_registry` (ALL_27→ALL_29) + `test_protocol`
+in sync.
+
+**Out of scope for B** (later sub-projects): the answer-via-hook channel ⌃⌘⏎/⎋ (C); spearcon synthesis +
+pitch-direction sound language (D) — B's ⌃⌘W speaks plain terse status.
