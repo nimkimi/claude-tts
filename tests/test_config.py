@@ -12,7 +12,14 @@ def test_defaults_has_documented_top_level_keys():
         "backlog_cap",
         "minqueue",
         "focus_follow",
+        "spearcon_voice",
+        "spearcon_rate",
     }
+
+
+def test_spearcon_defaults():
+    assert DEFAULTS["spearcon_voice"] == "Samantha"
+    assert DEFAULTS["spearcon_rate"] == 525
 
 
 def test_focus_follow_defaults_on():
