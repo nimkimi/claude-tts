@@ -359,7 +359,8 @@ def test_permission_decision_stdout_allow_and_deny():
     assert out == {"hookSpecificOutput": {
         "hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
     out = json.loads(permission_decision_stdout({"decision": "deny"}))
-    assert out["hookSpecificOutput"]["decision"]["behavior"] == "deny"
+    assert out == {"hookSpecificOutput": {
+        "hookEventName": "PermissionRequest", "decision": {"behavior": "deny"}}}
 
 
 def test_permission_decision_stdout_fallthrough_cases():
@@ -367,3 +368,6 @@ def test_permission_decision_stdout_fallthrough_cases():
     assert permission_decision_stdout({}) is None
     assert permission_decision_stdout(None) is None
     assert permission_decision_stdout({"decision": "ask"}) is None
+    # Non-dict reply (e.g. a string or int) must also fall through, not crash.
+    assert permission_decision_stdout("allow") is None
+    assert permission_decision_stdout(123) is None

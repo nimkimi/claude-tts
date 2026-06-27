@@ -446,6 +446,8 @@ class SpeechDaemon:
             import sys
             import traceback
             traceback.print_exc(file=sys.stderr)
+            if isinstance(msg, dict) and msg.get("type") == MsgType.PERMISSION_REQUEST:
+                return {"decision": None}   # fail-closed: don't strand the blocking hook for 130s
             return None
         if isinstance(result, dict) and result.get("__await_decision__"):
             try:

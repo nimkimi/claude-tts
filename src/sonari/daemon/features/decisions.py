@@ -192,7 +192,7 @@ def on_answer_permission(ctx, msg):
     host.speaker.cancel()                     # barge-in: confirm immediately
     host._enqueue(target, "prose",
                   "Approved." if behavior == "allow" else "Denied.",
-                  False, mute_exempt=True, at_front=True)
+                  False, mute_exempt=True, pause_exempt=True, at_front=True)
     return None
 
 
