@@ -84,17 +84,30 @@ def on_stop_all(ctx, msg):
 
 @handler(MsgType.JUMP_DECISION)
 def on_jump_decision(ctx, msg):
-    # Mark the cancelled current item heard and clear heard-markers of the
-    # skipped prose items so they don't linger in unheard() (M6).
-    cur = ctx.host._current_item
-    if cur is not None:
-        entry = ctx.host._pending_heard.get(cur.id)
-        if entry is not None:
-            entry.heard = True
+    # ⌃⌘D: jump to the question/decision. Follows OS focus like on_nav — when the
+    # focused session isn't the one speaking, MOVE the voice to it and voice its
+    # decision (crossed→focus+folder cue); otherwise jump within the foreground.
     sessions = ctx.host.sessions
-    target = sessions.focused_session() or sessions.foreground()
+    fg = sessions.foreground()
+    target = sessions.focused_session() or fg
+    crossed = target != fg
+    if crossed:
+        sessions.focus(target)
+    else:
+        # Acting on the session in flight: mark its current item heard (it's being
+        # skipped past). When crossed there is no in-flight item for the target.
+        cur = ctx.host._current_item
+        if cur is not None:
+            entry = ctx.host._pending_heard.get(cur.id)
+            if entry is not None:
+                entry.heard = True
     st = ctx.host._streams.get(target)
     if st is not None:
         ctx.host._drop_pending(st.queue.jump_to_decision())
     ctx.host.speaker.cancel()
+    if crossed:
+        folder = sessions.folder(target)
+        if folder:
+            ctx.host._enqueue(target, "prose", folder + ".", False,
+                              mute_exempt=True, at_front=True, names_session=True)
     return None

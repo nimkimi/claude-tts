@@ -129,6 +129,9 @@ def on_where_am_i(ctx, msg):
         return None
     # Capture the in-flight item BEFORE cancel so we can resume it afterwards.
     cur = host._current_item
+    # Capture entry now: cancel() doesn't touch _pending_heard, but grabbing it here
+    # keeps the invariant that we read all in-flight state before any mutation.
+    entry = host._pending_heard.get(cur.id) if cur is not None else None
     folder = host.sessions.folder(fg) or "Unknown session"
     st = host._streams.get(fg)
     state = "Stopped" if (st is not None and st.stopped) else "Playing"
@@ -141,7 +144,6 @@ def on_where_am_i(ctx, msg):
     # status cue), carrying its pending-heard entry on a FRESH item id so the speak
     # loop's note_spoken (which pops the OLD id with completed=False) can't lose it.
     if cur is not None:
-        entry = host._pending_heard.get(cur.id)
         host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
                       entry=entry, mute_exempt=cur.mute_exempt,
                       pause_exempt=cur.pause_exempt, names_session=cur.names_session,
