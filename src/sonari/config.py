@@ -15,6 +15,8 @@ DEFAULTS = {
     "backlog_cap": 200,
     "minqueue": 1,
     "focus_follow": True,
+    "spearcon_voice": "Samantha",
+    "spearcon_rate": 525,
 }
 
 
