@@ -55,6 +55,7 @@ def test_default_keymap_macos_uses_ctrl_cmd(mac):
         "jump_decision", "where_am_i", "faster", "slower",
         "nav_prev_response", "nav_next_response",
         "cycle_session_next", "cycle_session_prev",
+        "approve", "deny",
     }
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
     assert d["stop_session"]["key"] == "s" and d["stop_all"]["key"] == "m"
@@ -289,3 +290,35 @@ def test_full_default_keymap_resolves_without_duplicate_hotkeys(mac):
     assert {"jump_decision", "where_am_i", "faster", "slower",
             "cycle_session_next", "cycle_session_prev",
             "nav_prev_response", "nav_next_response"} <= actions
+
+
+# --- Sub-project C: answer_permission (approve/deny hotkeys) -------------------
+
+def test_approve_deny_action_messages():
+    assert keymap.ACTION_MESSAGES["approve"] == {"type": "answer_permission", "behavior": "allow"}
+    assert keymap.ACTION_MESSAGES["deny"] == {"type": "answer_permission", "behavior": "deny"}
+
+
+def test_approve_deny_default_bindings(mac):
+    km = keymap.default_keymap()
+    assert "approve" in km, "approve has no default binding"
+    assert "deny" in km, "deny has no default binding"
+    assert km["approve"]["key"] == "return"
+    assert km["deny"]["key"] == "escape"
+    assert km["approve"]["mods"] == ["ctrl", "cmd"]
+    assert km["deny"]["mods"] == ["ctrl", "cmd"]
+
+
+def test_approve_deny_resolve_to_correct_keycodes(mac):
+    resolved = keymap.resolve_keymap(keymap.default_keymap())
+    approve_entry = next((e for e in resolved if e["action"] == "approve"), None)
+    deny_entry = next((e for e in resolved if e["action"] == "deny"), None)
+    assert approve_entry is not None, "approve not in resolved keymap"
+    assert deny_entry is not None, "deny not in resolved keymap"
+    # Return key = keyCode 36, Escape key = keyCode 53, Ctrl+Cmd = 4096 | 256 = 4352
+    assert approve_entry["keyCode"] == 36
+    assert approve_entry["modifiers"] == 4352  # ctrl | cmd
+    assert deny_entry["keyCode"] == 53
+    assert deny_entry["modifiers"] == 4352  # ctrl | cmd
+    assert json.loads(approve_entry["message"]) == {"type": "answer_permission", "behavior": "allow"}
+    assert json.loads(deny_entry["message"]) == {"type": "answer_permission", "behavior": "deny"}
