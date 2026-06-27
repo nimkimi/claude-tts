@@ -83,8 +83,6 @@ def handle_event(event: str, payload: dict) -> list[dict]:
                     message=payload.get("message", ""),
                 ),
             ]
-        if nt == "idle_prompt":
-            return [_msg(type=MsgType.EARCON, kind="ready")]
         return []
 
     if event == "Stop":
