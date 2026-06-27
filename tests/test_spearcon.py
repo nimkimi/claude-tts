@@ -3,11 +3,22 @@ from pathlib import Path
 from sonari.spearcon import SpearconCache, spearcon_label
 
 
-def test_label_first_word_capped_at_12():
-    assert spearcon_label("backend") == "backend"
-    assert spearcon_label("my project here") == "my"          # first whitespace word
-    assert spearcon_label("averylongfoldername") == "averylongfol"   # 12 chars
+def test_label_splits_on_hyphen_underscore_whitespace():
+    # hyphen-separated (typical Claude Code folder names)
+    assert spearcon_label("backend-api") == "backend"
+    assert spearcon_label("invoice-generator") == "invoice"
+    assert spearcon_label("claude-everywhere") == "claude"
+    # underscore-separated
+    assert spearcon_label("my_project") == "my"
+    # whitespace still works
+    assert spearcon_label("  spaced name ") == "spaced"
+    # no delimiter — whole word returned
+    assert spearcon_label("frontend") == "frontend"
+    # 12-char cap on a long single component
+    assert spearcon_label("averylongfoldername") == "averylongfol"
+    # empty / falsy
     assert spearcon_label("") == ""
+    assert spearcon_label(None) == ""
 
 
 def _recording():
