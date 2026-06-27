@@ -15,6 +15,34 @@ import subprocess
 from pathlib import Path
 
 
+def _default_voice_lister() -> str:
+    """Run `say -v '?'` and return stdout. Raises on any error (non-zero / missing)."""
+    result = subprocess.run(
+        ["say", "-v", "?"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("say -v '?' exited non-zero")
+    return result.stdout
+
+
+def _voice_is_available(voice: str, lister) -> bool:
+    """Return True iff *voice* appears as the first token on any line of `say -v '?`
+    output. On any error (say missing, non-zero exit, parse failure) returns False —
+    the safe fallback (no doomed per-cue Popen)."""
+    try:
+        output = lister()
+        for line in output.splitlines():
+            parts = line.split()
+            if parts and parts[0].lower() == voice.lower():
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def spearcon_label(folder: str) -> str:
     """The short, recognizable label a folder is spoken as in a spearcon: the first
     component on a hyphen/underscore/whitespace split, capped at 12 chars. Real folder
@@ -28,11 +56,14 @@ def spearcon_label(folder: str) -> str:
 
 class SpearconCache:
     def __init__(self, cache_dir, voice: str = "Samantha", rate: int = 525,
-                 popen=None) -> None:
+                 popen=None, voice_lister=None) -> None:
         self._dir = Path(cache_dir)
         self._voice = voice
         self._rate = rate
         self._popen = popen or subprocess.Popen
+        # One-time check at init (never on the hot path). If the configured voice is
+        # absent or the lookup fails, generate() falls back to system default (no -v).
+        self._voice_available = _voice_is_available(voice, voice_lister or _default_voice_lister)
 
     def _key(self, label: str) -> str:
         short = spearcon_label(label)
@@ -61,7 +92,10 @@ class SpearconCache:
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
             p = self.path_for(label)
-            cmd = ["say", "-v", self._voice, "-r", str(self._rate), "-o", str(p), short]
+            cmd = ["say"]
+            if self._voice_available:
+                cmd += ["-v", self._voice]
+            cmd += ["-r", str(self._rate), "-o", str(p), short]
             return self._popen(cmd)
         except (OSError, ValueError):
             return None

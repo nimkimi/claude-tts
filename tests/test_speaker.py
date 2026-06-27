@@ -396,10 +396,12 @@ def test_speak_audio_path_tracks_proc_and_cancel_terminates_it():
             captured["sp"].cancel()            # barge-in mid-afplay
             return super().wait(timeout=timeout)
 
-    sp = Speaker(afplay_runner=lambda path: CancelOnWait())
+    proc = CancelOnWait()
+    sp = Speaker(afplay_runner=lambda path: proc)
     captured["sp"] = sp
     sp.speak(audio_path="/cache/x.aiff")
     # the tracked afplay proc was terminated by cancel() — barge-in parity with say
+    assert proc.terminate_calls == 1
 
 
 def test_speak_audio_path_honors_external_cancel_epoch_baseline():
