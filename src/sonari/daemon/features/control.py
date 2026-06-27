@@ -117,6 +117,42 @@ def on_status(ctx, msg):
     }
 
 
+@handler(MsgType.WHERE_AM_I)
+def on_where_am_i(ctx, msg):
+    # ⌃⌘W "where am I": a terse SPOKEN status (distinct from the CLI STATUS dict),
+    # barge-in + interjection-resume per §7. Plain text for sub-project B (spearcon /
+    # pitch polish is sub-project D): "{folder}. {Playing|Stopped}. {N} waiting."
+    host = ctx.host
+    fg = host.sessions.foreground()
+    if fg is None:
+        host.speaker.earcon("error")              # always-confirm-fired: never a silent no-op
+        return None
+    # Capture the in-flight item BEFORE cancel so we can resume it afterwards.
+    cur = host._current_item
+    folder = host.sessions.folder(fg) or "Unknown session"
+    st = host._streams.get(fg)
+    state = "Stopped" if (st is not None and st.stopped) else "Playing"
+    # Waiting = background sessions with live, non-stopped backlog (mirrors _waiting_target).
+    waiting = sum(1 for sess, s in host._streams.items()
+                  if sess != fg and not s.stopped and len(s.queue) > 0)
+    text = "{0}. {1}. {2} waiting.".format(folder, state, waiting)
+    host.speaker.cancel()                          # barge-in: cut the current utterance
+    # Resume-after-interjection: re-queue the interrupted item at the front (BEHIND the
+    # status cue), carrying its pending-heard entry on a FRESH item id so the speak
+    # loop's note_spoken (which pops the OLD id with completed=False) can't lose it.
+    if cur is not None:
+        entry = host._pending_heard.get(cur.id)
+        host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
+                      entry=entry, mute_exempt=cur.mute_exempt,
+                      pause_exempt=cur.pause_exempt, names_session=cur.names_session,
+                      at_front=True)
+    # Status cue at the very front (plays FIRST). pause_exempt so ⌃⌘W speaks even when the
+    # foreground session is stopped; mute_exempt so it is never folder-prefixed.
+    host._enqueue(fg, "prose", text, False,
+                  mute_exempt=True, pause_exempt=True, at_front=True)
+    return None
+
+
 @handler(MsgType.PING)
 def on_ping(ctx, msg):
     return {"ok": True}
