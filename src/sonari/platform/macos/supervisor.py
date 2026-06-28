@@ -157,7 +157,7 @@ class MacSupervisorBackend:
             LAUNCH_AGENT_LABEL,
             [python_executable, "-m", "sonari.daemon"],
             log_path,
-            env={"PYTHONPATH": src_path},
+            env={"PYTHONPATH": src_path, "PYTHONUNBUFFERED": "1"},
         )
 
     # --- lifecycle ---

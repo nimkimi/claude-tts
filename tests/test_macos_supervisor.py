@@ -17,6 +17,20 @@ def test_launchagent_plist_body_locks_autostart_contract():
     assert parsed["RunAtLoad"] is True
 
 
+def test_launchagent_plist_unbuffers_stdout_stderr():
+    # Verify that PYTHONUNBUFFERED is set to 1 for line-buffered output,
+    # so live logs are observable when diagnosing a wedge.
+    python = "/usr/bin/python3"
+    app_dir = "/my/app/src"
+    log = "/tmp/speechd.log"
+    xml = MacSupervisorBackend().launchagent_plist(
+        python_executable=python, src_path=app_dir, log_path=log)
+    parsed = plistlib.loads(xml.encode("utf-8"))
+    assert parsed["EnvironmentVariables"]["PYTHONUNBUFFERED"] == "1"
+    # Verify PYTHONPATH is still present (no regression)
+    assert parsed["EnvironmentVariables"]["PYTHONPATH"] == app_dir
+
+
 def test_resolve_python_prefers_usr_bin(monkeypatch):
     sup = MacSupervisorBackend()
     monkeypatch.setattr(sup, "_probe_python_version", lambda c: (3, 11))
