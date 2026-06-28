@@ -126,7 +126,9 @@ def on_status(ctx, msg):
             for sid, st in host._streams.items()
         ],
         "session_count": len(host._streams),
-        # Wall-clock uptime from construction; never negative.
+        # Wall-clock seconds since construction. Normally >=0, but time.time()
+        # is not monotonic (NTP / manual clock step) so this can briefly go
+        # backward; for a wedge-vs-idle read prefer last_drain_age_s (monotonic).
         "uptime_s": time.time() - host._started_at,
         # Monotonic age since the last drained item; None until the first drain.
         "last_drain_age_s": (
