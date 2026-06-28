@@ -1,4 +1,7 @@
 import os
+import signal
+
+import faulthandler
 
 import sonari.daemon.bootstrap as daemon_mod
 
@@ -13,3 +16,17 @@ def test_faulthandler_log_under_sonari_dir(tmp_path):
     assert expected.exists()
     assert daemon_mod._FAULT_FILE is not None
     assert os.path.realpath(daemon_mod._FAULT_FILE.name) == os.path.realpath(str(expected))
+
+
+def test_faulthandler_sigusr1_registered(tmp_path):
+    """After _arm_faulthandler(), SIGUSR1 handler is registered for on-demand
+    thread dumps via 'kill -USR1 <pid>'. Verify by calling faulthandler.unregister()
+    which returns True if the handler exists, then the global state is cleaned up
+    for subsequent tests."""
+    daemon_mod._arm_faulthandler()
+
+    # Verify SIGUSR1 is registered; unregister returns True on success.
+    # The unregister call also cleans up the global state so it doesn't leak
+    # to the next test.
+    assert faulthandler.unregister(signal.SIGUSR1), \
+        "SIGUSR1 handler should be registered after _arm_faulthandler()"

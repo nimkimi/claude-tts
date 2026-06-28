@@ -26,10 +26,12 @@ _FAULT_FILE = None
 def _arm_faulthandler() -> None:
     """Dump every thread's Python stack to SONARI_DIR/faulthandler.log on a NATIVE
     crash (access violation / segfault in WinRT, ctypes, or winsound) — the only
-    way to see otherwise-silent C-level daemon deaths. Never raises."""
+    way to see otherwise-silent C-level daemon deaths. On-demand thread dump via
+    'kill -USR1 <pid>'. Never raises."""
     global _FAULT_FILE
     try:
         import faulthandler
+        import signal
         # Import SONARI_DIR LIVE (not at module top) so the conftest monkeypatch /
         # any SONARI_DIR redirection takes effect; a top-level import would freeze
         # the value before tests patch it and leak into the real ~/.sonari.
@@ -41,6 +43,7 @@ def _arm_faulthandler() -> None:
         _FAULT_FILE.write("=== faulthandler armed: pid {0} ===\n".format(os.getpid()))
         _FAULT_FILE.flush()
         faulthandler.enable(file=_FAULT_FILE, all_threads=True)
+        faulthandler.register(signal.SIGUSR1, file=_FAULT_FILE, all_threads=True, chain=False)
     except Exception:  # noqa: BLE001 - diagnostics must never break startup
         pass
 
