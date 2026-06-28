@@ -117,6 +117,13 @@ class SpeechDaemon:
         """Raise thread reported failure for a still-current jump: tell the user
         to bring the window forward by hand. Acquires the daemon lock (this runs
         off the message-handler path)."""
+        # Diagnostic: log raise failure so backend (AppleScript/TCC) failures are visible.
+        import sys
+        try:
+            print(f"sonari[focus]: raise FAILED session={session} folder={folder}",
+                  file=sys.stderr)
+        except Exception:
+            pass  # Never raise from diagnostic emit
         text = ("Bring {0} forward to type.".format(folder) if folder
                 else "Bring it forward to type.")
         with self._lock:

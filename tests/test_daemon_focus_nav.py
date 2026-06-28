@@ -81,3 +81,68 @@ def test_within_focused_session_nav_no_voice_move_no_cue():
     # Exact-equality confirms no "frontend." cue was prepended (within-session, not crossed).
     assert texts == ["fg-m0", "fg-m1"]
     assert sessions.foreground() == "fg"               # within-session nav keeps the voice on fg
+
+
+def test_jump_waiting_diagnostic_identity_none(capsys):
+    # jump_waiting with a target whose identity is None should emit
+    # a diagnostic line with identity=none.
+    daemon, queue, _s, sessions, _c = make_daemon(foreground="a")
+    sessions.register("a", cwd="/work/a")
+    _seed(daemon, "a")
+
+    sessions.register("b", cwd="/work/b")
+    # Don't set identity for b -> identity will be None
+    # Enqueue a message to make b a valid jump target.
+    daemon._enqueue("b", "prose", "test message", False)
+
+    sessions.set_foreground("a")
+
+    # Trigger jump_waiting.
+    daemon.handle_message({"type": "jump_waiting"})
+
+    captured = capsys.readouterr()
+    # Should emit diagnostic with identity=none (since b's identity is None).
+    assert "sonari[focus]: jump_waiting target=b identity=none will_raise=" in captured.err
+
+
+def test_jump_waiting_diagnostic_identity_present(capsys):
+    # jump_waiting with a target whose identity is present (has tty) should emit
+    # a diagnostic line with identity=present.
+    daemon, queue, _s, sessions, _c = make_daemon(foreground="a")
+    sessions.register("a", cwd="/work/a")
+    sessions.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
+    _seed(daemon, "a")
+
+    sessions.register("b", cwd="/work/b")
+    sessions.set_identity("b", Identity(term_program="Apple_Terminal", tty="/dev/ttys002"))
+    daemon._enqueue("b", "prose", "test message", False)
+
+    sessions.set_foreground("a")
+
+    daemon.handle_message({"type": "jump_waiting"})
+
+    captured = capsys.readouterr()
+    # Should emit diagnostic with identity=present (since b's identity has a non-empty tty).
+    assert "sonari[focus]: jump_waiting target=b identity=present will_raise=" in captured.err
+
+
+def test_jump_waiting_diagnostic_identity_tty_empty(capsys):
+    # jump_waiting with a target whose identity exists but tty is empty should emit
+    # a diagnostic line with identity=tty-empty.
+    daemon, queue, _s, sessions, _c = make_daemon(foreground="a")
+    sessions.register("a", cwd="/work/a")
+    sessions.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
+    _seed(daemon, "a")
+
+    sessions.register("b", cwd="/work/b")
+    # Identity with empty tty.
+    sessions.set_identity("b", Identity(term_program="Apple_Terminal", tty=""))
+    daemon._enqueue("b", "prose", "test message", False)
+
+    sessions.set_foreground("a")
+
+    daemon.handle_message({"type": "jump_waiting"})
+
+    captured = capsys.readouterr()
+    # Should emit diagnostic with identity=tty-empty (since b's identity tty is empty).
+    assert "sonari[focus]: jump_waiting target=b identity=tty-empty will_raise=" in captured.err

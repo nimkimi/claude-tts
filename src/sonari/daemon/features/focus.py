@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
 
@@ -55,6 +57,18 @@ def on_jump_waiting(ctx, msg):
     folder = ctx.host.sessions.folder(target)
     identity = ctx.host.sessions.identity(target)
     will_raise = ctx.host._raise().will_attempt(identity)
+    # Diagnostic: classify identity state for debugging FOCUS-1 (jump_waiting raise fails).
+    try:
+        if identity is None:
+            identity_class = "none"
+        elif not identity.tty:
+            identity_class = "tty-empty"
+        else:
+            identity_class = "present"
+        print(f"sonari[focus]: jump_waiting target={target} identity={identity_class} will_raise={will_raise}",
+              file=sys.stderr)
+    except Exception:
+        pass  # Never raise from diagnostic emit
     # Bump the jump generation on EVERY jump, not only raising ones. A jump to
     # a non-followable target must still advance the generation so a prior
     # in-flight raise sees itself superseded (its _is_current(genOld) check
