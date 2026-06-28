@@ -3,6 +3,8 @@ import signal
 
 import faulthandler
 
+import pytest
+
 import sonari.daemon.bootstrap as daemon_mod
 
 
@@ -18,6 +20,10 @@ def test_faulthandler_log_under_sonari_dir(tmp_path):
     assert os.path.realpath(daemon_mod._FAULT_FILE.name) == os.path.realpath(str(expected))
 
 
+@pytest.mark.skipif(
+    not hasattr(signal, "SIGUSR1"),
+    reason="SIGUSR1 is POSIX-only; daemon is macOS-only",
+)
 def test_faulthandler_sigusr1_registered(tmp_path):
     """After _arm_faulthandler(), SIGUSR1 handler is registered for on-demand
     thread dumps via 'kill -USR1 <pid>'. Verify by calling faulthandler.unregister()
