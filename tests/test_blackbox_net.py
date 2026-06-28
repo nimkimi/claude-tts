@@ -346,7 +346,9 @@ def test_status_snapshot_and_ping():
     daemon, speaker, log, sessions, config = make_net(foreground="fg")
     daemon._enqueue("fg", "prose", "x", False)
     reply = daemon.handle_message(msg(MsgType.STATUS, "fg"))
-    assert reply == {
+    # The original 6 keys must still be present with the right values.
+    assert {k: reply[k] for k in ("verbosity", "rate", "voice", "foreground",
+                                   "queue_len", "minqueue")} == {
         "verbosity": "everything",
         "rate": 200,
         "voice": None,
@@ -354,4 +356,8 @@ def test_status_snapshot_and_ping():
         "queue_len": 1,
         "minqueue": 1,
     }
+    # DIAG-3 additions: basic invariants only (uptime_s is dynamic).
+    assert reply["session_count"] == 1
+    assert reply["uptime_s"] >= 0
+    assert reply["current_item"] is False
     assert daemon.handle_message(msg(MsgType.PING, "fg")) == {"ok": True}

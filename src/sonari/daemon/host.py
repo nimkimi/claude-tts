@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import secrets
 import threading
+import time
 
 from sonari.protocol import MsgType
 from sonari.queue import SpeechItem
@@ -55,6 +56,12 @@ class SpeechDaemon:
         # Mutated ONLY under self._lock (handlers); the Event is waited on ONLY outside
         # the lock (in _handle_message_guarded, after the transaction exits).
         self._pending_decisions: dict = {}
+        # Diagnostics: wall-clock start time and monotonic drain heartbeat.
+        # _last_drain is None until the first item drains; updated as a bare
+        # assignment in note_spoken (no lock — a float write is atomic in CPython,
+        # and this is observe-only data for status/diagnosis).
+        self._started_at: float = time.time()
+        self._last_drain: "float | None" = None
 
     # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
     # (speak loop + kernel ops) goes through self._state._X directly; these
@@ -246,6 +253,10 @@ class SpeechDaemon:
     def note_spoken(self, item, completed: bool) -> None:
         """Speak-loop bookkeeping: confirm (or decline) the heard-marker for a
         finished utterance, and release the current-item claim."""
+        # Heartbeat: stamp the drain time BEFORE acquiring the lock so this
+        # observe-only write never adds latency to or contends with the lock path.
+        # A float write is atomic in CPython; no lock needed for a diagnostic field.
+        self._last_drain = time.monotonic()
         with self._lock:
             self._state._current_item = None
             entry = self._state._pending_heard.pop(item.id, None)

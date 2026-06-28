@@ -100,7 +100,9 @@ def test_status_returns_documented_dict():
     queue.enqueue(SpeechItem(id=1, session="fg", kind="prose", text="a", is_decision=False))
     queue.enqueue(SpeechItem(id=2, session="fg", kind="prose", text="b", is_decision=False))
     resp = daemon.handle_message(_msg(MsgType.STATUS))
-    assert resp == {
+    # The original 6 keys must still be present with the right values.
+    assert {k: resp[k] for k in ("verbosity", "rate", "voice", "foreground",
+                                  "queue_len", "minqueue")} == {
         "verbosity": "medium",
         "rate": 175,
         "voice": "Samantha",
@@ -108,6 +110,12 @@ def test_status_returns_documented_dict():
         "queue_len": 2,
         "minqueue": 4,
     }
+    # DIAG-3 additions: verify shape and basic invariants.
+    assert resp["session_count"] == 1
+    assert resp["sessions"] == [{"session": "fg", "queue_len": 2, "stopped": False}]
+    assert resp["uptime_s"] >= 0
+    assert resp["last_drain_age_s"] is None   # no item drained yet in this test
+    assert resp["current_item"] is False
 
 
 def test_ping_returns_ok():

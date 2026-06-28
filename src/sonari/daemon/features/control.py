@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
 from sonari.config import save_config
@@ -107,13 +109,33 @@ def on_cycle_verbosity(ctx, msg):
 
 @handler(MsgType.STATUS)
 def on_status(ctx, msg):
+    host = ctx.host
+    last_drain = host._last_drain
     return {
-        "verbosity": ctx.host.config.get("verbosity"),
-        "rate": ctx.host.config.get("rate"),
-        "voice": ctx.host.config.get("voice"),
-        "foreground": ctx.host.sessions.foreground(),
-        "queue_len": sum(len(st.queue) for st in ctx.host._streams.values()),
-        "minqueue": ctx.host.config.get("minqueue"),
+        # Original 6 keys — kept verbatim for backward-compat.
+        "verbosity": host.config.get("verbosity"),
+        "rate": host.config.get("rate"),
+        "voice": host.config.get("voice"),
+        "foreground": host.sessions.foreground(),
+        "queue_len": sum(len(st.queue) for st in host._streams.values()),
+        "minqueue": host.config.get("minqueue"),
+        # Diagnostic additions (DIAG-3).
+        # Per-session snapshot: one entry per known stream.
+        "sessions": [
+            {"session": sid, "queue_len": len(st.queue), "stopped": st.stopped}
+            for sid, st in host._streams.items()
+        ],
+        "session_count": len(host._streams),
+        # Wall-clock uptime from construction; never negative.
+        "uptime_s": time.time() - host._started_at,
+        # Monotonic age since the last drained item; None until the first drain.
+        "last_drain_age_s": (
+            time.monotonic() - last_drain if last_drain is not None else None
+        ),
+        # True when an item is currently claimed by the speak loop (in-flight utterance).
+        # No global stop_all flag exists — stop is per-stream via st.stopped, surfaced
+        # in the sessions array above.  We intentionally do NOT add a stop_all key.
+        "current_item": host._state._current_item is not None,
     }
 
 

@@ -19,7 +19,34 @@ def _cmd_status(_args) -> int:
     if reply is None:
         print("sonari: no response from daemon (is it running?)")
         return 1
+    # Raw JSON first — preserves every key for scripting / copy-paste diagnosis.
     print(json.dumps(reply, indent=2))
+    # Human-readable diagnostic summary for the new DIAG-3 fields.
+    # All lookups use .get() so this renders cleanly against an older daemon that
+    # does not yet return these keys.
+    uptime_s = reply.get("uptime_s")
+    session_count = reply.get("session_count")
+    last_drain_age_s = reply.get("last_drain_age_s")
+    current_item = reply.get("current_item")
+    sessions = reply.get("sessions")  # None when key absent (old daemon)
+    if uptime_s is not None or session_count is not None:
+        uptime_str = "{:.1f}s".format(uptime_s) if uptime_s is not None else "?"
+        count_str = str(session_count) if session_count is not None else "?"
+        speaking_str = ("yes" if current_item else "no") if current_item is not None else "?"
+        print("---")
+        print("Uptime: {0}  |  Sessions: {1}  |  Speaking: {2}".format(
+            uptime_str, count_str, speaking_str))
+        # last_drain_age_s key present but None = no drain yet; key absent = old daemon.
+        if "last_drain_age_s" in reply:
+            if last_drain_age_s is None:
+                print("Heartbeat: no drain yet")
+            else:
+                print("Heartbeat: {:.2f}s ago".format(last_drain_age_s))
+        if sessions:
+            for s in sessions:
+                state = "stopped" if s.get("stopped") else "active"
+                print("  {0}  queue={1}  [{2}]".format(
+                    s.get("session", "?"), s.get("queue_len", 0), state))
     return 0
 
 

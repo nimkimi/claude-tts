@@ -204,6 +204,63 @@ def test_client_send_raises_daemon_not_running_on_connection_refused(tmp_path, m
         client_mod.send({"type": "ping"})
 
 
+# ---------------------------------------------------------------------------
+# DIAG-3: _cmd_status renders new fields as human-readable lines and tolerates
+# an old daemon reply that lacks those keys.
+# ---------------------------------------------------------------------------
+
+def test_status_renders_uptime_and_session_count(capsys):
+    """Human-readable Uptime: and Sessions: labels appear when new fields are present."""
+    reply = {
+        "verbosity": "everything", "rate": 200, "voice": None,
+        "foreground": "abc", "queue_len": 3, "minqueue": 1,
+        "uptime_s": 42.5, "last_drain_age_s": 1.23, "session_count": 2,
+        "current_item": False,
+        "sessions": [
+            {"session": "abc", "queue_len": 3, "stopped": False},
+            {"session": "def", "queue_len": 0, "stopped": True},
+        ],
+    }
+    with mock.patch("sonari.client.send", return_value=reply):
+        rc = cli.main(["status"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Uptime:" in out, "Expected 'Uptime:' label in status output"
+    assert "Sessions: 2" in out, "Expected 'Sessions: 2' in status output"
+    # Both session ids must appear in the per-session lines
+    assert "abc" in out
+    assert "def" in out
+    # The stopped session's state must be surfaced
+    assert "stopped" in out.lower()
+
+
+def test_status_renders_no_drain_when_last_drain_age_is_none(capsys):
+    """When last_drain_age_s is None (no items drained yet), a readable label says so."""
+    reply = {
+        "verbosity": "everything", "rate": 200, "voice": None,
+        "foreground": "abc", "queue_len": 0, "minqueue": 1,
+        "uptime_s": 5.0, "last_drain_age_s": None, "session_count": 1,
+        "current_item": False,
+        "sessions": [{"session": "abc", "queue_len": 0, "stopped": False}],
+    }
+    with mock.patch("sonari.client.send", return_value=reply):
+        rc = cli.main(["status"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "no drain" in out.lower(), "Expected 'no drain' indicator when last_drain_age_s is None"
+
+
+def test_status_cli_backward_compat_old_daemon(capsys):
+    """CLI does not crash and still shows existing fields when new keys are absent."""
+    reply = {"verbosity": "everything", "rate": 200, "voice": None,
+             "foreground": "abc", "queue_len": 3}
+    with mock.patch("sonari.client.send", return_value=reply):
+        rc = cli.main(["status"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "everything" in out
+
+
 def test_rate_subcommand_sends_absolute_set_rate():
     with mock.patch("sonari.client.send", return_value=None) as send:
         rc = cli.main(["rate", "300"])

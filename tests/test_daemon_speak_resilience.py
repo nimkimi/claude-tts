@@ -1,6 +1,8 @@
 """The speak thread must survive ANY exception in its loop body — a crash in
 pop_next/note_spoken/etc. previously killed the thread permanently (daemon alive,
 earcons firing, but mute forever until a restart). Regression guard."""
+import time as _time
+
 from tests.daemon_helpers import make_daemon
 
 
@@ -142,3 +144,40 @@ def test_signal_speak_failure_logs_traceback_to_stderr():
     assert speaker.earcons == ["error"], (
         f"Expected error earcon but got: {speaker.earcons!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# DIAG-3: heartbeat — _last_drain advances each time note_spoken is called.
+# ---------------------------------------------------------------------------
+
+def test_last_drain_is_none_before_any_drain():
+    """Heartbeat sentinel starts as None (no drain has happened yet)."""
+    daemon = make_daemon()[0]
+    assert daemon._last_drain is None
+
+
+def test_started_at_is_set_at_construction():
+    """_started_at is a wall-clock timestamp captured in __init__."""
+    before = _time.time()
+    daemon = make_daemon()[0]
+    after = _time.time()
+    assert hasattr(daemon, "_started_at")
+    assert before <= daemon._started_at <= after
+
+
+def test_heartbeat_advances_after_each_drain():
+    """_last_drain is set (and advances) each time the speak loop drains an item."""
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    assert daemon._last_drain is None
+
+    daemon._enqueue("fg", "prose", "first", False)
+    daemon._speak_loop_once()
+    first_drain = daemon._last_drain
+    assert first_drain is not None, "_last_drain must be set after the first drain"
+
+    # Let monotonic advance (even sub-ms is fine — we just need the assignment to fire again).
+    daemon._enqueue("fg", "prose", "second", False)
+    _time.sleep(0.01)
+    daemon._speak_loop_once()
+    second_drain = daemon._last_drain
+    assert second_drain >= first_drain, "_last_drain must not go backwards"

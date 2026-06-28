@@ -174,3 +174,57 @@ def test_new_prompt_same_session_still_cuts():
                                       text="answer.", is_decision=False)
     daemon.handle_message(_msg(MsgType.FLUSH, "a"))
     assert speaker.cancels == 1                          # existing behavior preserved
+
+
+# ---------------------------------------------------------------------------
+# DIAG-3: richer STATUS dict — per-session array, uptime, heartbeat.
+# ---------------------------------------------------------------------------
+
+def test_on_status_preserves_original_six_keys():
+    """Backward-compat: the 6 original STATUS keys must still be present."""
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    reply = daemon.handle_message(_msg(MsgType.STATUS))
+    for key in ("verbosity", "rate", "voice", "foreground", "queue_len", "minqueue"):
+        assert key in reply, f"Original key '{key}' missing from STATUS reply"
+
+
+def test_on_status_returns_per_session_array_with_stopped_flag():
+    """STATUS returns per-session list; stopped flag is correct per-stream."""
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    # Create a second stream and mark it stopped
+    daemon._stream("bg").stopped = True
+
+    reply = daemon.handle_message(_msg(MsgType.STATUS))
+
+    # New keys present
+    assert "sessions" in reply
+    assert "session_count" in reply
+    assert "uptime_s" in reply
+    assert "last_drain_age_s" in reply
+    assert "current_item" in reply
+
+    # Per-session data correct
+    sess_arr = reply["sessions"]
+    assert isinstance(sess_arr, list)
+    assert len(sess_arr) == 2
+
+    by_id = {s["session"]: s for s in sess_arr}
+    assert "fg" in by_id
+    assert "bg" in by_id
+    assert by_id["fg"]["stopped"] is False
+    assert by_id["bg"]["stopped"] is True
+    assert isinstance(by_id["fg"]["queue_len"], int)
+
+    assert reply["session_count"] == 2
+    assert reply["uptime_s"] >= 0
+    assert reply["last_drain_age_s"] is None  # no drain yet
+    assert reply["current_item"] is False
+
+
+def test_on_status_current_item_true_when_item_claimed():
+    """STATUS reports current_item=True when a SpeechItem is in flight."""
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    daemon._state._current_item = SpeechItem(
+        id=1, session="fg", kind="prose", text="hello", is_decision=False)
+    reply = daemon.handle_message(_msg(MsgType.STATUS))
+    assert reply["current_item"] is True
