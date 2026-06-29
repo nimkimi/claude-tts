@@ -115,7 +115,10 @@ A new arrival — any session finishing or producing output, including an autono
 ### R3 — Completeness: the marker never skips
 When the voice reads a session it goes **forward from its frontier, in order, omitting no item** —
 rendered at the current verbosity's detail (§9; the *transcript* itself drops nothing). The frontier
-advances only across content actually read aloud.
+advances only across content you've **dealt with** — *heard*, or *deliberately skipped* (⌃⌘↓, §10.1) —
+**never on its own, and never when new content merely arrives.** (Skipped content stays in the
+transcript, browsable; it's just out of the auto-catch-up path. A *deliberate* skip is your choice, not
+a silent system gap — that's the distinction the "ding and join the pile" rule, D17, was protecting.)
 > **Observable:** B's unheard transcript is `[t1, t2, t3]`; when the voice reads B it emits `t1`, then
 > `t2`, then `t3`; it never emits `t3` before `t1`; B's frontier reaches `t3` only after all three are
 > read.
@@ -132,6 +135,10 @@ travels.
 - **Default (vetoable):** when several sessions have unheard output, the voice finishes the current
   session to its live edge, then picks the session whose **oldest unheard output is oldest**
   (longest-waiting first), so nothing starves.
+- **Active sessions only (§10.1):** keep-going auto-advances among **active** sessions; a session you
+  **stopped** (⌃⌘S / ⌃⌘M) or in **quiet** is *not* auto-drained — it piles navigably and you absorb it
+  with the catch-up key. (Switching focus to another session does **not** "stop" the first — it stays
+  active / auto-flowed.)
 
 ### R5 — You override the flow; the window follows *your* action
 Three deliberate user actions change the speaker on demand, and **each makes that session the
@@ -182,7 +189,9 @@ reports that the voice is stopped.
 
 Re-engaging (cycle / jump / submit to any session) **lifts the quiet hold** and ambient flow resumes
 for non-muted sessions. The specifically stopped session **stays muted** until you start *it* again,
-at which point it resumes from its frozen marker. Navigating *to* a still-muted session raises its
+at which point it resumes from its frozen marker. While stopped, its output **piles** (dinging on
+turn-completion); you absorb that pile with the **catch-up key** (§10.1) — reading from the frozen
+marker forward, never an auto-blast. Navigating *to* a still-muted session raises its
 window (it becomes the workspace) but it **stays silent** until you start it (`⌃⌘S`) — navigation
 never un-mutes; only an explicit start does.
 
@@ -327,7 +336,8 @@ Pass 2's first job here is to confirm them against the real bindings before trus
 | Cycle next / prev session (R5, R12) | ⌃⌘Tab / ⌃⌘⇧Tab | **CHANGE** | Now **raises the window** on each landing (was voice-only). Speaker + workspace move together. |
 | Submit a typed prompt (R5, R6) | *(type + enter)* | **KEEP** | A **human-typed** submit preempts (R5); an autonomous session's own submit does **not** (R6) — it dings + queues. Workspace already there. |
 | Within-response nav / hear-again (R3) | ⌃⌘← / → | **KEEP** | Moves within the transcript; ← re-reads (marker-aware). |
-| Between-response nav (R3) | ⌃⌘↑ / ↓ | **KEEP** | ⌃⌘↓ to newest = live edge. |
+| Between-response nav (R3) | ⌃⌘↑ / ↓ | **KEEP** | ⌃⌘↓ to newest = live edge (also: skip a pile to live). |
+| Catch up the focused session (§10) | catch-up key (reuse legacy `catch_up`) | **ADD** | Reads forward from your frontier through the pile to live — the bridge for navigable (stopped / quiet) sessions. The new model makes it first-class. |
 | Go to the waiting decision (R9) | ⌃⌘D | **KEEP** | How you reach a permission prompt that (by R9) waits its turn; it's a go-there (raises). |
 | Approve / deny a permission (R10) | ⌃⌘⏎ / ⌃⌘⎋ | **KEEP** | Targets the workspace's pending decision; wrong target → error tone (fail-closed). |
 | Where am I (R7, R8) | ⌃⌘W | **CHANGE** | Now also reports the **voice state** (flowing / quiet-hold / stopped-all) so a deliberate stop is never a silent surprise. |
@@ -340,9 +350,9 @@ ambient, R8 identity, R11 restart cue) need no key — no behavior is left witho
 **Cut / add candidates for Pass 2 to weigh** (flagged, not decided):
 - **CUT (logic, not a key):** the old "#65 voice-follows-speaker / nothing-steals-it" automatic rule is
   **superseded** by the full arbitration (R1–R6) — remove it, don't preserve it.
-- **ADD (consider):** a "skip the rest of this session's backlog and let keep-going move on" control,
-  *if* pruning an auto-flood via ⌃⌘S / ⌃⌘↓ / cycle proves too blunt in the live test. Not adding now
-  (YAGNI until the flood is felt).
+- **ADD (real):** the **catch-up key** (row above) — first-class in the new model (reuse the legacy
+  `catch_up` action); it's how you absorb a navigable pile. **Skip** is already served by **⌃⌘↓**
+  (jump a session to its live edge).
 - **No hotkey is a cut candidate** — the cockpit binding *set* is largely correct; the rebuild is the
   arbitration *semantics* behind the keys (the CHANGE rows), not the key inventory.
 
@@ -364,6 +374,10 @@ filter you can turn up, or pull past, at any time.
 - **Quiet** — no auto prose. Activity is a **turn-completion ding**, a waiting decision gets the
   **distinct cue**, and you **pull** content on demand (⌃⌘W status, or navigate / raise verbosity to
   hear it). Awareness without narration.
+
+**Verbosity scope.** Today verbosity is one **global** setting (`/sonari:verbosity`), so "quiet →
+navigable" (§10.1) applies system-wide. Whether it should instead be **per-session** (only quieted
+sessions go navigable) is parked (§15) — a Pass-2 / product call.
 
 **Always recoverable.** Because the transcript is whole, you can always get the full detail of
 anything: navigate to it, raise verbosity, or switch a quiet session to everything — the raw record is
@@ -387,9 +401,10 @@ whatever the current verbosity renders, always upgradable.
 ## 10. Navigation & the marker (two positions)
 
 Each session carries **two** positions, not one:
-- **The frontier** — the high-water "furthest I've heard" mark. **Monotonic: it only ever advances**,
-  as you hear genuinely new content. Keep-going (R4) and forward readout read *from the frontier* and
-  push it forward. It never retreats.
+- **The frontier** — the high-water "furthest I've *dealt with*" mark. **Monotonic: it only ever
+  advances** — as you *hear* new content, or *deliberately skip* a pile. Keep-going (R4) and forward
+  readout read *from the frontier* and push it forward. It never retreats, and new content arriving
+  never moves it.
 - **The browse cursor** — where you are *right now* when you navigate back to review. Replay /
   older-response / jump-to-decision move the **browse cursor**, never the frontier.
 
@@ -397,8 +412,11 @@ So reviewing carries no penalty: re-hearing an earlier item or jumping to an old
 nothing** — the frontier stays put, and keep-going still resumes from it. **⌃⌘↓ (to newest) snaps the
 browse cursor back to the live edge / frontier.**
 
-**What advances the frontier:** hearing content *beyond* it (forward readout, keep-going, or browsing
-forward past it into never-heard territory). Re-hearing content *below* it does not move it.
+**What advances the frontier:** hearing content *beyond* it (forward readout, keep-going), **or a
+deliberate skip** (⌃⌘↓) past a pile you choose to drop — skipped content stays in the transcript
+(browsable), just out of the auto-catch-up path. Re-hearing content *below* it does not move it, and
+**new content arriving never moves it** — which is exactly what keeps the catch-up key from losing its
+place.
 
 The nav keys (§8) operate the **browse cursor**: ⌃⌘← / → (within a response; ← = hear-again),
 ⌃⌘↑ / ↓ (between responses; ↓ = live edge), ⌃⌘D (to the waiting decision).
@@ -409,6 +427,40 @@ The nav keys (§8) operate the **browse cursor**: ⌃⌘← / → (within a resp
 
 This pins the meaning of "the marker" used in §5–§7: **"marker" = the frontier**; the browse cursor is
 the review-only position introduced here.
+
+### 10.1 Catching up — auto-flow vs navigable (the sweet spot)
+
+A backlog can be handled two ways, and **which one is governed by whether you deliberately stepped
+away** — *not* by how big the pile is (no fuzzy threshold):
+
+- **Default — auto-flow (you didn't stop anything).** The voice keeps going (R4): it follows your
+  active thread, and when that idles it rolls to other **active** sessions and catches them up from
+  their frontiers — contiguous, **no gaps**, hands-free. Small real-time piles drain smoothly; a rare
+  big one you skip with **⌃⌘↓** (jump that session to its live edge).
+- **Navigable — after a deliberate stop / quiet.** A session you **stopped** (⌃⌘S / ⌃⌘M) or that's in
+  **quiet** is **not** auto-drained; its output piles (dinging on turn-completion), and you pull it
+  with the **catch-up key**. This is the "I stepped away and several piled up" case — no flood, you
+  choose what to hear.
+
+So **"left" means stopped or quieted, not merely switched focus**: switching focus to another session
+leaves the first one **active** (still auto-flowed when the voice frees); only a deliberate stop/quiet
+turns it into a navigable pile.
+
+Why it has to split this way: you ruled out gaps (a behind session's new turn joins the pile, never
+reads ahead — D17, the "ding and join the pile" choice). So a behind session can only **flood** (read its
+whole pile) or **wait** (navigable) — there is no "read just the new bit." Convenience (auto-flow) and
+rigor (navigable) therefore genuinely trade off; the deliberate stop/quiet is the clean switch between
+them.
+
+**The catch-up key** (reuse the legacy `catch_up`) reads **forward from your frontier** on the focused
+session, through its whole pile *and anything that arrived while you were away*, until you reach live —
+then you're following again. It **can never lose its place**, because the frontier moves *only when you
+hear content* (R3), never when new content arrives — new output only extends the pile *beyond* the
+frontier.
+
+> **Observable:** you ⌃⌘S-stop session B (it keeps working) → B's new turns ding + pile, the voice does
+> not read them; you focus B and press catch-up → it reads from B's frontier forward through the pile to
+> live. Meanwhile session C, which you never stopped, is still auto-flowed when the voice is free.
 
 ## 11. Sound language (reuse, not invent)
 
@@ -461,11 +513,11 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
 |---|---|---|---|
 | D1 | Background finishes mid-reply: keep reply + signal / keep reply silent / cut in | **Keep reply + a quick signal** | Never cut the live answer, but stay aware. |
 | D2 | The signal: name the session / generic sound / name-on-demand | **Generic ding** (overlays, no pause) | Sessions are autonomous and the user navigates between them, so identity is *pulled*, not pushed. |
-| D3 | When the voice is free and sessions produce output: only the attended one / auto-read ambient / pull only | **Auto-read ambient, one at a time** *(in everything / medium; quiet = dings + pull, §9)* | Keep-going; hands-free awareness. |
+| D3 | When the voice is free and sessions produce output: only the attended one / auto-read ambient / pull only | **Auto-read ambient, one at a time** *(everything / medium, **active** sessions; quiet or stopped = dings + pull, §9–§10.1)* | Keep-going; hands-free awareness. |
 | D4 | Stop the speaker while another waits: advance to the queue / go fully quiet | **Go fully quiet** | A deliberate stop means silence, not a hand-off. |
 | D5 | Cycle by ear: window stays / raises on every landing | *(superseded by D9)* | — |
 | D6 | Restart mid-reply: cue + keep sessions / seamless resume / silent recovery | **Cue + keep sessions** | A silent gap reads as "broken"; auto-resume after a gap is disorienting. |
-| D7 | Landing on a piled-up session: live edge / catch-up + latest / everything from where you left off | **Everything from where you left off** | Completeness — audio is the only channel; the user prunes with stop/rate/nav. |
+| D7 | Landing on a piled-up session: live edge / catch-up + latest / everything from where you left off | **Everything from where you left off** — *refined by D16: auto-flow for **active** sessions; **stopped/quiet** piles are navigable via the catch-up key, not auto-blasted* | Completeness — audio is the only channel; the user prunes with stop / rate / nav / catch-up. |
 | D8 | After a deliberate stop, does brand-new output speak: revive ambient / stay quiet until re-engage | **Stay quiet until re-engage** | Stop is a *lasting* quiet the user controls (discoverable via dings + `⌃⌘W`). |
 | D9 | Window ↔ speaker coupling | **Coupled on every user action** (submit, jump, **and cycle**) | The user values hear = see; accepts viewport movement on cycle. Upgrades D5. |
 | D10 | Does the system's ambient auto-move also raise the window | **No** | Protects keyboard focus — auto-moving the window would land keystrokes in the wrong session. |
@@ -474,6 +526,8 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
 | D13 | Quiet mode out loud | **Turn-done dings + distinct decision cue + on-demand pull; no auto prose** | Awareness without narration; the transcript is still whole, so pull / raise verbosity recovers detail. |
 | D14 | Marker ↔ navigation | **Two positions — a monotonic frontier + a separate browse cursor** | Reviewing must never re-queue everything after the point you went back to. |
 | D15 | How often a background session dings | **On turn-completion** (= the existing turn-done earcon) | You monitor by "a session finished a thing"; per-chunk dinging machine-guns. |
+| D16 | Auto-flow vs navigable backlog (the sweet spot) | **A (auto-flow) by default; B (navigable + catch-up) after a deliberate stop / quiet** (§10.1) | Convenience normally, rigor for the rare "away + multiple piles." No gaps were allowed, so a behind session can only flood or wait — stop/quiet picks "wait." |
+| D17 | What "left" means + the catch-up key | **"Left" = stopped / quiet (NOT merely switched focus); a first-class catch-up key** (reuse legacy `catch_up`) | The frontier moves only by *hearing*, so catch-up never loses position; switching focus keeps the other session active / auto-flowed. |
 
 ## 14. Vetoable defaults (chosen by inference, easy to flip in Pass 2)
 
@@ -494,6 +548,12 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
   defined; the rendering mechanism is Pass-2.
 - **Marker mechanics** — whether the marker is per-session only (assumed) and how "live edge / idle"
   is detected for keep-going (R4).
+- **⌃⌘↓ skip semantics** (§10.1) — the *principle* is settled (a deliberate skip advances the frontier
+  past the pile; the skipped content stays browsable but leaves the auto-catch-up path). The open
+  detail: does ⌃⌘↓ *always* do this, or only on a held / repeated press vs. a plain browse-to-live?
+  Pass-2 to bind.
+- **Verbosity scope** (§9) — global (today) vs per-session; per-session would let only quieted sessions
+  go navigable. Pass-2 / product call.
 - **Quiet-hold + cycle onto a muted session** (unresolved design edge, R7/§6) — re-engaging by cycling
   lifts quiet-hold, but the landed session may itself be muted (silent). Open: does the voice then
   keep-go to a *different* queued session (you hear one session while your workspace sits on the muted
