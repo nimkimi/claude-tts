@@ -242,3 +242,34 @@ def test_session_ids_excludes_unregistered():
     sm.register("b")
     sm.unregister("a")
     assert sm.session_ids() == ["b"]
+
+
+# --- SP1: speaker() / workspace() seam -----------------------------------
+
+def test_speaker_tracks_deliberate_setters():
+    sm = SessionManager()
+    assert sm.speaker() is None
+    sm.set_foreground("a", cwd="/x/a")
+    assert sm.speaker() == "a"            # set_foreground sets the speaker
+    sm.focus("b", cwd="/x/b")
+    assert sm.speaker() == "b"            # focus (jump/cycle/nav) sets the speaker
+
+def test_speaker_equals_foreground_in_sp1():
+    sm = SessionManager()
+    sm.set_foreground("a")
+    assert sm.speaker() == sm.foreground()   # SP1 invariant: no keep-going yet
+
+def test_unregister_clears_speaker():
+    sm = SessionManager()
+    sm.set_foreground("a")
+    sm.unregister("a")
+    assert sm.speaker() is None
+
+def test_workspace_prefers_os_focus_then_foreground():
+    sm = SessionManager()
+    sm.register("a", cwd="/x/a")
+    sm.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
+    sm.set_foreground("b")                       # b is the voice owner / last-acted
+    assert sm.workspace() == "b"                 # no OS focus -> fallback to foreground
+    sm.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys001")
+    assert sm.workspace() == "a"                 # OS focus on a -> workspace is a

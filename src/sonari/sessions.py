@@ -38,6 +38,9 @@ class SessionManager:
         # list/cycle is stable; membership/`in`/len behave like the old set.
         self._sessions: "dict[str, str | None]" = {}
         self._foreground: "str | None" = None
+        self._speaker: "str | None" = None    # the VOICE owner (speak loop reads this).
+        # SP1: kept == _foreground (deliberate setters move both). SP2's keep-going
+        # will advance _speaker on its own, diverging from _foreground (= last-acted).
         self._os_focused_session: "str | None" = None    # session in the OS-focused terminal
         self._identities: "dict[str, Identity]" = {}
 
@@ -51,10 +54,22 @@ class SessionManager:
     def set_foreground(self, session: str, cwd=None) -> None:
         self._record(session, cwd)
         self._foreground = session
+        self._speaker = session
 
     def foreground(self) -> "str | None":
         """The session that owns the voice: the last session to submit a prompt / start."""
         return self._foreground
+
+    def speaker(self) -> "str | None":
+        """The session the voice is reading (the speak loop plays this stream).
+        SP1: == foreground(); SP2 keep-going advances it independently."""
+        return self._speaker
+
+    def workspace(self) -> "str | None":
+        """The front terminal + keyboard: the OS-focused session if known, else the
+        last deliberately-acted session (foreground). The spec's 'workspace' — where
+        you answer and what raises. Independent of the speaker once keep-going lands."""
+        return self.focused_session() or self._foreground
 
     def session_ids(self) -> "list[str]":
         """All registered session ids in insertion order — the cycle roster (⌃⌘Tab).
@@ -73,6 +88,8 @@ class SessionManager:
         self._identities.pop(session, None)
         if self._foreground == session:
             self._foreground = None
+        if self._speaker == session:
+            self._speaker = None
         if self._os_focused_session == session:
             self._os_focused_session = None
 
@@ -110,6 +127,7 @@ class SessionManager:
         set it foreground."""
         self._record(session, cwd)
         self._foreground = session
+        self._speaker = session
 
     def set_os_focus(self, term_program: str = "", tty: str = "",
                      iterm_session_id: str = "", focused: bool = True) -> None:
