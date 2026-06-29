@@ -105,8 +105,8 @@ def on_jump_waiting(ctx, msg):
 @handler(MsgType.CYCLE_SESSION)
 def on_cycle_session(ctx, msg):
     # ⌃⌘Tab / ⌃⌘⇧Tab: cycle the VOICE through the session roster in insertion order,
-    # wrapping at the ends. A SOFT switch (no terminal-raise, unlike jump-to-waiting):
-    # focus the target, cut the current utterance, lead with a self-naming folder cue.
+    # wrapping at the ends. Raises the target terminal window (R5/R12: a deliberate
+    # cycle is a workspace action), mirroring on_jump_waiting's raise machinery.
     sessions = ctx.host.sessions
     ids = sessions.session_ids()
     if len(ids) < 2:
@@ -120,8 +120,17 @@ def on_cycle_session(ctx, msg):
     sessions.focus(target)
     ctx.host.speaker.cancel()
     folder = sessions.folder(target)
+    identity = sessions.identity(target)
+    will_raise = ctx.host._raise().will_attempt(identity)
+    # Bump on EVERY cycle, not only raising ones — same rationale as jump_waiting:
+    # a non-raising cycle must still supersede a prior in-flight raise.
+    gen = ctx.host._raise().bump_generation()
     cue = folder + "." if folder else "Another session."
     ctx.host._enqueue(target, "prose", cue, False,
                       audio_path=ctx.host._spearcon_path(folder),
                       mute_exempt=True, at_front=True, names_session=True)
+    if will_raise:
+        ctx.host._raise().raise_async(
+            identity, gen,
+            on_failure=lambda s=target, f=folder: ctx.host._raise_failed(s, f))
     return None
