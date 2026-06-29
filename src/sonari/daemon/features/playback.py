@@ -88,9 +88,8 @@ def on_jump_decision(ctx, msg):
     # focused session isn't the one speaking, MOVE the voice to it and voice its
     # decision (crossed→focus+folder cue); otherwise jump within the foreground.
     sessions = ctx.host.sessions
-    fg = sessions.foreground()           # voice owner — kept for SP2 when speaker() != workspace()
     target = sessions.workspace()
-    crossed = target != sessions.speaker()   # SP2: speaker() advances independently of workspace()
+    crossed = target != sessions.speaker()   # voice owner is speaker(); SP2 advances it independently of workspace()
     if crossed:
         sessions.focus(target)
     else:

@@ -57,7 +57,9 @@ class SessionManager:
         self._speaker = session
 
     def foreground(self) -> "str | None":
-        """The session that owns the voice: the last session to submit a prompt / start."""
+        """The last deliberately-acted session (submit / jump / cycle). NOTE: the
+        voice owner is speaker() — since SP1 split the two, this is no longer "who
+        owns the voice"; in SP1 they happen to coincide, but SP2 diverges them."""
         return self._foreground
 
     def speaker(self) -> "str | None":
