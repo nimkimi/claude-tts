@@ -269,7 +269,7 @@ has fired). A session can be `queued` *and* `blocked` at once.
 | non-speaker | autonomous output (R6) | that session → `queued` + ding; speaker unchanged |
 | speaker `speaking` | you ⌃⌘S | speaker → `muted` (marker frozen); voice → **quiet-hold** |
 | `muted` session | you ⌃⌘S (start) | resumes from frozen marker; counts as re-engage → voice **flowing** |
-| voice **quiet-hold** | you submit / jump / cycle | voice → **flowing** (navigated / non-muted session speaks) |
+| voice **quiet-hold** | you submit / jump / cycle | voice → **flowing** (navigated / non-muted session speaks; landing on a *muted* session → open edge, §12) |
 | any | you ⌃⌘M | all sessions → `muted`; voice → **stopped-all** |
 | `producing` session | hits a permission prompt | set `blocked-on-decision` + distinct cue; stays in marker order (no preempt, R9) |
 | `blocked` session is the workspace | you ⌃⌘⏎ / ⌃⌘⎋ | decision answered; flag cleared (wrong target → error tone, R10) |
@@ -306,6 +306,10 @@ Supersedes the 2026-06-26 cockpit-grammar spec where they differ. Every behavior
 maps to a control; every existing control is checked for whether a behavior still needs it. **Chords
 are the settled cockpit bindings;** Pass 2 verifies coverage and prunes / adds against this table.
 
+**Fidelity caveat (code-closed):** this table is reconciled against the *documented* grammar, not the
+live `keymap.py` / resolved keymap — design docs drift from code. So the verdicts are **provisional**;
+Pass 2's first job here is to confirm them against the real bindings before trusting the coverage check.
+
 **Legend:** **KEEP** (works as-is) · **CHANGE** (binding stays, behavior shifts under the new model) ·
 **ADD** (newly required) · **CUT** (no behavior needs it).
 
@@ -315,7 +319,7 @@ are the settled cockpit bindings;** Pass 2 verifies coverage and prunes / adds a
 | Stop everything (R7) | ⌃⌘M | **KEEP** | All muted, voice stopped-all; re-engage + per-session ⌃⌘S to return. |
 | Jump to a waiting session (R5, R11, R12) | ⌃⌘J | **CHANGE** | Now reliably **raises the window + keyboard** (workspace follows) and survives a restart (identity persists) — fixes FOCUS-1. |
 | Cycle next / prev session (R5, R12) | ⌃⌘Tab / ⌃⌘⇧Tab | **CHANGE** | Now **raises the window** on each landing (was voice-only). Speaker + workspace move together. |
-| Submit a typed prompt (R5, R6) | *(type + enter)* | **KEEP** | The only *arriving* action that preempts; workspace already there. |
+| Submit a typed prompt (R5, R6) | *(type + enter)* | **KEEP** | A **human-typed** submit preempts (R5); an autonomous session's own submit does **not** (R6) — it dings + queues. Workspace already there. |
 | Within-response nav / hear-again (R3) | ⌃⌘← / → | **KEEP** | Moves within the transcript; ← re-reads (marker-aware). |
 | Between-response nav (R3) | ⌃⌘↑ / ↓ | **KEEP** | ⌃⌘↓ to newest = live edge. |
 | Go to the waiting decision (R9) | ⌃⌘D | **KEEP** | How you reach a permission prompt that (by R9) waits its turn; it's a go-there (raises). |
@@ -391,6 +395,11 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
 - **R4 scheduling** — the precise cross-session "what plays next" policy (confirm the §11 default).
 - **Marker mechanics** — whether the marker is per-session only (assumed) and how "live edge / idle"
   is detected for keep-going (R4).
+- **Quiet-hold + cycle onto a muted session** (unresolved design edge, R7/§6) — re-engaging by cycling
+  lifts quiet-hold, but the landed session may itself be muted (silent). Open: does the voice then
+  keep-go to a *different* queued session (you hear one session while your workspace sits on the muted
+  one), or stay silent until you start it? Resolve in Pass 2 — predictability is the whole point, so
+  this edge must have one defined answer.
 
 ## 13. What Pass 2 does next
 
