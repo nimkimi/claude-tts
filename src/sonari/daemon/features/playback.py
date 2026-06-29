@@ -105,10 +105,23 @@ def on_jump_decision(ctx, msg):
     if st is not None:
         ctx.host._drop_pending(st.queue.jump_to_decision())
     ctx.host.speaker.cancel()
-    if crossed:
-        folder = sessions.folder(target)
-        if folder:
-            ctx.host._enqueue(target, "prose", folder + ".", False,
-                              audio_path=ctx.host._spearcon_path(folder),
-                              mute_exempt=True, at_front=True, names_session=True)
+    # Compute folder once — reused by both the crossed-folder spearcon cue and
+    # the raise on_failure lambda below (DRY; avoids a second sessions.folder()
+    # call inside the raise closure, which would capture a stale binding).
+    folder = sessions.folder(target)
+    if crossed and folder:
+        ctx.host._enqueue(target, "prose", folder + ".", False,
+                          audio_path=ctx.host._spearcon_path(folder),
+                          mute_exempt=True, at_front=True, names_session=True)
+    # Raise the target window (R5/R9 — C2 fix): ⌃⌘D is a deliberate workspace
+    # action, so the terminal follows the jump, mirroring on_cycle_session and
+    # on_jump_waiting. bump_generation() runs on EVERY invocation (outside the
+    # guard) so a non-raising jump still supersedes any prior in-flight raise.
+    identity = sessions.identity(target)
+    will_raise = ctx.host._raise().will_attempt(identity)
+    gen = ctx.host._raise().bump_generation()
+    if will_raise:
+        ctx.host._raise().raise_async(
+            identity, gen,
+            on_failure=lambda s=target, f=folder: ctx.host._raise_failed(s, f))
     return None

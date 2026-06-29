@@ -1,5 +1,7 @@
 from sonari.protocol import MsgType, PROTOCOL_VERSION
+from sonari.sessions import Identity
 from tests.daemon_helpers import make_daemon, stream_queue
+from tests.test_daemon_focus_follow import RecordingRaiseService
 
 
 def _msg(mtype, session, **extra):
@@ -228,8 +230,6 @@ def test_answer_targets_workspace():
     # B is OS-focused (workspace), A owns the voice (foreground). The answer
     # must resolve B's pending decision, not A's.
     import threading
-    from sonari.sessions import Identity
-    from tests.daemon_helpers import make_daemon
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     sessions.register("B", cwd="/x/B")
     sessions.set_identity("B", Identity(term_program="Apple_Terminal", tty="/dev/ttysB"))
@@ -239,3 +239,21 @@ def test_answer_targets_workspace():
     daemon._pending_decisions["B"] = {"event": threading.Event(), "behavior": None}
     daemon.handle_message(_msg(MsgType.ANSWER_PERMISSION, "", behavior="allow"))
     assert daemon._pending_decisions["B"]["behavior"] == "allow"   # answered B (workspace), not A
+
+
+def test_jump_decision_raises_target_window():
+    # ⌃⌘D must raise the target terminal window (R5/R9 — C2 fix), mirroring
+    # the same raise machinery on_cycle_session and on_jump_waiting use.
+    # B is the workspace (OS-focused) and owns the pending decision; we expect
+    # the raise service to fire exactly once, targeting B's identity.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    rs = RecordingRaiseService(will=True)
+    daemon.raise_service = rs
+    sessions.register("B", cwd="/x/B")
+    sessions.set_identity("B", Identity(term_program="Apple_Terminal", tty="/dev/ttysB"))
+    sessions.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttysB")  # workspace/target == B
+    daemon._enqueue("B", "permission", "Allow X?", True)  # pending decision lands on B
+    daemon.handle_message(_msg(MsgType.JUMP_DECISION, ""))
+    assert len(rs.attempts) == 1                           # jump_decision attempted a raise
+    ident, gen = rs.attempts[0]
+    assert ident.tty == "/dev/ttysB" and gen >= 1
