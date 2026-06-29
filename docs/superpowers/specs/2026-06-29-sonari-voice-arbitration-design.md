@@ -1,13 +1,17 @@
-# Sonari — Voice Arbitration: Behavioral Spec (Pass 1 — DEFINE)
+# Sonari — Voice & Session Behavior: Complete Behavioral Spec (Pass 1 — DEFINE)
 
 - **Date:** 2026-06-29
-- **Status:** Design — Pass 1 (DEFINE) approved in collaborative brainstorm; **code-closed**. Awaiting
+- **Status:** Design — Pass 1 (DEFINE) approved in collaborative brainstorm; **code-closed**. The
+  complete behavioral definition — model + state machine + queue contract + control surface. Awaiting
   Pass 2 (RECONCILE against the code) before implementation planning.
+- **Supersedes:** the 2026-06-26 cockpit-grammar spec — this is now the **single behavioral source of
+  truth** for voice + session control (§8 reconciles every binding; the grammar becomes historical).
 - **Scope owner:** Nima
 - **Audience:** Sonari's users are blind / eyes-free power users — designed for them, not around any
   one person's setup. The behavior below was co-designed with Nima as the lived-experience source.
-- **Layer:** Track B — *voice arbitration*: which session owns the voice, what is heard, and when.
-  This is the WHAT. Mechanisms ("how the code does it") are deferred to Pass 2.
+- **Layer:** Track B — *voice & session behavior*: which session owns the voice, what's heard and
+  when — plus the state machine, queue contract, and control surface that realize it. This is the
+  WHAT. Mechanisms ("how the code does it") are deferred to Pass 2.
 
 ## 1. Why this spec exists
 
@@ -25,9 +29,9 @@ redefined.
 
 - **Track A — audio infrastructure** (can the daemon get audio out of its launchd context). Separate,
   and already working. A logic rebuild will not fix audio infra.
-- **Exact hotkey assignments.** Bindings named below (`⌃⌘S`, `⌃⌘M`, `⌃⌘Tab`, `⌃⌘J`, `⌃⌘D`, `⌃⌘W`,
-  `⌃⌘⏎`, `⌃⌘⎋`) are illustrative anchors from the cockpit grammar; this spec governs *behavior*, not
-  which chord triggers it.
+- **Re-tuning specific chord choices** (which exact key) is Nima's to adjust later — but the
+  *required controls and their behavior* ARE in scope, specified in §8, which supersedes the cockpit
+  grammar's bindings.
 - **TTS rendering** (voice, rate, spearcon generation, earcon sounds). Owned elsewhere.
 
 ## 2. The user and the core insight
@@ -226,7 +230,113 @@ the instant the user acts**.
 > **Observable:** during ambient flow the speaker moves A→B→C while the front window stays on whatever
 > the user last navigated to; the user cycles → the front window jumps to the cycled session.
 
-## 6. User stories (the seven scenarios, as outcomes)
+## 6. State model (the checkable state machine)
+
+Three independent pointers (speaker · workspace · the per-session marker) plus two layered state sets.
+Pass 2 holds the implementation to these states and transitions.
+
+**Per-session state** (each session is in exactly one):
+- **idle** — at its marker's live edge; no unheard output; not producing spoken output (a subagent may
+  be working silently).
+- **producing** — generating output that appends to its transcript (may also be the speaker).
+- **queued** — has unheard output behind its marker, waiting for the voice.
+- **speaking** — currently the **speaker**: the voice is reading its transcript forward from its marker.
+- **muted** — user-stopped (⌃⌘S, or all-muted by ⌃⌘M); marker frozen; will not speak (even when
+  navigated to) until an explicit start (⌃⌘S).
+
+Plus an orthogonal flag, **blocked-on-decision** — waiting on a permission answer (its distinct cue
+has fired). A session can be `queued` *and* `blocked` at once.
+
+**The voice (global) state** (exactly one):
+- **flowing** — default: a speaker is reading, or the voice auto-advances to the next queued session on
+  natural idle (keep-going, R4).
+- **quiet-hold** — entered by stopping the speaker (⌃⌘S): no auto-advance, new output only dings;
+  **lifts on re-engage** (submit / jump / cycle).
+- **stopped-all** — entered by ⌃⌘M: every session muted, voice silent; lifts on re-engage, but each
+  session stays muted until individually started, so re-engaging lands you on a silent session until
+  ⌃⌘S.
+
+**The workspace pointer** — the session with the front window + keyboard. Independent of the speaker;
+**moves only on submit / jump / cycle** (R12), never on its own.
+
+**Key transitions** (the ones Pass 2 must get right):
+
+| From | Trigger | To |
+|---|---|---|
+| speaker `speaking`, others `queued` | speaker hits live edge + idle | next queued session → `speaking` (R4 order); old → `idle`; voice stays **flowing** |
+| any | you submit a typed prompt to X | X → `speaking` (cut current), workspace = X, voice **flowing** |
+| any | you jump / cycle to X | X → `speaking` (cut current, read from X's marker), workspace = X |
+| non-speaker | autonomous output (R6) | that session → `queued` + ding; speaker unchanged |
+| speaker `speaking` | you ⌃⌘S | speaker → `muted` (marker frozen); voice → **quiet-hold** |
+| `muted` session | you ⌃⌘S (start) | resumes from frozen marker; counts as re-engage → voice **flowing** |
+| voice **quiet-hold** | you submit / jump / cycle | voice → **flowing** (navigated / non-muted session speaks) |
+| any | you ⌃⌘M | all sessions → `muted`; voice → **stopped-all** |
+| `producing` session | hits a permission prompt | set `blocked-on-decision` + distinct cue; stays in marker order (no preempt, R9) |
+| `blocked` session is the workspace | you ⌃⌘⏎ / ⌃⌘⎋ | decision answered; flag cleared (wrong target → error tone, R10) |
+| any | daemon restart | sessions/markers/identities persist; "restarted" cue; voice → **flowing** (idle); interrupted readout does **not** auto-resume (R11) |
+
+## 7. Queue & ordering contract
+
+"The queue" is not a separate structure — it is **the set of sessions with unheard output** (content
+past their markers). This is the contract Pass 2 checks the queue implementation against.
+
+- **Within a session: strict FIFO.** The transcript is append-only and read in order; the marker
+  advances only across content read aloud (R3). A session's own output is never reordered or skipped.
+- **Across sessions (what speaks next when the voice frees on natural idle):** default = finish the
+  current session to its live edge, then take the session whose **oldest unheard output is oldest**
+  (longest-waiting first), so nothing starves. *(Vetoable default — §11.)*
+- **Preemption:** only a deliberate user action (submit / jump / cycle) preempts the current readout.
+  **Autonomous output never preempts** (R2, R6) — it appends, dings, and waits.
+- **Barge-in (carried from the cockpit grammar, still required):** a hotkey that *speaks* (⌃⌘W, a
+  jump / where-am-I announcement) cuts the current utterance, speaks at the front, then the interrupted
+  item **re-queues at the front** and resumes from that item's start. **Rate (⌃⌘+/−) does not cut** —
+  immediacy is its feedback.
+- **Dings are not queued.** A non-speaker's ordinary output emits a fire-and-forget generic ding (may
+  overlay the readout); a blocked decision emits the distinct decision cue. Neither enters the readout
+  stream — they only *announce*.
+- **Identity:** on a speaker change to a *different* session, announce its spearcon before the readout
+  (R8).
+- **Stop / restart never drop queued content.** ⌃⌘S freezes a marker and holds the voice (quiet-hold);
+  ⌃⌘M mutes all and holds (stopped-all); restart preserves every transcript + marker. Queued output
+  survives all three and is heard later (completeness).
+
+## 8. Control surface (behavior → control, reconciled with the cockpit grammar)
+
+Supersedes the 2026-06-26 cockpit-grammar spec where they differ. Every behavior the model requires
+maps to a control; every existing control is checked for whether a behavior still needs it. **Chords
+are the settled cockpit bindings;** Pass 2 verifies coverage and prunes / adds against this table.
+
+**Legend:** **KEEP** (works as-is) · **CHANGE** (binding stays, behavior shifts under the new model) ·
+**ADD** (newly required) · **CUT** (no behavior needs it).
+
+| Behavior (rule) | Control | Verdict | Note |
+|---|---|---|---|
+| Stop / start the focused session (R7) | ⌃⌘S | **CHANGE** | Now also puts the **voice into quiet-hold** (no auto-advance) until re-engage — not just per-session silence. Resume-from-marker stays. |
+| Stop everything (R7) | ⌃⌘M | **KEEP** | All muted, voice stopped-all; re-engage + per-session ⌃⌘S to return. |
+| Jump to a waiting session (R5, R11, R12) | ⌃⌘J | **CHANGE** | Now reliably **raises the window + keyboard** (workspace follows) and survives a restart (identity persists) — fixes FOCUS-1. |
+| Cycle next / prev session (R5, R12) | ⌃⌘Tab / ⌃⌘⇧Tab | **CHANGE** | Now **raises the window** on each landing (was voice-only). Speaker + workspace move together. |
+| Submit a typed prompt (R5, R6) | *(type + enter)* | **KEEP** | The only *arriving* action that preempts; workspace already there. |
+| Within-response nav / hear-again (R3) | ⌃⌘← / → | **KEEP** | Moves within the transcript; ← re-reads (marker-aware). |
+| Between-response nav (R3) | ⌃⌘↑ / ↓ | **KEEP** | ⌃⌘↓ to newest = live edge. |
+| Go to the waiting decision (R9) | ⌃⌘D | **KEEP** | How you reach a permission prompt that (by R9) waits its turn; it's a go-there (raises). |
+| Approve / deny a permission (R10) | ⌃⌘⏎ / ⌃⌘⎋ | **KEEP** | Targets the workspace's pending decision; wrong target → error tone (fail-closed). |
+| Where am I (R7, R8) | ⌃⌘W | **CHANGE** | Now also reports the **voice state** (flowing / quiet-hold / stopped-all) so a deliberate stop is never a silent surprise. |
+| Speed up / slow down (R4 / D7) | ⌃⌘+ / − | **KEEP** | No-cut; also the tool to prune an auto-flood. |
+| Settings (verbosity / voice / minqueue / keymap) | slash commands | **KEEP** | Orthogonal to arbitration. |
+
+**Coverage check:** every rule with a user action has a binding above; the automatic rules (R1–R4
+ambient, R8 identity, R11 restart cue) need no key — no behavior is left without a control.
+
+**Cut / add candidates for Pass 2 to weigh** (flagged, not decided):
+- **CUT (logic, not a key):** the old "#65 voice-follows-speaker / nothing-steals-it" automatic rule is
+  **superseded** by the full arbitration (R1–R6) — remove it, don't preserve it.
+- **ADD (consider):** a "skip the rest of this session's backlog and let keep-going move on" control,
+  *if* pruning an auto-flood via ⌃⌘S / ⌃⌘↓ / cycle proves too blunt in the live test. Not adding now
+  (YAGNI until the flood is felt).
+- **No hotkey is a cut candidate** — the cockpit binding *set* is largely correct; the rebuild is the
+  arbitration *semantics* behind the keys (the CHANGE rows), not the key inventory.
+
+## 9. User stories (the seven scenarios, as outcomes)
 
 1. **Submit and listen.** You type a prompt to A and send it → A is speaker + workspace; you hear A's
    reply in full from its marker. *(R5, R3)*
@@ -247,7 +357,7 @@ the instant the user acts**.
 7. **Always know who's talking.** Every speaker-change announces the new session; ordinary output
    dings; a blocked decision gives a distinct cue. *(R8, R9)*
 
-## 7. Decisions log (every fork, and what was chosen)
+## 10. Decisions log (every fork, and what was chosen)
 
 Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependent rule.
 
@@ -265,7 +375,7 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
 | D10 | Does the system's ambient auto-move also raise the window | **No** | Protects keyboard focus — auto-moving the window would land keystrokes in the wrong session. |
 | D11 | Permission prompt mid-reply: cue + jump the line / cue + wait its turn / ordinary ding | **Distinct cue, waits its turn** | Awareness without the system reordering; the user controls timing via `⌃⌘D`. |
 
-## 8. Vetoable defaults (chosen by inference, easy to flip in Pass 2)
+## 11. Vetoable defaults (chosen by inference, easy to flip in Pass 2)
 
 - **R4 cross-session order:** finish current session to its live edge, then take the longest-waiting
   session's backlog.
@@ -273,16 +383,16 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
   sentence).
 - **R8 announce trigger:** announce identity on speaker-change only (not every chunk).
 
-## 9. Parked for Pass 2 (need the code)
+## 12. Parked for Pass 2 (need the code)
 
 - **R6 discriminator** — how Sonari tells a human-typed prompt from an autonomous continuation.
 - **R11 persistence** — how transcripts, markers, and session identities survive a restart.
 - **R10 targeting** — the exact answer-key target (workspace vs speaker) and the fail-closed path.
-- **R4 scheduling** — the precise cross-session "what plays next" policy (confirm the §8 default).
+- **R4 scheduling** — the precise cross-session "what plays next" policy (confirm the §11 default).
 - **Marker mechanics** — whether the marker is per-session only (assumed) and how "live edge / idle"
   is detected for keep-going (R4).
 
-## 10. What Pass 2 does next
+## 13. What Pass 2 does next
 
 Read the reconciliation reference, the cockpit-grammar bug map, and the code. For each rule above:
 does the code satisfy it, diverge, or lack it? Map the gap, decide **keep vs rebuild**, estimate cost,
