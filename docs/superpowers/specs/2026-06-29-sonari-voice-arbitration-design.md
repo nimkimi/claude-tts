@@ -2,8 +2,9 @@
 
 - **Date:** 2026-06-29
 - **Status:** Design — Pass 1 (DEFINE) approved in collaborative brainstorm; **code-closed**. The
-  complete behavioral definition — model + state machine + queue contract + control surface. Awaiting
-  Pass 2 (RECONCILE against the code) before implementation planning.
+  complete behavioral definition — model + state machine + queue contract + control surface +
+  transcript/verbosity + navigation + sound language. Awaiting Pass 2 (RECONCILE against the code)
+  before implementation planning.
 - **Supersedes:** the 2026-06-26 cockpit-grammar spec — this is now the **single behavioral source of
   truth** for voice + session control (§8 reconciles every binding; the grammar becomes historical).
 - **Scope owner:** Nima
@@ -64,17 +65,20 @@ The old tangle conflated three things. They are independent here:
 
 Plus the data model that guarantees completeness:
 
-- **Transcript** — each session's ordered, append-only record of spoken-eligible output.
-- **Marker** — a per-session pointer: *"you have heard up to here."* The voice reads **forward from a
-  session's marker**. **A marker never advances over unheard output.** This single rule is what makes
-  "nothing is skipped" mean something testable.
+- **Transcript** — each session's ordered, append-only record of spoken-eligible output, captured at
+  **full fidelity** (raw tool input / output, all prose, decisions) **regardless of verbosity**;
+  verbosity filters only what's auto-spoken, never what's kept (§9).
+- **Marker — two positions per session** (§10): the **frontier** (the high-water *"furthest I've
+  heard"*, which only ever advances and **never moves over unheard output**) and the **browse cursor**
+  (where you are when you navigate back to review). The voice reads **forward from the frontier**;
+  re-reading moves only the browse cursor. Throughout §5–§7, *"the marker"* means the **frontier**.
 
 And the audio tiers:
 
 - **Readout** — full spoken content; exclusive (one at a time); the speaker's transcript read aloud
   from its marker forward.
-- **Ding** — a brief, generic, non-speech earcon for ordinary output from a *non-speaking* session.
-  May overlay the current readout; **never pauses or cuts it**.
+- **Ding** — a brief, generic, non-speech earcon when a *non-speaking* session **completes a turn**
+  (§11); may overlay the current readout, **never pauses or cuts it**. (Mid-turn streaming is silent.)
 - **Decision cue** — a distinct (audibly different from the ding) non-speech earcon: a session is
   blocked on a permission/decision prompt.
 - **Speaker-change announcement** — the new speaker's identity (spearcon), spoken when the voice
@@ -97,10 +101,10 @@ Everything in §5 is a corollary of this one sentence.
 Every rule states a behavior and a decidable outcome, so Pass 2 can turn it into a test.
 
 ### R1 — One voice; everyone else dings and accrues
-At any instant ≤1 session is the speaker. Any other session producing output: a **ding** plays (may
-overlay), and that output **appends to its transcript** (behind its marker).
-> **Observable:** while A is speaker, B emits output → exactly one readout audible (A's); one ding
-> plays; B's transcript grows; B's marker is unchanged.
+At any instant ≤1 session is the speaker. Any other session producing output **appends to its
+transcript** (behind its frontier) and **dings on turn-completion** (§11) — not on every chunk.
+> **Observable:** while A is speaker, B produces output → exactly one readout audible (A's); B's
+> transcript grows; B's frontier unchanged; B's ding fires when B *completes a turn*.
 
 ### R2 — The speaker is never auto-cut
 A new arrival — any session finishing or producing output, including an autonomous continuation —
@@ -109,13 +113,15 @@ A new arrival — any session finishing or producing output, including an autono
 > ding plays.
 
 ### R3 — Completeness: the marker never skips
-The voice reads a session's transcript **forward from its marker, in order, omitting nothing**. A
-marker advances only across content actually read aloud.
+When the voice reads a session it goes **forward from its frontier, in order, omitting no item** —
+rendered at the current verbosity's detail (§9; the *transcript* itself drops nothing). The frontier
+advances only across content actually read aloud.
 > **Observable:** B's unheard transcript is `[t1, t2, t3]`; when the voice reads B it emits `t1`, then
-> `t2`, then `t3`; it never emits `t3` before `t1`; B's marker reaches `t3` only after all three are
+> `t2`, then `t3`; it never emits `t3` before `t1`; B's frontier reaches `t3` only after all three are
 > read.
 
 ### R4 — Keep-going on natural idle (ambient); the window stays put
+*(Auto-readout layer — applies in everything / medium; **quiet** has no auto-readout, see §9.)*
 When the speaker reaches its marker's live edge **and is idle** (e.g. its subagent is working with no
 new spoken output), the voice **automatically becomes the speaker of another session that has unheard
 output**, reading from *that* session's marker. **The workspace does not change** — only the sound
@@ -269,7 +275,7 @@ has fired). A session can be `queued` *and* `blocked` at once.
 | non-speaker | autonomous output (R6) | that session → `queued` + ding; speaker unchanged |
 | speaker `speaking` | you ⌃⌘S | speaker → `muted` (marker frozen); voice → **quiet-hold** |
 | `muted` session | you ⌃⌘S (start) | resumes from frozen marker; counts as re-engage → voice **flowing** |
-| voice **quiet-hold** | you submit / jump / cycle | voice → **flowing** (navigated / non-muted session speaks; landing on a *muted* session → open edge, §12) |
+| voice **quiet-hold** | you submit / jump / cycle | voice → **flowing** (navigated / non-muted session speaks; landing on a *muted* session → open edge, §15) |
 | any | you ⌃⌘M | all sessions → `muted`; voice → **stopped-all** |
 | `producing` session | hits a permission prompt | set `blocked-on-decision` + distinct cue; stays in marker order (no preempt, R9) |
 | `blocked` session is the workspace | you ⌃⌘⏎ / ⌃⌘⎋ | decision answered; flag cleared (wrong target → error tone, R10) |
@@ -284,7 +290,7 @@ past their markers). This is the contract Pass 2 checks the queue implementation
   advances only across content read aloud (R3). A session's own output is never reordered or skipped.
 - **Across sessions (what speaks next when the voice frees on natural idle):** default = finish the
   current session to its live edge, then take the session whose **oldest unheard output is oldest**
-  (longest-waiting first), so nothing starves. *(Vetoable default — §11.)*
+  (longest-waiting first), so nothing starves. *(Vetoable default — §14.)*
 - **Preemption:** only a deliberate user action (submit / jump / cycle) preempts the current readout.
   **Autonomous output never preempts** (R2, R6) — it appends, dings, and waits.
 - **Barge-in (carried from the cockpit grammar, still required):** a hotkey that *speaks* (⌃⌘W, a
@@ -340,7 +346,93 @@ ambient, R8 identity, R11 restart cue) need no key — no behavior is left witho
 - **No hotkey is a cut candidate** — the cockpit binding *set* is largely correct; the rebuild is the
   arbitration *semantics* behind the keys (the CHANGE rows), not the key inventory.
 
-## 9. User stories (the seven scenarios, as outcomes)
+## 9. Transcript, verbosity & what's spoken
+
+The transcript (§3) is the **full-fidelity record** of a session — every prose item, every tool use
+(raw input / output), every decision — **captured regardless of verbosity**. Verbosity never changes
+what is *kept*; it changes only what is *auto-spoken* and at what detail. **This is what lets
+completeness and verbosity coexist:** completeness = the transcript never drops; verbosity = a readout
+filter you can turn up, or pull past, at any time.
+
+**The three modes (auto-readout rendering):**
+- **Everything** — full prose + full tool detail (the actual commands / outputs).
+- **Medium** — prose + a **short tool-use summary** ("searching for X in the repo", "reading
+  `paths.py`") instead of the raw command. *(Mechanism, Pass-2: the summary is templated from the
+  tool's structured input — Grep's pattern, Read's path — needing no LLM for the common case; an opaque
+  raw bash line falls back to an LLM-distilled gist, or, failing that, is skipped from the **readout**
+  — never from the **transcript**.)*
+- **Quiet** — no auto prose. Activity is a **turn-completion ding**, a waiting decision gets the
+  **distinct cue**, and you **pull** content on demand (⌃⌘W status, or navigate / raise verbosity to
+  hear it). Awareness without narration.
+
+**Always recoverable.** Because the transcript is whole, you can always get the full detail of
+anything: navigate to it, raise verbosity, or switch a quiet session to everything — the raw record is
+right there. A quiet stretch is never a permanent blind spot.
+
+**Scope of the auto-readout layer.** R1 (speaker / ding), R3 (read forward from the frontier), R4
+(keep-going), and the invariant's "keeps it going on its own" describe the **auto-readout** of
+**everything / medium**. **Quiet has no auto-readout** — nothing speaks on its own; the frontier
+advances only as you pull, while dings, the decision cue, and barge-in still apply. *(Consequence:
+leaving quiet for everything / medium after a while fires keep-going over the whole accumulated
+backlog — a big flood on the mode switch. Same auto-flood you accepted (D7); cut it with stop / rate.)*
+
+> **Observable:** in **medium**, a `Grep "TODO"` tool use is spoken "searching for TODO"; the raw
+> invocation is still in the transcript; raising to **everything** (or navigating to that item)
+> surfaces the full command. In **quiet**, the same tool use makes no speech; its turn completion
+> dings; ⌃⌘W or nav surfaces it.
+
+This refines **R3**: "omitting nothing" means the *transcript* drops nothing; the spoken detail is
+whatever the current verbosity renders, always upgradable.
+
+## 10. Navigation & the marker (two positions)
+
+Each session carries **two** positions, not one:
+- **The frontier** — the high-water "furthest I've heard" mark. **Monotonic: it only ever advances**,
+  as you hear genuinely new content. Keep-going (R4) and forward readout read *from the frontier* and
+  push it forward. It never retreats.
+- **The browse cursor** — where you are *right now* when you navigate back to review. Replay /
+  older-response / jump-to-decision move the **browse cursor**, never the frontier.
+
+So reviewing carries no penalty: re-hearing an earlier item or jumping to an older response **un-hears
+nothing** — the frontier stays put, and keep-going still resumes from it. **⌃⌘↓ (to newest) snaps the
+browse cursor back to the live edge / frontier.**
+
+**What advances the frontier:** hearing content *beyond* it (forward readout, keep-going, or browsing
+forward past it into never-heard territory). Re-hearing content *below* it does not move it.
+
+The nav keys (§8) operate the **browse cursor**: ⌃⌘← / → (within a response; ← = hear-again),
+⌃⌘↑ / ↓ (between responses; ↓ = live edge), ⌃⌘D (to the waiting decision).
+
+> **Observable:** frontier at item 10; you ⌃⌘← to replay item 5 (browse cursor = 5, frontier stays
+> 10); a new item 11 arrives; keep-going reads **11** (from the frontier), not 6–10. ⌃⌘↓ returns the
+> browse cursor to the live edge.
+
+This pins the meaning of "the marker" used in §5–§7: **"marker" = the frontier**; the browse cursor is
+the review-only position introduced here.
+
+## 11. Sound language (reuse, not invent)
+
+The model's audio tiers (§3) map onto the **existing** cockpit sound vocabulary — consistency means
+reuse, not a new earcon language:
+- **Generic ding** = the existing **turn-completion** earcon. A non-speaking session dings when it
+  **finishes a turn** (a notable "did a thing"), **not** on every streamed chunk. Mid-turn streaming is
+  silent; the turn-done ding is the awareness beat.
+- **Distinct decision cue** = the existing **decision-alert** earcon (choice / plan / permission),
+  audibly distinct from the turn-done ding.
+- **Speaker-change announcement** = the existing **spearcon** (time-compressed session name), on a
+  change of speaker (R8).
+- **Directional pitch chirps** (rising = forward / next / yes, falling = back / prev / no) and the
+  **error** earcon (e.g. answering a session with no pending decision, R10) — existing, reused
+  unchanged.
+
+No new earcon vocabulary is introduced by this redesign; the arbitration model rides the sounds that
+already shipped.
+
+> **Observable:** a background session finishing a turn → exactly one turn-completion ding; the same
+> session mid-turn (still streaming) → no ding; a session blocking on a permission prompt → the
+> decision-alert earcon, distinct from the turn-done ding.
+
+## 12. User stories (the seven scenarios, as outcomes)
 
 1. **Submit and listen.** You type a prompt to A and send it → A is speaker + workspace; you hear A's
    reply in full from its marker. *(R5, R3)*
@@ -361,7 +453,7 @@ ambient, R8 identity, R11 restart cue) need no key — no behavior is left witho
 7. **Always know who's talking.** Every speaker-change announces the new session; ordinary output
    dings; a blocked decision gives a distinct cue. *(R8, R9)*
 
-## 10. Decisions log (every fork, and what was chosen)
+## 13. Decisions log (every fork, and what was chosen)
 
 Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependent rule.
 
@@ -369,7 +461,7 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
 |---|---|---|---|
 | D1 | Background finishes mid-reply: keep reply + signal / keep reply silent / cut in | **Keep reply + a quick signal** | Never cut the live answer, but stay aware. |
 | D2 | The signal: name the session / generic sound / name-on-demand | **Generic ding** (overlays, no pause) | Sessions are autonomous and the user navigates between them, so identity is *pulled*, not pushed. |
-| D3 | When the voice is free and sessions produce output: only the attended one / auto-read ambient / pull only | **Auto-read ambient, one at a time** | Keep-going; hands-free awareness. |
+| D3 | When the voice is free and sessions produce output: only the attended one / auto-read ambient / pull only | **Auto-read ambient, one at a time** *(in everything / medium; quiet = dings + pull, §9)* | Keep-going; hands-free awareness. |
 | D4 | Stop the speaker while another waits: advance to the queue / go fully quiet | **Go fully quiet** | A deliberate stop means silence, not a hand-off. |
 | D5 | Cycle by ear: window stays / raises on every landing | *(superseded by D9)* | — |
 | D6 | Restart mid-reply: cue + keep sessions / seamless resume / silent recovery | **Cue + keep sessions** | A silent gap reads as "broken"; auto-resume after a gap is disorienting. |
@@ -378,8 +470,12 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
 | D9 | Window ↔ speaker coupling | **Coupled on every user action** (submit, jump, **and cycle**) | The user values hear = see; accepts viewport movement on cycle. Upgrades D5. |
 | D10 | Does the system's ambient auto-move also raise the window | **No** | Protects keyboard focus — auto-moving the window would land keystrokes in the wrong session. |
 | D11 | Permission prompt mid-reply: cue + jump the line / cue + wait its turn / ordinary ding | **Distinct cue, waits its turn** | Awareness without the system reordering; the user controls timing via `⌃⌘D`. |
+| D12 | What's an "item" / verbosity vs completeness | **Transcript captures full fidelity always; verbosity filters only auto-readout** (everything = full · medium = prose + short tool summary · quiet = sounds + pull) | Audio is the only channel — detail must stay recoverable; verbosity is "how chatty now," not "what's remembered." |
+| D13 | Quiet mode out loud | **Turn-done dings + distinct decision cue + on-demand pull; no auto prose** | Awareness without narration; the transcript is still whole, so pull / raise verbosity recovers detail. |
+| D14 | Marker ↔ navigation | **Two positions — a monotonic frontier + a separate browse cursor** | Reviewing must never re-queue everything after the point you went back to. |
+| D15 | How often a background session dings | **On turn-completion** (= the existing turn-done earcon) | You monitor by "a session finished a thing"; per-chunk dinging machine-guns. |
 
-## 11. Vetoable defaults (chosen by inference, easy to flip in Pass 2)
+## 14. Vetoable defaults (chosen by inference, easy to flip in Pass 2)
 
 - **R4 cross-session order:** finish current session to its live edge, then take the longest-waiting
   session's backlog.
@@ -387,12 +483,15 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
   sentence).
 - **R8 announce trigger:** announce identity on speaker-change only (not every chunk).
 
-## 12. Parked for Pass 2 (need the code)
+## 15. Parked for Pass 2 (need the code)
 
 - **R6 discriminator** — how Sonari tells a human-typed prompt from an autonomous continuation.
 - **R11 persistence** — how transcripts, markers, and session identities survive a restart.
 - **R10 targeting** — the exact answer-key target (workspace vs speaker) and the fail-closed path.
-- **R4 scheduling** — the precise cross-session "what plays next" policy (confirm the §11 default).
+- **R4 scheduling** — the precise cross-session "what plays next" policy (confirm the §14 default).
+- **Medium tool-summary rendering** (§9) — template the summary from the tool's structured input (no
+  LLM) for the common case; LLM-distill or skip-from-readout fallback for opaque raw bash. Behavior is
+  defined; the rendering mechanism is Pass-2.
 - **Marker mechanics** — whether the marker is per-session only (assumed) and how "live edge / idle"
   is detected for keep-going (R4).
 - **Quiet-hold + cycle onto a muted session** (unresolved design edge, R7/§6) — re-engaging by cycling
@@ -401,7 +500,7 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
   one), or stay silent until you start it? Resolve in Pass 2 — predictability is the whole point, so
   this edge must have one defined answer.
 
-## 13. What Pass 2 does next
+## 16. What Pass 2 does next
 
 Read the reconciliation reference, the cockpit-grammar bug map, and the code. For each rule above:
 does the code satisfy it, diverge, or lack it? Map the gap, decide **keep vs rebuild**, estimate cost,
