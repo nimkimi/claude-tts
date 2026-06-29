@@ -296,3 +296,24 @@ def test_daemon_ctx_is_ctx_pointing_at_daemon():
     daemon, *_ = make_daemon()
     assert isinstance(daemon._ctx, Ctx)
     assert daemon._ctx.host is daemon
+
+
+# ---------------------------------------------------------------------------
+# SP1-B2 regression pin: speak loop plays speaker() stream (not foreground())
+# ---------------------------------------------------------------------------
+
+def test_speak_loop_plays_speaker_stream():
+    """Pin: the loop pops from speaker()'s stream, not foreground()'s.
+
+    In SP1 speaker() == foreground() always, so this passes before and after
+    the B2 repoint — that is correct and expected for a behavior-preserving
+    refactor pin.  SP2 will diverge speaker() from foreground(), at which
+    point this test becomes the gate that forces the loop to follow speaker().
+    """
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="s0")
+    sessions.register("s1", cwd="/x/s1")
+    sessions.focus("s1")                       # deliberate setter -> speaker() == "s1"
+    daemon._enqueue("s1", "prose", "hello from s1", False)
+    daemon._speak_loop_once()
+    # substring-tolerant: _attributed_text may prepend a folder label on speaker change
+    assert any(s and "hello from s1" in s for s in speaker.spoken)

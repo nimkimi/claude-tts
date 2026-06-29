@@ -392,18 +392,20 @@ class SpeechDaemon:
     def _speak_loop_once(self) -> None:
         """One iteration of the speak loop. May raise; _speak_loop contains it.
 
-        The voice plays the FOREGROUND session's stream: every pop reads the
-        foreground stream's own queue. Background streams accumulate untouched
-        until they become foreground. When the foreground stream is per-session
+        The voice plays the SPEAKER session's stream: every pop reads the
+        speaker stream's own queue. Background streams accumulate untouched
+        until they become the speaker. When the speaker stream is per-session
         STOPPED (⌃⌘S / ⌃⌘M), the loop is held — only a pause-exempt cue
-        ("Stopped." / "All stopped.") is voiced — until it is started again."""
-        fg0 = self.sessions.foreground()
+        ("Stopped." / "All stopped.") is voiced — until it is started again.
+        SP1: speaker() == foreground(); SP2 keep-going advances speaker()
+        independently."""
+        fg0 = self.sessions.speaker()
         st0 = self._state._streams.get(fg0)
         if st0 is not None and st0.stopped:
-            # Held: scan the foreground stream for a pause-exempt cue; otherwise
+            # Held: scan the speaker stream for a pause-exempt cue; otherwise
             # wait. Pop+claim under the lock, mirroring the normal branch.
             with self._lock:
-                fg = self.sessions.foreground()
+                fg = self.sessions.speaker()
                 st = self._state._streams.get(fg)
                 item = st.queue.pop_pause_exempt() if st is not None else None
                 self._state._current_item = item
@@ -423,12 +425,12 @@ class SpeechDaemon:
                 completed = False
             self.note_spoken(item, completed)
             return
-        # Pop and CLAIM the foreground stream's next item atomically under the lock.
-        # foreground() is read here too, so a switch arriving on another connection
+        # Pop and CLAIM the speaker stream's next item atomically under the lock.
+        # speaker() is read here too, so a switch arriving on another connection
         # (also under the lock) is observed consistently. STOP/FLUSH run under this
         # lock, so they can't slip into the gap between pop and claim.
         with self._lock:
-            fg = self.sessions.foreground()
+            fg = self.sessions.speaker()
             st = self._state._streams.get(fg)
             item = st.queue.pop_next() if st is not None else None
             self._state._current_item = item
