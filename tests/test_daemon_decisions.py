@@ -220,3 +220,22 @@ def test_jump_decision_crossed_with_folder_enqueues_folder_cue():
     assert folder_item.text == "bravo."
     decision_item = bq.pop_next()
     assert decision_item.text == "decide later"
+
+
+def test_answer_targets_workspace():
+    # ⌃⌘⏎/⌃⌘⎋ must answer the WORKSPACE session (OS-focused or foreground),
+    # not the literal foreground when a different terminal is OS-focused.
+    # B is OS-focused (workspace), A owns the voice (foreground). The answer
+    # must resolve B's pending decision, not A's.
+    import threading
+    from sonari.sessions import Identity
+    from tests.daemon_helpers import make_daemon
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    sessions.register("B", cwd="/x/B")
+    sessions.set_identity("B", Identity(term_program="Apple_Terminal", tty="/dev/ttysB"))
+    sessions.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttysB")  # workspace == B
+    assert sessions.workspace() == "B"
+    assert sessions.foreground() == "A"
+    daemon._pending_decisions["B"] = {"event": threading.Event(), "behavior": None}
+    daemon.handle_message(_msg(MsgType.ANSWER_PERMISSION, "", behavior="allow"))
+    assert daemon._pending_decisions["B"]["behavior"] == "allow"   # answered B (workspace), not A

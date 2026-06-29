@@ -101,10 +101,10 @@ def _nav_response(ctx, session: str, direction: str) -> None:
 @handler(MsgType.NAV)
 def on_nav(ctx, msg):
     sessions = ctx.host.sessions
-    target = sessions.focused_session() or sessions.foreground()
+    target = sessions.workspace()
     if target is None:
         return None
-    crossed = target != sessions.foreground()     # compute BEFORE focus() moves it
+    crossed = target != sessions.speaker()        # compute BEFORE focus() moves it; SP2: speaker() advances independently of workspace()
     if crossed:
         sessions.focus(target)                     # move the voice to the navigated session
     to = msg.get("to", "prev")

@@ -182,7 +182,7 @@ def on_answer_permission(ctx, msg):
     if behavior not in ("allow", "deny"):
         host.speaker.earcon("error")
         return None
-    target = host.sessions.focused_session() or host.sessions.foreground()
+    target = host.sessions.workspace()
     pd = host._pending_decisions.get(target) if target is not None else None
     if pd is None:
         host.speaker.earcon("error")         # nothing to answer on the focused session
