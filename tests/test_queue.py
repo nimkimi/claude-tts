@@ -170,3 +170,23 @@ def test_speech_item_audio_path_defaults_none_and_is_settable():
                    audio_path="/cache/x.aiff")
     assert b.audio_path == "/cache/x.aiff"
 
+
+# --- SP2 T0: oldest_id() ---
+
+def test_oldest_id_empty_is_none():
+    assert SpeechQueue().oldest_id() is None
+
+
+def test_oldest_id_returns_head_id_not_tail():
+    q = SpeechQueue()
+    q.enqueue(_item(7))
+    q.enqueue(_item(9))
+    assert q.oldest_id() == 7          # the head (oldest), not the tail
+
+
+def test_oldest_id_does_not_pop():
+    q = SpeechQueue()
+    q.enqueue(_item(7))
+    q.oldest_id()
+    assert len(q) == 1                 # non-destructive
+

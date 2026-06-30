@@ -56,6 +56,15 @@ class SessionManager:
         self._foreground = session
         self._speaker = session
 
+    def set_speaker(self, session: str) -> None:
+        """Advance the VOICE owner WITHOUT moving the workspace. Keep-going calls this
+        to read accumulated background output while _foreground (the last
+        deliberately-acted session) stays put — the window never moves on its own
+        (R12/D10). Unlike set_foreground()/focus() it writes ONLY _speaker: no folder
+        _record, no registration, no _foreground write. Caller holds the daemon lock
+        by convention (keep-going runs inside the speak-loop lock)."""
+        self._speaker = session
+
     def foreground(self) -> "str | None":
         """The last deliberately-acted session (submit / jump / cycle). NOTE: the
         voice owner is speaker() — since SP1 split the two, this is no longer "who

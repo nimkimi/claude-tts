@@ -87,3 +87,10 @@ class SpeechQueue:
 
     def __len__(self) -> int:
         return len(self._items)
+
+    def oldest_id(self) -> "int | None":
+        """The id of the head (oldest) item, or None when empty. Non-destructive — the
+        keep-going selector compares queue ages WITHOUT popping. Keeps _items private;
+        the smallest surviving id across all queues is the oldest unheard output (the id
+        counter is daemon-global and monotonic)."""
+        return self._items[0].id if self._items else None

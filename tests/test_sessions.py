@@ -273,3 +273,14 @@ def test_workspace_prefers_os_focus_then_foreground():
     assert sm.workspace() == "b"                 # no OS focus -> fallback to foreground
     sm.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys001")
     assert sm.workspace() == "a"                 # OS focus on a -> workspace is a
+
+
+# --- SP2 T0: set_speaker() ---
+
+def test_set_speaker_moves_voice_only():
+    sm = SessionManager()
+    sm.set_foreground("a")             # both pointers -> a
+    sm.set_speaker("b")                # voice -> b
+    assert sm.speaker() == "b"
+    assert sm.foreground() == "a"      # set_speaker did NOT move the workspace
+    assert sm.workspace() == "a"       # workspace tracks foreground (no OS focus)
