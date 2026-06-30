@@ -482,6 +482,8 @@ class SpeechDaemon:
                 if next_sess is not None:
                     self.sessions.set_speaker(next_sess)
                     st = self._state._streams.get(next_sess)
+                    # pop_next() is guaranteed non-None: _select_keep_going verified
+                    # len(queue) > 0 for next_sess inside this same held lock.
                     item = st.queue.pop_next() if st is not None else None
             self._state._current_item = item
             # Capture the speaker's cancel baseline atomically with the claim, so a

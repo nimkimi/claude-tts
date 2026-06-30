@@ -46,6 +46,26 @@ def test_keep_going_bootstraps_from_none_speaker():
     assert any(s and "hello b" in s for s in speaker.spoken)
 
 
+# --- Test E (negative): keep-going SUPPRESSED when speaker queue empty but prose_buffer non-empty ---
+def test_keep_going_suppressed_when_prose_buffered():
+    """The speaker's queue is empty but it has buffered prose awaiting minqueue flush.
+    Keep-going must NOT advance the voice to a background session — the speaker still
+    has speech to deliver. Pins the `len(st.prose_buffer) == 0` clause of
+    _stream_quiescent so dropping it would turn this test RED."""
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    sessions.register("B", cwd="/x/B")
+    daemon._enqueue("B", "prose", "from b", False)
+    # Leave A's queue empty but give A a non-empty prose_buffer (direct injection —
+    # prose_buffer is a plain list per SessionStream, and _buffer_prose appends tuples).
+    st_a = daemon._stream("A")
+    st_a.prose_buffer.append(("buffered prose not yet flushed", None))
+    daemon._speak_loop_once()
+    # Voice must NOT have advanced: speaker is still A, B's text must NOT be spoken.
+    assert sessions.speaker() == "A", "keep-going advanced voice despite non-empty prose_buffer"
+    assert not any(s and "from b" in s for s in speaker.spoken), \
+        "B's text was spoken even though A still had buffered prose"
+
+
 # --- Test G: a keep-going-voiced decision is unanswerable until you jump (R10, fail-closed) ---
 def test_keep_going_voiced_decision_unanswerable_until_jump():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
