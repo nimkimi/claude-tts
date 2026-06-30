@@ -14,8 +14,9 @@ def _waiting_target(ctx, exclude):
     decision (choice|plan|permission) ranks ahead of prose-only ones; ties break
     by session insertion order. Excludes *exclude* (the current foreground)."""
     blocked, prose = [], []
+    spk = ctx.host.sessions.speaker()
     for sess, st in ctx.host._streams.items():          # insertion-ordered
-        if sess == exclude or st.stopped or len(st.queue) == 0:
+        if sess == exclude or sess == spk or st.stopped or len(st.queue) == 0:
             continue
         (blocked if st.queue.has_decision() else prose).append(sess)
     ordered = blocked + prose

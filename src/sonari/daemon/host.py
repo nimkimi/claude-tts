@@ -153,9 +153,9 @@ class SpeechDaemon:
         cur = self._state._current_item
         if cur is not None and cur.session != session:
             return True                       # an utterance from another session is in flight
-        fg = self.sessions.foreground()
-        if fg is not None and fg != session:
-            st = self._state._streams.get(fg)
+        spk = self.sessions.speaker()
+        if spk is not None and spk != session:
+            st = self._state._streams.get(spk)
             if st is not None and (len(st.queue) > 0 or len(st.prose_buffer) > 0
                                    or st.assembler.has_pending()):
                 return True                   # the voice owner still has speech to deliver
@@ -218,7 +218,7 @@ class SpeechDaemon:
         # a new turn) — never per sentence. Decisions carry their own alert earcon,
         # so this is prose-only.
         if (not st.waiting_signaled and not st.stopped
-                and session != self.sessions.foreground()
+                and session != self.sessions.speaker()
                 and len(st.queue) > 0):
             self.speaker.earcon("waiting")
             st.waiting_signaled = True
