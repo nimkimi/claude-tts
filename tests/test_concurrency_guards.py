@@ -100,6 +100,23 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     for s in ("s0", "s1", "s2"):
         sessions.register(s, cwd="/x/" + s)
 
+    # Passive keep-going target: preloaded backlog, NO feeder/hammer thread, and no
+    # hammer thread ever sends a SET_FOREGROUND/STOP/FLUSH at it. Its items are the
+    # OLDEST in the daemon (enqueued before the storm -> smallest SpeechItem.ids), so
+    # whenever the speaker goes idle, _select_keep_going prefers it. A non-zero
+    # set_speaker count therefore proves the new in-lock scan+pop ran under real
+    # contention. (JUMP_WAITING/CYCLE could ALSO happen to focus it; that does not
+    # affect the > 0 assertion — keep-going still fires on every other idle window.)
+    sessions.register("s_bg", cwd="/x/s_bg")
+    for i in range(50):
+        daemon._enqueue("s_bg", "prose", "bg {0}.".format(i), False)
+    keep_going_fires = [0]
+    _orig_set_speaker = sessions.set_speaker
+    def _counting_set_speaker(s):                  # set_speaker is called ONLY by keep-going
+        keep_going_fires[0] += 1
+        return _orig_set_speaker(s)
+    sessions.set_speaker = _counting_set_speaker
+
     errors: list = []
     # Capture crashes at the boundary BEFORE the production swallow layers eat
     # them: _dispatch_hotkey wraps handle_message in `except Exception: pass`, and
@@ -137,13 +154,18 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
                 daemon._dispatch_hotkey(_msg(MsgType.PROSE, sess,
                     delta="line {0}. ".format(i), index=i, final=False))
                 i += 1
+                time.sleep(0.001)                  # brief gaps so the speaker goes idle -> keep-going fires
             except Exception as e:  # noqa: BLE001
                 errors.append(("feeder", sess, e))
                 return
 
     def hammer(sess):
+        # CYCLE_SESSION calls sessions.focus() (resets BOTH pointers), racing keep-going's
+        # set_speaker() (which moves only _speaker) -> exercises diverge-then-resync under
+        # contention. will_attempt(None) is False (no identities registered), so raise_async
+        # never fires -- same no-raise shape as the existing JUMP_WAITING op.
         ops = [MsgType.STOP_SESSION, MsgType.FLUSH, MsgType.SET_FOREGROUND,
-               MsgType.JUMP_WAITING]
+               MsgType.JUMP_WAITING, MsgType.CYCLE_SESSION]
         n = 0
         while not stop.is_set():
             try:
@@ -176,6 +198,11 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     assert not speak_thread.is_alive(), "speak thread died under stress"
     # The speak loop actually did work — not merely "didn't deadlock at the end".
     assert runner.calls > 0, "speak loop never spoke anything; the stress window was empty"
+    # The new in-lock keep-going scan+pop actually ran under contention: the passive
+    # s_bg backlog can only advance the voice via set_speaker(), which keep-going alone
+    # calls. (Do NOT weaken this; if it ever flakes, widen the idle window -- raise the
+    # feeder sleep or extend the storm -- never drop the assertion.)
+    assert keep_going_fires[0] > 0, "keep-going never fired; the idle window was empty"
     # This guard does NOT bound queue LENGTH. Cap-exempt cues (PAUSE "Paused./
     # Resumed.", JUMP_WAITING "Jumping to...") use enqueue_front, which is
     # deliberately NOT subject to _backlog_cap (queue.py:42-45), so under this
@@ -266,3 +293,58 @@ def test_reentrant_stop_flush_requeues_item_exactly_once():
     assert daemon._stream("fg").queue._items[0].text == "interrupted"
     assert daemon._current_item is None                # claim released
     assert daemon._last_spoken_session is None         # rolled back to pre-speak baseline
+
+
+class _ReentrantFlusher:
+    """speak() fires FLUSH(bg) once, before returning not-completed -- a FLUSH landing
+    in the keep-going pop->speak gap. bg is NOT stopped, so the L2 re-queue check sees
+    stopped=False and does NOT re-queue; note_spoken drops the marker. No orphan survives."""
+
+    def __init__(self, daemon, bg):
+        self.daemon = daemon
+        self.bg = bg
+        self._epoch = 0
+        self._fired = False
+
+    def speak(self, text, audio_path=None, cancel_epoch=None):
+        if not self._fired:
+            self._fired = True
+            self.daemon.handle_message(_msg(MsgType.FLUSH, self.bg))
+        return False
+
+    def cancel_epoch(self):
+        return self._epoch
+
+    def cancel(self):
+        self._epoch += 1
+
+    def earcon(self, kind):
+        pass
+
+
+class _HeardEntry:
+    def __init__(self):
+        self.heard = False
+
+
+def test_keep_going_flush_race_leaves_no_orphan():
+    """M1: a kept-going item is popped+claimed under the lock; a FLUSH fired during
+    speak() clears bg's (already-emptied) queue and, because bg is not stopped, the L2
+    check does NOT re-queue -> note_spoken drops the marker. If scan+pop were not atomic
+    this would strand a claim with no marker."""
+    sessions = SessionManager()
+    sessions.set_foreground("fg")                  # speaker=fg, empty/idle
+    config = {k: (v.copy() if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
+    config["verbosity"] = "everything"
+    daemon = SpeechDaemon(None, sessions, config)
+    speaker = _ReentrantFlusher(daemon, bg="bg")
+    daemon.speaker = speaker
+    daemon._last_spoken_session = None
+    sessions.register("bg", cwd="/x/bg")
+    daemon._enqueue("bg", "prose", "race", False, entry=_HeardEntry())
+
+    daemon._speak_loop_once()                      # keep-going pops bg, claims, speaks; FLUSH races
+
+    assert daemon._current_item is None            # claim released
+    assert len(daemon._stream("bg").queue) == 0    # item popped; FLUSH cleared nothing extra
+    assert daemon._pending_heard == {}             # NO orphaned marker
