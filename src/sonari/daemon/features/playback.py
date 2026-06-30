@@ -71,12 +71,13 @@ def on_stop_all(ctx, msg):
         st.stopped = True
     if ctx.host._current_item is not None:
         ctx.host.speaker.cancel()
-    fg = ctx.host.sessions.foreground()
-    if fg is not None:
-        # Ensure the foreground stream is stopped even if it had no stream yet, then
-        # voice the confirmation (pause_exempt -> the held branch speaks it).
-        ctx.host._stream(fg).stopped = True
-        ctx.host._enqueue(fg, "prose", "All stopped.", False,
+    spk = ctx.host.sessions.speaker()
+    if spk is not None:
+        # Ensure the SPEAKER's stream is stopped even if it had no stream yet, then
+        # voice the confirmation there (pause_exempt -> the held branch, which reads
+        # speaker(), speaks it under divergence).
+        ctx.host._stream(spk).stopped = True
+        ctx.host._enqueue(spk, "prose", "All stopped.", False,
                           mute_exempt=True, pause_exempt=True)
     return None
 
