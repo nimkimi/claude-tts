@@ -59,14 +59,27 @@ def on_set_foreground(ctx, msg):
     t = msg.get("type")          # KEEP LOCAL — there is NO ctx.type
     session = ctx.session
     cwd = msg.get("cwd")
-    # #65: a background session's prompt event must not seize the voice from a
-    # different session that is actively speaking. Take the voice only when it is
-    # idle (or already ours); otherwise just register — record the folder and
-    # become a jump-to-waiting target while our prose accumulates in our own stream.
-    if ctx.host._voice_busy_elsewhere(session):
-        ctx.host.sessions.register(session, cwd=cwd)
+    # Policy A (R6 resolved): take the VOICE iff it is idle OR the submitter already
+    # owns it (is the speaker); otherwise register only (ding + accrue as a jump/keep-
+    # going target). Split voice-take from workspace-move: an auto-advanced speaker
+    # self-submitting takes voice (already ours) but must NOT drift the workspace onto
+    # an autonomous session (F2; R12/M3 — you'd answer the wrong session). All reads run
+    # under self._lock (the handler path holds it), atomic with the speak loop's claim.
+    voice_idle = not ctx.host._voice_busy_elsewhere(session)
+    is_speaker = (session == ctx.host.sessions.speaker())
+    if voice_idle or is_speaker:
+        if is_speaker and ctx.host.sessions.speaker() != ctx.host.sessions.foreground():
+            # keep-going-advanced speaker self-submitting: voice is ALREADY ours, so do
+            # NOT move the workspace onto an auto-advanced session.
+            ctx.host.sessions.register(session, cwd=cwd)
+        else:
+            # idle bootstrap, or speaker==foreground already aligned: take voice + workspace.
+            # (Do NOT blanket-remove set_foreground — the single-session / focus-unknown
+            # bootstrap needs _foreground set, or answer_permission has no target. The
+            # idle-non-speaker move is pre-existing SP1 #65 residual, not SP2-new.)
+            ctx.host.sessions.set_foreground(session, cwd=cwd)
     else:
-        ctx.host.sessions.set_foreground(session, cwd=cwd)
+        ctx.host.sessions.register(session, cwd=cwd)     # denied: ding + accrue
     if t == MsgType.SESSION_START:
         ctx.host.sessions.register(session, cwd=cwd)
         from sonari.sessions import Identity
