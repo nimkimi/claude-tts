@@ -12,7 +12,8 @@ def _waiting_target(ctx, exclude):
     Considers only streams with a non-empty, non-stopped queue (live backlog —
     Stage 3 keys off the queue, not history). A stream holding an unplayed
     decision (choice|plan|permission) ranks ahead of prose-only ones; ties break
-    by session insertion order. Excludes *exclude* (the current foreground)."""
+    by session insertion order. Excludes *exclude* (the current foreground) and
+    the current speaker() — both are already receiving attention."""
     blocked, prose = [], []
     spk = ctx.host.sessions.speaker()
     for sess, st in ctx.host._streams.items():          # insertion-ordered
@@ -41,10 +42,16 @@ def on_jump_waiting(ctx, msg):
     fg = ctx.host.sessions.foreground()
     target = _waiting_target(ctx, exclude=fg)
     if target is None:
-        # Nothing waiting: say so (mute_exempt so it's always heard). With no
-        # foreground to speak through, fall back to an error earcon.
-        if fg is not None:
-            ctx.host._enqueue(fg, "prose", "No session waiting.", False,
+        # Nothing waiting: say so. Route to speaker() so the cue lands in the
+        # stream the speak loop is already reading (held or normal branch both
+        # read speaker()). When speaker() is None (loop idle), foreground() is
+        # the next session keep-going will adopt — enqueue there so it isn't
+        # lost. If both are None, fall back to an error earcon.
+        # NOTE: fg is kept for the _waiting_target exclude= arg above; don't
+        # use it as the enqueue target — that's the divergence bug this fixes.
+        tgt = ctx.host.sessions.speaker() or fg
+        if tgt is not None:
+            ctx.host._enqueue(tgt, "prose", "No session waiting.", False,
                               mute_exempt=True)
         else:
             ctx.host.speaker.earcon("error")
