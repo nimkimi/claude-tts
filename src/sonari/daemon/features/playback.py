@@ -30,12 +30,14 @@ def on_skip(ctx, msg):
 
 @handler(MsgType.STOP_SESSION)
 def on_stop_session(ctx, msg):
-    # Per-session stop/start (⌃⌘S). Toggles the FOREGROUND session — the track you
-    # are currently flying; switch with ⌃⌘Tab / ⌃⌘J first to stop another. Stopping
-    # holds this session's stream and re-reads from the interrupted item on resume;
-    # the state is sticky across new prompts (a stopped session stays silent until
-    # ⌃⌘S'd again).
-    fg = ctx.host.sessions.foreground()
+    # Per-session stop/start (⌃⌘S). Toggles the SPEAKER session — the track you are
+    # currently HEARING; in the keep-going era that may differ from the workspace.
+    # "Stop what's talking." Stopping holds this session's stream and re-reads from
+    # the interrupted item on resume; the state is sticky across new prompts (a
+    # stopped session stays silent until ⌃⌘S'd again). The "Stopped."/"Resumed." cue
+    # is enqueued to the SAME target (fg), so the held branch voices it under
+    # divergence (the held branch reads speaker(), which is fg after the repoint).
+    fg = ctx.host.sessions.speaker()
     if fg is None:
         ctx.host.speaker.earcon("error")
         return None

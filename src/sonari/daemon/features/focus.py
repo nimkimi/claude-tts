@@ -113,7 +113,10 @@ def on_cycle_session(ctx, msg):
     if len(ids) < 2:
         ctx.host.speaker.earcon("error")          # <2 sessions: confirm fired, no silent no-op
         return None
-    fg = sessions.foreground()
+    # Cycle FROM the SPEAKER (what's talking), not the workspace. In the keep-going
+    # era the speaker may differ from the foreground; cycling from the silent workspace
+    # would skip the session you're already hearing.
+    fg = sessions.speaker()
     cur = ids.index(fg) if fg in ids else 0
     step = 1 if msg.get("direction", "next") == "next" else -1
     target = ids[(cur + step) % len(ids)]

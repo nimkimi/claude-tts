@@ -147,7 +147,11 @@ def on_where_am_i(ctx, msg):
     # barge-in + interjection-resume per §7. Plain text for sub-project B (spearcon /
     # pitch polish is sub-project D): "{folder}. {Playing|Stopped}. {N} waiting."
     host = ctx.host
-    fg = host.sessions.foreground()
+    # Report the SPEAKER's state (voice-state), not the workspace. §8 reconciliation:
+    # ⌃⌘W answers "what am I hearing?" — in the keep-going era the speaker may differ
+    # from the foreground, so the status cue is enqueued to the speaker's stream
+    # (the held branch reads speaker(), ensuring it's voiced under divergence).
+    fg = host.sessions.speaker()
     if fg is None:
         host.speaker.earcon("error")              # always-confirm-fired: never a silent no-op
         return None
