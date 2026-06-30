@@ -29,6 +29,44 @@ from sonari.daemon.features import prose  # noqa: F401
 from sonari.daemon.features import hotkeys  # noqa: F401
 
 
+def _stream_quiescent(st) -> bool:
+    """True when *st* has nothing left to voice: no queued items, no buffered prose,
+    no half-assembled sentence. None (no stream) counts as quiescent. The inverse of
+    _voice_busy_elsewhere's stream clause (shared so the busy predicate and the
+    keep-going gate use one definition)."""
+    return st is None or (len(st.queue) == 0
+                          and len(st.prose_buffer) == 0
+                          and not st.assembler.has_pending())
+
+
+def _select_keep_going(streams, sessions) -> "str | None":
+    """The longest-waiting eligible background session, or None. Eligible = a
+    registered session other than the current speaker whose stream exists, is not
+    stopped, and has a non-empty queue. Among those, pick the minimum
+    SpeechQueue.oldest_id() (the globally-monotonic SpeechItem.id of the oldest unheard
+    item). Runs INSIDE the speak-loop lock; never pokes _items.
+
+    §14 is longest-waiting-first AT EACH IDLE WINDOW, not global starvation-freedom:
+    re-selection happens only at speaker-idle, so a busy speaker drains FIFO ahead of
+    older items elsewhere, and a perpetually-busy autonomous producer defers all
+    background sessions indefinitely — the escape is a deliberate ⌃⌘J / ⌃⌘Tab."""
+    spk = sessions.speaker()
+    best = None
+    best_id = None
+    for s in sessions.session_ids():
+        if s == spk:
+            continue
+        st = streams.get(s)
+        if st is None or st.stopped or len(st.queue) == 0:
+            continue
+        oid = st.queue.oldest_id()
+        if oid is None:
+            continue
+        if best_id is None or oid < best_id:
+            best, best_id = s, oid
+    return best
+
+
 class SpeechDaemon:
     def __init__(self, speaker, sessions, config, raise_service=None,
                  spearcons=None) -> None:
@@ -156,8 +194,7 @@ class SpeechDaemon:
         spk = self.sessions.speaker()
         if spk is not None and spk != session:
             st = self._state._streams.get(spk)
-            if st is not None and (len(st.queue) > 0 or len(st.prose_buffer) > 0
-                                   or st.assembler.has_pending()):
+            if not _stream_quiescent(st):
                 return True                   # the voice owner still has speech to deliver
         return False
 
@@ -433,6 +470,19 @@ class SpeechDaemon:
             fg = self.sessions.speaker()
             st = self._state._streams.get(fg)
             item = st.queue.pop_next() if st is not None else None
+            if item is None and _stream_quiescent(st):
+                # KEEP-GOING (M1): the speaker is at its live edge and fully idle.
+                # Advance the VOICE (only _speaker) to the longest-waiting eligible
+                # background session and pop ITS oldest item — scan+select+set_speaker+
+                # pop+claim ALL inside this one lock so a FLUSH/STOP can't race the
+                # TOCTOU gap. _foreground is untouched: the workspace never moves on its
+                # own (R12/D10). (A later SP gates this scan on a voice-global quiet-hold:
+                # add `and not self._voice_quiet_hold` to the condition above.)
+                next_sess = _select_keep_going(self._state._streams, self.sessions)
+                if next_sess is not None:
+                    self.sessions.set_speaker(next_sess)
+                    st = self._state._streams.get(next_sess)
+                    item = st.queue.pop_next() if st is not None else None
             self._state._current_item = item
             # Capture the speaker's cancel baseline atomically with the claim, so a
             # cancel() arriving during speak() is detected (M2 — the pop->speak gap).
