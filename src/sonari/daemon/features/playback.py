@@ -47,6 +47,7 @@ def on_stop_session(ctx, msg):
         # speak loop re-queued there on stop), then clear the flag. _enqueue wakes
         # the loop. mute_exempt so the control cue is never folder-prefixed.
         st.stopped = False
+        ctx.host.voice_state = "flowing"             # ⌃⌘S-start counts as re-engage (SPEC:286)
         ctx.host._enqueue(fg, "prose", "Resumed.", False,
                           mute_exempt=True, at_front=True)
     else:
@@ -95,6 +96,7 @@ def on_jump_decision(ctx, msg):
     sessions = ctx.host.sessions
     target = sessions.workspace()
     crossed = target != sessions.speaker()   # voice owner is speaker(); SP2 advances it independently of workspace()
+    ctx.host.voice_state = "flowing"                 # ⌃⌘D re-engage (R5:149 groups jump/⌃⌘D)
     if crossed:
         sessions.focus(target)
     else:

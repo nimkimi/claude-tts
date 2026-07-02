@@ -107,6 +107,7 @@ def on_nav(ctx, msg):
     crossed = target != sessions.speaker()        # compute BEFORE focus() moves it; SP2: speaker() advances independently of workspace()
     if crossed:
         sessions.focus(target)                     # move the voice to the navigated session
+        ctx.host.voice_state = "flowing"           # cross-nav is a deliberate re-engage; within-nav is not
     to = msg.get("to", "prev")
     _chirp = {"next": "up", "prev": "down",
               "next_response": "up", "prev_response": "down"}.get(to)
