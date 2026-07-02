@@ -30,39 +30,40 @@ def on_skip(ctx, msg):
 
 @handler(MsgType.STOP_SESSION)
 def on_stop_session(ctx, msg):
-    # Per-session stop/start (⌃⌘S). Toggles the SPEAKER session — the track you are
-    # currently HEARING; in the keep-going era that may differ from the workspace.
-    # "Stop what's talking." Stopping holds this session's stream and re-reads from
-    # the interrupted item on resume; the state is sticky across new prompts (a
-    # stopped session stays silent until ⌃⌘S'd again). The "Stopped."/"Resumed." cue
-    # is enqueued to the SAME target (fg), so the held branch voices it under
-    # divergence (the held branch reads speaker(), which is fg after the repoint).
-    fg = ctx.host.sessions.speaker()
+    # ⌃⌘S per-session stop/start. Fork 4 = ASYMMETRIC target: if the session you
+    # NAVIGATED TO (workspace) is stopped, START it (R7 "start the session you navigated
+    # to"); otherwise STOP the speaker (R7 "Stop-the-speaker"). Without this, cycle-onto-
+    # muted leaves workspace=muted, speaker=active, and a speaker-target ⌃⌘S would STOP
+    # the active speaker instead of starting the mute -> the mute is keyboard-unstartable.
+    sessions = ctx.host.sessions
+    ws = sessions.workspace()
+    ws_st = ctx.host._streams.get(ws) if ws is not None else None
+    if ws_st is not None and ws_st.stopped:
+        fg = ws                                   # START the navigated-to (muted) workspace
+    else:
+        fg = sessions.speaker()                   # STOP the speaker (status quo)
     if fg is None:
         ctx.host.speaker.earcon("error")
         return None
     st = ctx.host._stream(fg)
     if st.stopped:
-        # Resuming: "Resumed." FIRST (at the front, ahead of the interrupted item the
-        # speak loop re-queued there on stop), then clear the flag. _enqueue wakes
-        # the loop. mute_exempt so the control cue is never folder-prefixed.
+        # Resuming (⌃⌘S-start re-engage, SPEC:286): un-stop, lift to flowing, and MOVE
+        # THE VOICE to the started session so it is actually heard (set_speaker is a
+        # no-op when fg is already the speaker — the non-divergent case). "Resumed."
+        # leads (at_front, ahead of the interrupted item the speak loop re-queued).
         st.stopped = False
-        ctx.host.voice_state = "flowing"             # ⌃⌘S-start counts as re-engage (SPEC:286)
-        ctx.host._enqueue(fg, "prose", "Resumed.", False,
-                          mute_exempt=True, at_front=True)
+        ctx.host.voice_state = "flowing"
+        sessions.set_speaker(fg)
+        ctx.host._enqueue(fg, "prose", "Resumed.", False, mute_exempt=True, at_front=True)
     else:
+        # Stopping -> quiet-hold (SPEC §6). Cancel only if THIS session is in flight.
         st.stopped = True
-        ctx.host.voice_state = "quiet-hold"          # SPEC §6: ⌃⌘S on the speaker -> quiet-hold
-        # Cancel only if THIS session is the one in flight, so stopping never cuts
-        # another session's utterance (the loop only plays the foreground, so a live
-        # claim is the foreground's — the session check is belt-and-suspenders).
+        ctx.host.voice_state = "quiet-hold"
         cur = ctx.host._current_item
         if cur is not None and cur.session == fg:
             ctx.host.speaker.cancel()
-        # "Stopped." is pause_exempt (the held branch voices it past the re-queued
-        # item) and mute_exempt (a control cue, never folder-prefixed).
-        ctx.host._enqueue(fg, "prose", "Stopped.", False,
-                          mute_exempt=True, pause_exempt=True)
+        # "Stopped." is pause_exempt (held branch voices it) + mute_exempt (control cue).
+        ctx.host._enqueue(fg, "prose", "Stopped.", False, mute_exempt=True, pause_exempt=True)
     return None
 
 

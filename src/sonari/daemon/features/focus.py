@@ -113,29 +113,37 @@ def on_jump_waiting(ctx, msg):
 
 @handler(MsgType.CYCLE_SESSION)
 def on_cycle_session(ctx, msg):
-    # ⌃⌘Tab / ⌃⌘⇧Tab: cycle the VOICE through the session roster in insertion order,
-    # wrapping at the ends. Raises the target terminal window (R5/R12: a deliberate
-    # cycle is a workspace action), mirroring on_jump_waiting's raise machinery.
+    # ⌃⌘Tab / ⌃⌘⇧Tab: cycle the VOICE through the roster in insertion order, wrapping.
+    # Raises the target window (a deliberate cycle is a workspace action).
     sessions = ctx.host.sessions
-    ids = sessions.session_ids()
-    if len(ids) < 2:
+    # Fork 2 = KEEP: the roster INCLUDES muted sessions. Filter at the CALL SITE (never
+    # in session_ids()) so the insertion-order pins in test_sessions.py survive.
+    roster = sessions.session_ids()
+    if len(roster) < 2:
         ctx.host.speaker.earcon("error")          # <2 sessions: confirm fired, no silent no-op
         return None
-    # Cycle FROM the SPEAKER (what's talking), not the workspace. In the keep-going
-    # era the speaker may differ from the foreground; cycling from the silent workspace
-    # would skip the session you're already hearing.
-    fg = sessions.speaker()
-    cur = ids.index(fg) if fg in ids else 0
+    # Fork 1 = workspace(): anchor on the front window (moves only on deliberate acts),
+    # so consecutive ⌃⌘Tabs step deterministically — fixes the live-test anchor-drift
+    # (keep-going advances speaker() between presses; sessions.py:79-83).
+    fg = sessions.workspace()
+    cur = roster.index(fg) if fg in roster else 0
     step = 1 if msg.get("direction", "next") == "next" else -1
-    target = ids[(cur + step) % len(ids)]
+    target = roster[(cur + step) % len(roster)]
     ctx.host.speaker.pitch("up" if step == 1 else "down")   # directional chirp first
-    sessions.focus(target)
+    sessions.focus(target)                        # workspace + voice -> target; raises
     ctx.host.speaker.cancel()
+    ctx.host.voice_state = "flowing"              # cycle is a deliberate re-engage (req 9)
+    if ctx.host._stream(target).stopped:
+        # Cycle-onto-muted (RATIFIED, RECON:184 #3): keep the WORKSPACE on the muted
+        # target (focus + raise), but RELEASE the voice so the keep-going scan moves it
+        # to another ACTIVE session (speaker != workspace). set_speaker(None): the next
+        # speak-loop pass (now flowing) picks the longest-waiting active session; if
+        # none, _speaker stays None (flowing-but-silent) and ⌃⌘W reports the state.
+        # Do NOT un-mute the target (R7:191 — it stays muted until its own ⌃⌘S-start).
+        sessions.set_speaker(None)
     folder = sessions.folder(target)
     identity = sessions.identity(target)
     will_raise = ctx.host._raise().will_attempt(identity)
-    # Bump on EVERY cycle, not only raising ones — same rationale as jump_waiting:
-    # a non-raising cycle must still supersede a prior in-flight raise.
     gen = ctx.host._raise().bump_generation()
     cue = folder + "." if folder else "Another session."
     ctx.host._enqueue(target, "prose", cue, False,

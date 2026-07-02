@@ -66,19 +66,18 @@ def test_stop_session_resume_cue_also_follows_speaker():
 
 
 # ---------------------------------------------------------------------------
-# ⌃⌘Tab — on_cycle_session cycles FROM speaker()
+# ⌃⌘Tab — on_cycle_session cycles FROM workspace() (Fork 1, T4)
 # ---------------------------------------------------------------------------
 
-def test_cycle_session_from_speaker_not_foreground_under_divergence():
-    """⌃⌘Tab under divergence: cycles from B (speaker) → C, not from A → B."""
+def test_cycle_session_from_workspace_not_speaker_under_divergence():
+    """⌃⌘Tab under divergence: cycles from A (workspace) → B, not from B (speaker) → C."""
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     sessions.register("B", cwd="/x/B")
     sessions.register("C", cwd="/x/C")
     sessions.set_speaker("B")                          # voice=B, workspace=A; roster=[A,B,C]
     daemon.handle_message(_msg(MsgType.CYCLE_SESSION, "", direction="next"))
-    # Without repoint: fg=A(idx 0) → target=B; speaker=="B", not "C" → RED.
-    # With repoint:    fg=B(idx 1) → target=C; speaker=="C" → GREEN.
-    assert sessions.speaker() == "C"
+    # Fork 1 = workspace(): fg=A(idx 0) -> target=B; speaker()=="B" (not "C").
+    assert sessions.speaker() == "B"
 
 
 def test_cycle_session_parity_when_speaker_equals_foreground():

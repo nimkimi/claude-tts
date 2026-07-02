@@ -104,28 +104,43 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     # OLDEST in the daemon (enqueued before the storm -> smallest SpeechItem.ids), so
     # whenever the CURRENT speaker goes idle (and is itself non-stopped -- see below),
     # _select_keep_going (host.py:42, which explicitly skips the current speaker)
-    # prefers s_bg over any other competing backlog. A non-zero set_speaker count
-    # therefore proves the new in-lock scan+pop ran under real contention.
-    # STOP_ALL (added T5) stops s_bg too, under voice_state=stopped-all, which gates
-    # keep-going off outright. s_bg is NOT permanently stopped, though: CYCLE_SESSION
-    # moves sessions.speaker() via focus() (no .stopped check), so a hammer thread's
-    # CYCLE_SESSION can park the voice on s_bg while it is still stopped; the next
-    # STOP_SESSION then acts on whichever stream is CURRENTLY speaker() (not the
-    # message's nominal session) and resumes it -- the same event that lifts
-    # voice_state back to flowing (see the hammer() comment above). Verified
-    # empirically (uncommitted probe, 5 runs): s_bg.stopped flips back to False
-    # repeatedly through the storm, correlated with speaker()==s_bg. Because a fire
-    # also needs the CURRENT speaker's own stream non-stopped and idle (the held
-    # branch returns before keep-going ever runs otherwise), post-STOP_ALL fires are
-    # fewer than before STOP_ALL existed (measured 2-4 vs the pre-STOP_ALL 9-10) --
-    # not "every other idle window" -- but the STOP_SESSION-resume/CYCLE_SESSION
-    # interplay keeps them recurring, never zero.
+    # prefers s_bg over any other competing backlog.
+    # STOP_ALL (T5) stops s_bg too, under voice_state=stopped-all, which gates
+    # keep-going off outright. s_bg is NOT permanently stopped, though: post-T4 the
+    # un-stop path runs through the WORKSPACE, not the speaker. CYCLE_SESSION
+    # (focus.py) still calls sessions.focus(target), which has no .stopped check, so a
+    # hammer thread's CYCLE_SESSION can still park _foreground (the workspace) on a
+    # stopped s_bg -- but T4 immediately releases the SPEAKER off a stopped landing
+    # (sessions.set_speaker(None)), so the voice itself is no longer parked there.
+    # STOP_SESSION (T4, Fork 4 asymmetric) is what then acts on s_bg: it now targets
+    # sessions.workspace() when that stream is stopped, else sessions.speaker() --
+    # NOT "whichever stream is CURRENTLY speaker()" as pre-T4. So if s_bg is still the
+    # workspace when a STOP_SESSION fires, it un-stops s_bg, calls
+    # sessions.set_speaker(s_bg) (moving the voice onto it directly), and lifts
+    # voice_state to flowing. CYCLE_SESSION (T4) ALSO unconditionally sets
+    # voice_state="flowing" on every fire (not only muted-landings) -- a second,
+    # independent lift path with no pre-T4 equivalent. Because a REAL keep-going fire
+    # additionally needs the scan to run with the CURRENT speaker idle/non-stopped
+    # (the held branch returns before keep-going ever executes otherwise), and the
+    # STOP_SESSION-start path above moves the voice by a direct set_speaker() call
+    # rather than via the scan, s_bg being picked up by genuine keep-going (as opposed
+    # to being un-stopped by STOP_SESSION-start) is a narrower window post-T4. See the
+    # isolated _select_keep_going probe (uncommitted; T4 build report) for the true
+    # keep-going-only fire count -- NOT the keep_going_fires[0] counter below, which
+    # is no longer keep-going-exclusive post-T4 (see its own comment).
     sessions.register("s_bg", cwd="/x/s_bg")
     for i in range(50):
         daemon._enqueue("s_bg", "prose", "bg {0}.".format(i), False)
     keep_going_fires = [0]
     _orig_set_speaker = sessions.set_speaker
-    def _counting_set_speaker(s):                  # set_speaker is called ONLY by keep-going
+    def _counting_set_speaker(s):
+        # NOTE (T4): set_speaker() is no longer keep-going's exclusive caller --
+        # on_stop_session's resume branch (Fork 4 asymmetric start) and
+        # on_cycle_session's muted-landing branch (focus.py) both call it now too.
+        # This counter is therefore a general "the voice moved via set_speaker()"
+        # count, not a keep-going-only one; see the s_bg/hammer() comments below for
+        # how the two new callers can satisfy it without real keep-going running, and
+        # the isolated _select_keep_going probe (T4 build report) for the true count.
         keep_going_fires[0] += 1
         return _orig_set_speaker(s)
     sessions.set_speaker = _counting_set_speaker
@@ -173,27 +188,38 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
                 return
 
     def hammer(sess):
-        # CYCLE_SESSION calls sessions.focus() (resets BOTH pointers), racing keep-going's
-        # set_speaker() (which moves only _speaker) -> exercises diverge-then-resync under
-        # contention. will_attempt(None) is False (no identities registered), so raise_async
-        # never fires -- same no-raise shape as the existing JUMP_WAITING op.
+        # CYCLE_SESSION calls sessions.focus() (resets BOTH pointers), then (T4) checks
+        # the landed target: if its stream is stopped, sessions.set_speaker(None)
+        # releases the SPEAKER again right away -- so focus() still parks _foreground
+        # (the workspace) on a stopped stream (including s_bg), but no longer leaves
+        # the SPEAKER parked there. CYCLE_SESSION (T4) ALSO unconditionally sets
+        # voice_state="flowing" on every fire, regardless of the landed target's
+        # stopped state -- a second, independent lift path alongside STOP_SESSION
+        # below. will_attempt(None) is False (no identities registered), so
+        # raise_async never fires -- same no-raise shape as the existing JUMP_WAITING
+        # op.
         # STOP_ALL (SP3/T5) sets voice_state=stopped-all (suppressing keep-going) and
         # stops EVERY stream -- including the passive s_bg -- under the one lock.
-        # STOP_SESSION-resume (it acts on whichever stream is CURRENTLY
-        # sessions.speaker(), not on the message's nominal session) is the ONLY op in
-        # this rotation that lifts stopped-all back to flowing: JUMP_WAITING can't
+        # STOP_SESSION (T4, Fork 4 asymmetric) targets sessions.workspace() when that
+        # stream is stopped, else sessions.speaker() -- NOT "whichever stream is
+        # CURRENTLY speaker()" as pre-T4. So when CYCLE_SESSION has just parked the
+        # workspace on a stopped stream (including s_bg), the next STOP_SESSION in the
+        # rotation un-stops THAT stream (the workspace), calls sessions.set_speaker(fg)
+        # to move the voice onto it, and lifts voice_state to flowing -- this, plus
+        # CYCLE_SESSION's own unconditional lift, are the two ops in this rotation
+        # that can lift stopped-all back to flowing. JUMP_WAITING still can't
         # (_waiting_target skips every stopped stream, so under stopped-all it always
         # finds no target and takes the no-lift "nothing waiting" branch -- it lifts
-        # quiet-hold only, where the speaker's stream alone is held); CYCLE_SESSION
-        # doesn't write voice_state at all yet (that wiring is T4, fork-gated, not
-        # built). CYCLE_SESSION DOES move sessions.speaker() via focus(), which sets
-        # _speaker directly with no .stopped check -- so it can park the voice on an
-        # already-stopped stream (including s_bg) for a later STOP_SESSION in the
-        # rotation to resume (see the s_bg comment above for what that un-stopping
-        # implies for fire counts). So flowing windows recur via STOP_SESSION-resume,
-        # and keep-going still fires. on_stop_all iterates _streams.values() under the
-        # one lock, so the born-muted read and the enum write are lock-consistent with
-        # the speak loop's gate read (no torn read; F3/F5).
+        # quiet-hold only, where the speaker's stream alone is held). So flowing
+        # windows recur via STOP_SESSION-start and/or CYCLE_SESSION, and keep-going
+        # still fires -- verified via an isolated probe on _select_keep_going's
+        # non-None returns (NOT the keep_going_fires[0] counter below, which T4 also
+        # feeds from on_stop_session's resume-branch set_speaker(fg) and
+        # on_cycle_session's muted-landing set_speaker(None), so it no longer isolates
+        # keep-going alone -- see the counter's own comment). on_stop_all iterates
+        # _streams.values() under the one lock, so the born-muted read and the enum
+        # write are lock-consistent with the speak loop's gate read (no torn read;
+        # F3/F5).
         ops = [MsgType.STOP_SESSION, MsgType.FLUSH, MsgType.SET_FOREGROUND,
                MsgType.JUMP_WAITING, MsgType.CYCLE_SESSION, MsgType.STOP_ALL]
         n = 0
@@ -228,10 +254,16 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     assert not speak_thread.is_alive(), "speak thread died under stress"
     # The speak loop actually did work — not merely "didn't deadlock at the end".
     assert runner.calls > 0, "speak loop never spoke anything; the stress window was empty"
-    # The new in-lock keep-going scan+pop actually ran under contention: the passive
-    # s_bg backlog can only advance the voice via set_speaker(), which keep-going alone
-    # calls. (Do NOT weaken this; if it ever flakes, widen the idle window -- raise the
-    # feeder sleep or extend the storm -- never drop the assertion.)
+    # This counter is no longer keep-going-exclusive post-T4 (set_speaker() gained two
+    # more legitimate callers -- on_stop_session's resume branch and on_cycle_session's
+    # muted-landing release; see the _counting_set_speaker and hammer() comments
+    # above), so a non-zero count alone no longer PROVES the in-lock keep-going scan
+    # ran under contention -- it can be satisfied entirely by the two new T4 callers.
+    # Genuine keep-going activity is verified separately via an isolated probe on
+    # _select_keep_going's non-None returns (uncommitted; see the T4 build report).
+    # Kept here as a coarser "the voice moved under contention" signal. (Do NOT weaken
+    # this assertion; if it ever flakes, widen the idle window -- raise the feeder
+    # sleep or extend the storm -- never drop the assertion.)
     assert keep_going_fires[0] > 0, "keep-going never fired; the idle window was empty"
     # This guard does NOT bound queue LENGTH. Cap-exempt cues (PAUSE "Paused./
     # Resumed.", JUMP_WAITING "Jumping to...") use enqueue_front, which is
