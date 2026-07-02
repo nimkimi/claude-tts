@@ -51,16 +51,8 @@ def on_jump_waiting(ctx, msg):
         # use it as the enqueue target — that's the divergence bug this fixes.
         tgt = ctx.host.sessions.speaker() or fg
         if tgt is not None:
-            # Under hold, an earlier pause-exempt cue (e.g. "Stopped.") may already
-            # be queued ahead of this one — pop_pause_exempt() returns the FIRST
-            # match by queue order, so this confirmation needs at_front to lead
-            # (mirrors the ⌃⌘W state-cue precedent at control.py:213-221). Only
-            # while held: in the normal (not-stopped) case this must stay a plain
-            # append, so it doesn't jump ahead of the target's own real backlog.
-            tgt_st = ctx.host._streams.get(tgt)
-            held = tgt_st is not None and tgt_st.stopped
             ctx.host._enqueue(tgt, "prose", "No session waiting.", False,
-                              mute_exempt=True, pause_exempt=True, at_front=held)
+                              mute_exempt=True, pause_exempt=True)
         else:
             ctx.host.speaker.earcon("error")
         return None

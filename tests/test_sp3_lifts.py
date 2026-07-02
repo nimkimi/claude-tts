@@ -33,7 +33,8 @@ def test_jump_no_target_is_audible_under_hold_and_does_not_lift():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     daemon.handle_message(_msg(MsgType.STOP_SESSION, "A"))         # quiet-hold, A stopped, no other session
     daemon.handle_message(_msg(MsgType.JUMP_WAITING, ""))          # nothing waiting
-    daemon._speak_loop_once()                                     # held branch pops pause_exempt
+    daemon._speak_loop_once()                                     # held branch pops "Stopped." first (FIFO)
+    daemon._speak_loop_once()                                     # then pops "No session waiting."
     assert any(s and "No session waiting." in s for s in speaker.spoken)
     assert daemon.voice_state == "quiet-hold"                     # no jump happened -> no lift
 
