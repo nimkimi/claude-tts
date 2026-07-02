@@ -125,10 +125,10 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     # (the held branch returns before keep-going ever executes otherwise), and the
     # STOP_SESSION-start path above moves the voice by a direct set_speaker() call
     # rather than via the scan, s_bg being picked up by genuine keep-going (as opposed
-    # to being un-stopped by STOP_SESSION-start) is a narrower window post-T4. See the
-    # isolated probe (wrap host._select_keep_going and count its non-None returns --
-    # verified single call site at host.py:490) for the true keep-going-only fire
-    # count -- NOT the keep_going_fires[0] counter below, which
+    # to being un-stopped by STOP_SESSION-start) is a narrower window post-T4. The
+    # true keep-going-only fire count is the COMMITTED real_keep_going_fires counter
+    # in the stress test (a _select_keep_going wrap -- verified single call site at
+    # host.py:490) -- NOT the keep_going_fires[0] counter below, which
     # is no longer keep-going-exclusive post-T4 (see its own comment).
     sessions.register("s_bg", cwd="/x/s_bg")
     for i in range(50):

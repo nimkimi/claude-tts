@@ -61,6 +61,10 @@ def on_earcon(ctx, msg):
     # (ctx.session == ""), so the session==speaker() test must never reach them.
     if kind == "turn_done":
         host = ctx.host
+        # Known edge (accepted): speaker() is read at earcon-ARRIVAL time, so if
+        # keep-going advances the voice off the just-finished session in the
+        # hook-latency window, a turn heard live to completion gets one extra ding.
+        # Rare (the finishing speaker usually still holds backlog) and self-limiting.
         if not (session == host.sessions.speaker() and host.voice_state == "flowing"):
             host.speaker.earcon(kind)
         # End-of-turn boundary: flush any sub-threshold buffered prose UNCONDITIONALLY
