@@ -164,8 +164,15 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
         # set_speaker() (which moves only _speaker) -> exercises diverge-then-resync under
         # contention. will_attempt(None) is False (no identities registered), so raise_async
         # never fires -- same no-raise shape as the existing JUMP_WAITING op.
+        # STOP_ALL (SP3/T5) sets voice_state=stopped-all (suppressing keep-going) and
+        # stops EVERY stream -- including the passive s_bg -- under the one lock; the
+        # enum is lifted back to flowing by the interleaved STOP_SESSION-resume /
+        # CYCLE_SESSION / JUMP_WAITING ops in this same rotation, so flowing windows
+        # recur and keep-going still fires. on_stop_all iterates _streams.values()
+        # under the one lock, so the born-muted read and the enum write are
+        # lock-consistent with the speak loop's gate read (no torn read; F3/F5).
         ops = [MsgType.STOP_SESSION, MsgType.FLUSH, MsgType.SET_FOREGROUND,
-               MsgType.JUMP_WAITING, MsgType.CYCLE_SESSION]
+               MsgType.JUMP_WAITING, MsgType.CYCLE_SESSION, MsgType.STOP_ALL]
         n = 0
         while not stop.is_set():
             try:
