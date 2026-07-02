@@ -33,9 +33,11 @@ def _cmd_status(_args) -> int:
         uptime_str = "{:.1f}s".format(uptime_s) if uptime_s is not None else "?"
         count_str = str(session_count) if session_count is not None else "?"
         speaking_str = ("yes" if current_item else "no") if current_item is not None else "?"
+        voice_state = reply.get("voice_state")
+        vs_str = voice_state if voice_state is not None else "?"
         print("---")
-        print("Uptime: {0}  |  Sessions: {1}  |  Speaking: {2}".format(
-            uptime_str, count_str, speaking_str))
+        print("Uptime: {0}  |  Sessions: {1}  |  Speaking: {2}  |  Voice: {3}".format(
+            uptime_str, count_str, speaking_str, vs_str))
         # last_drain_age_s key present but None = no drain yet; key absent = old daemon.
         if "last_drain_age_s" in reply:
             if last_drain_age_s is None:

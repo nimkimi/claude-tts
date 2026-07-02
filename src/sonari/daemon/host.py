@@ -142,6 +142,17 @@ class SpeechDaemon:
     def _next_id(self, value):
         self._state._next_id = value
 
+    @property
+    def voice_state(self):
+        """The voice-global mode ("flowing"/"quiet-hold"/"stopped-all"). COLD-PATH
+        shim (⌃⌘W, STATUS, tests, handlers); the speak-loop gate reads
+        self._state._voice_state directly (Step-7 hot-path discipline)."""
+        return self._state._voice_state
+
+    @voice_state.setter
+    def voice_state(self, value):
+        self._state._voice_state = value
+
     def _raise(self):
         """The RaiseService, built lazily on first use (so tests can inject a fake
         via `daemon.raise_service` before any jump). Cached after the first call."""
@@ -470,14 +481,16 @@ class SpeechDaemon:
             fg = self.sessions.speaker()
             st = self._state._streams.get(fg)
             item = st.queue.pop_next() if st is not None else None
-            if item is None and _stream_quiescent(st):
+            if item is None and _stream_quiescent(st) and self._state._voice_state == "flowing":
                 # KEEP-GOING (M1): the speaker is at its live edge and fully idle.
                 # Advance the VOICE (only _speaker) to the longest-waiting eligible
                 # background session and pop ITS oldest item — scan+select+set_speaker+
                 # pop+claim ALL inside this one lock so a FLUSH/STOP can't race the
                 # TOCTOU gap. _foreground is untouched: the workspace never moves on its
-                # own (R12/D10). (A later SP gates this scan on a voice-global quiet-hold:
-                # add `and not self._voice_quiet_hold` to the condition above.)
+                # own (R12/D10). The scan is gated on the voice-global state in the
+                # condition above: keep-going advances the voice ONLY while `flowing`
+                # (a deliberate quiet-hold / stopped-all suppresses it — R7 "lasting
+                # quiet"). Read directly off _state on the hot path.
                 next_sess = _select_keep_going(self._state._streams, self.sessions)
                 if next_sess is not None:
                     self.sessions.set_speaker(next_sess)

@@ -23,6 +23,12 @@ class SessionState:
         self._pending_heard: "dict" = {}
         self._current_item = None
         self._last_spoken_session = None
+        # The voice-global mode (SPEC §6): exactly one of "flowing" / "quiet-hold"
+        # / "stopped-all". Born flowing so the keep-going gate is a no-op until a
+        # deliberate ⌃⌘S / ⌃⌘M transitions it (T1). Read on the hot path directly
+        # as self._state._voice_state; cold-path callers use host.voice_state.
+        # TRANSIENT: not serialized -- a live hold is lost on daemon restart (-> SP6).
+        self._voice_state = "flowing"
 
     @contextmanager
     def transaction(self):

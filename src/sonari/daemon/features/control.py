@@ -135,9 +135,11 @@ def on_status(ctx, msg):
             time.monotonic() - last_drain if last_drain is not None else None
         ),
         # True when an item is currently claimed by the speak loop (in-flight utterance).
-        # No global stop_all flag exists — stop is per-stream via st.stopped, surfaced
-        # in the sessions array above.  We intentionally do NOT add a stop_all key.
+        # The voice-global mode (SPEC §6): flowing / quiet-hold / stopped-all. This
+        # SUBSUMES the old "no global stop_all flag" note — stopped-all is now a
+        # first-class state surfaced here (per-stream st.stopped stays in "sessions").
         "current_item": host._state._current_item is not None,
+        "voice_state": host.voice_state,
     }
 
 
@@ -153,7 +155,30 @@ def on_where_am_i(ctx, msg):
     # (the held branch reads speaker(), ensuring it's voiced under divergence).
     fg = host.sessions.speaker()
     if fg is None:
-        host.speaker.earcon("error")              # always-confirm-fired: never a silent no-op
+        # speaker() None is LEGITIMATE post-SP3 (stopped-all all-ended; cycle-onto-
+        # muted with nothing active). Report the voice-state to a PLAYABLE workspace
+        # stream rather than error-toning (R7 discoverability). DELIVERY NOTE: the loop
+        # plays speaker() (None here), so the cue must land where keep-going can adopt
+        # it — a NON-stopped workspace stream (keep-going skips stopped streams). A
+        # muted/None workspace has nothing voiceable -> the honest fallback is the error
+        # earcon. (A workspace with no stream yet counts as playable: _enqueue creates it
+        # non-stopped and keep-going then adopts it.)
+        # BEHAVIOR NAMED (vs (c)#4 "⌃⌘W never moves the voice"): (c)#4 forbids ⌃⌘W
+        # STEALING the voice from an ACTIVE speaker. Here speaker() is None — the voice
+        # is IDLE — so keep-going adopting the playable workspace (effectively
+        # set_speaker(workspace) on the next loop turn) is the idle voice landing on
+        # where you already are, NOT a steal. This is intended, not a (c)#4 violation.
+        ws = host.sessions.workspace()
+        ws_st = host._streams.get(ws) if ws is not None else None
+        playable = ws is not None and not (ws_st is not None and ws_st.stopped)
+        if playable:
+            vs = host.voice_state
+            cue = ("All stopped." if vs == "stopped-all"
+                   else "On hold." if vs == "quiet-hold"
+                   else "Nothing playing.")
+            host._enqueue(ws, "prose", cue, False, mute_exempt=True, pause_exempt=True)
+        else:
+            host.speaker.earcon("error")
         return None
     # Capture the in-flight item BEFORE cancel so we can resume it afterwards.
     cur = host._current_item
@@ -162,7 +187,13 @@ def on_where_am_i(ctx, msg):
     entry = host._pending_heard.get(cur.id) if cur is not None else None
     folder = host.sessions.folder(fg) or "Unknown session"
     st = host._streams.get(fg)
-    state = "Stopped" if (st is not None and st.stopped) else "Playing"
+    vs = host.voice_state
+    if vs == "stopped-all":
+        state = "All stopped"
+    elif vs == "quiet-hold":
+        state = "On hold"
+    else:
+        state = "Stopped" if (st is not None and st.stopped) else "Playing"
     # Waiting = background sessions with live, non-stopped backlog (mirrors _waiting_target).
     waiting = sum(1 for sess, s in host._streams.items()
                   if sess != fg and not s.stopped and len(s.queue) > 0)
