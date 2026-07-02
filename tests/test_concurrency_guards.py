@@ -125,8 +125,9 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     # STOP_SESSION-start path above moves the voice by a direct set_speaker() call
     # rather than via the scan, s_bg being picked up by genuine keep-going (as opposed
     # to being un-stopped by STOP_SESSION-start) is a narrower window post-T4. See the
-    # isolated _select_keep_going probe (uncommitted; T4 build report) for the true
-    # keep-going-only fire count -- NOT the keep_going_fires[0] counter below, which
+    # isolated probe (wrap host._select_keep_going and count its non-None returns --
+    # verified single call site at host.py:490) for the true keep-going-only fire
+    # count -- NOT the keep_going_fires[0] counter below, which
     # is no longer keep-going-exclusive post-T4 (see its own comment).
     sessions.register("s_bg", cwd="/x/s_bg")
     for i in range(50):
@@ -140,7 +141,7 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
         # This counter is therefore a general "the voice moved via set_speaker()"
         # count, not a keep-going-only one; see the s_bg/hammer() comments below for
         # how the two new callers can satisfy it without real keep-going running, and
-        # the isolated _select_keep_going probe (T4 build report) for the true count.
+        # an isolated probe wrapping host._select_keep_going for the true count.
         keep_going_fires[0] += 1
         return _orig_set_speaker(s)
     sessions.set_speaker = _counting_set_speaker
@@ -259,8 +260,9 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     # muted-landing release; see the _counting_set_speaker and hammer() comments
     # above), so a non-zero count alone no longer PROVES the in-lock keep-going scan
     # ran under contention -- it can be satisfied entirely by the two new T4 callers.
-    # Genuine keep-going activity is verified separately via an isolated probe on
-    # _select_keep_going's non-None returns (uncommitted; see the T4 build report).
+    # Genuine keep-going activity is verified separately via an isolated probe that
+    # wraps host._select_keep_going (single call site, host.py:490) and counts its
+    # non-None returns, rather than this set_speaker() shadow.
     # Kept here as a coarser "the voice moved under contention" signal. (Do NOT weaken
     # this assertion; if it ever flakes, widen the idle window -- raise the feeder
     # sleep or extend the storm -- never drop the assertion.)
