@@ -15,6 +15,7 @@ import time
 from sonari.speaker import Speaker
 from sonari.sessions import SessionManager
 from sonari.daemon import SpeechDaemon
+import sonari.daemon.host as host_mod
 from sonari.config import DEFAULTS
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 
@@ -139,152 +140,180 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
         # on_stop_session's resume branch (Fork 4 asymmetric start) and
         # on_cycle_session's muted-landing branch (focus.py) both call it now too.
         # This counter is therefore a general "the voice moved via set_speaker()"
-        # count, not a keep-going-only one; see the s_bg/hammer() comments below for
-        # how the two new callers can satisfy it without real keep-going running, and
-        # an isolated probe wrapping host._select_keep_going for the true count.
+        # count, not a keep-going-only one; see the s_bg/hammer() comments below and
+        # real_keep_going_fires below for the keep-going-exclusive proof.
         keep_going_fires[0] += 1
         return _orig_set_speaker(s)
     sessions.set_speaker = _counting_set_speaker
 
-    errors: list = []
-    # Capture crashes at the boundary BEFORE the production swallow layers eat
-    # them: _dispatch_hotkey wraps handle_message in `except Exception: pass`, and
-    # _speak_loop catches+continues every _speak_loop_once exception by design. We
-    # record-then-reraise so a real race ("list changed size during iteration",
-    # lost/duplicated/resurrected item) is OBSERVED here, then still swallowed by
-    # production (the speak thread must stay alive). Instance attrs shadow the
-    # bound methods, so _speak_loop's `self._speak_loop_once()` and
-    # _dispatch_hotkey's `self.handle_message(...)` hit these wrappers.
-    _orig_loop_once = daemon._speak_loop_once
-    def _capture_loop_once():
-        try:
-            _orig_loop_once()
-        except Exception as e:  # noqa: BLE001 - record, then re-raise into _speak_loop's handler
-            errors.append(("speak_loop", repr(e)))
-            raise
-    daemon._speak_loop_once = _capture_loop_once
-    _orig_handle = daemon.handle_message
-    def _capture_handle(m):
-        try:
-            return _orig_handle(m)
-        except Exception as e:  # noqa: BLE001 - record, then re-raise into _dispatch_hotkey's handler
-            errors.append(("handle_message", repr(e)))
-            raise
-    daemon.handle_message = _capture_handle
-    speak_thread = threading.Thread(target=daemon._speak_loop, daemon=True)
-    speak_thread.start()
+    # Keep-going-EXCLUSIVE counter (T4 review fix, restores the guard's original
+    # meaning). _select_keep_going (host.py:42) has exactly one call site (host.py:490,
+    # verified via grep), so wrapping it and counting non-None returns is immune to the
+    # two new set_speaker() callers above -- it can ONLY go non-zero when the in-lock
+    # scan actually selects a background session. This is a MODULE-level patch (unlike
+    # the instance shadows above, which are self-contained per fresh daemon/sessions
+    # objects), so it MUST be restored in the finally below regardless of outcome --
+    # otherwise a failed assertion mid-storm would leave every daemon in the process
+    # (including later tests) running the wrapped version.
+    real_keep_going_fires = [0]
+    _orig_select_keep_going = host_mod._select_keep_going
+    def _counting_select_keep_going(streams, sess):
+        result = _orig_select_keep_going(streams, sess)
+        if result is not None:
+            real_keep_going_fires[0] += 1
+        return result
+    host_mod._select_keep_going = _counting_select_keep_going
 
-    stop = threading.Event()
-
-    def feeder(sess):
-        i = 0
-        while not stop.is_set():
+    try:
+        errors: list = []
+        # Capture crashes at the boundary BEFORE the production swallow layers eat
+        # them: _dispatch_hotkey wraps handle_message in `except Exception: pass`, and
+        # _speak_loop catches+continues every _speak_loop_once exception by design. We
+        # record-then-reraise so a real race ("list changed size during iteration",
+        # lost/duplicated/resurrected item) is OBSERVED here, then still swallowed by
+        # production (the speak thread must stay alive). Instance attrs shadow the
+        # bound methods, so _speak_loop's `self._speak_loop_once()` and
+        # _dispatch_hotkey's `self.handle_message(...)` hit these wrappers.
+        _orig_loop_once = daemon._speak_loop_once
+        def _capture_loop_once():
             try:
-                daemon._dispatch_hotkey(_msg(MsgType.PROSE, sess,
-                    delta="line {0}. ".format(i), index=i, final=False))
-                i += 1
-                time.sleep(0.001)                  # brief gaps so the speaker goes idle -> keep-going fires
-            except Exception as e:  # noqa: BLE001
-                errors.append(("feeder", sess, e))
-                return
-
-    def hammer(sess):
-        # CYCLE_SESSION calls sessions.focus() (resets BOTH pointers), then (T4) checks
-        # the landed target: if its stream is stopped, sessions.set_speaker(None)
-        # releases the SPEAKER again right away -- so focus() still parks _foreground
-        # (the workspace) on a stopped stream (including s_bg), but no longer leaves
-        # the SPEAKER parked there. CYCLE_SESSION (T4) ALSO unconditionally sets
-        # voice_state="flowing" on every fire, regardless of the landed target's
-        # stopped state -- a second, independent lift path alongside STOP_SESSION
-        # below. will_attempt(None) is False (no identities registered), so
-        # raise_async never fires -- same no-raise shape as the existing JUMP_WAITING
-        # op.
-        # STOP_ALL (SP3/T5) sets voice_state=stopped-all (suppressing keep-going) and
-        # stops EVERY stream -- including the passive s_bg -- under the one lock.
-        # STOP_SESSION (T4, Fork 4 asymmetric) targets sessions.workspace() when that
-        # stream is stopped, else sessions.speaker() -- NOT "whichever stream is
-        # CURRENTLY speaker()" as pre-T4. So when CYCLE_SESSION has just parked the
-        # workspace on a stopped stream (including s_bg), the next STOP_SESSION in the
-        # rotation un-stops THAT stream (the workspace), calls sessions.set_speaker(fg)
-        # to move the voice onto it, and lifts voice_state to flowing -- this, plus
-        # CYCLE_SESSION's own unconditional lift, are the two ops in this rotation
-        # that can lift stopped-all back to flowing. JUMP_WAITING still can't
-        # (_waiting_target skips every stopped stream, so under stopped-all it always
-        # finds no target and takes the no-lift "nothing waiting" branch -- it lifts
-        # quiet-hold only, where the speaker's stream alone is held). So flowing
-        # windows recur via STOP_SESSION-start and/or CYCLE_SESSION, and keep-going
-        # still fires -- verified via an isolated probe on _select_keep_going's
-        # non-None returns (NOT the keep_going_fires[0] counter below, which T4 also
-        # feeds from on_stop_session's resume-branch set_speaker(fg) and
-        # on_cycle_session's muted-landing set_speaker(None), so it no longer isolates
-        # keep-going alone -- see the counter's own comment). on_stop_all iterates
-        # _streams.values() under the one lock, so the born-muted read and the enum
-        # write are lock-consistent with the speak loop's gate read (no torn read;
-        # F3/F5).
-        ops = [MsgType.STOP_SESSION, MsgType.FLUSH, MsgType.SET_FOREGROUND,
-               MsgType.JUMP_WAITING, MsgType.CYCLE_SESSION, MsgType.STOP_ALL]
-        n = 0
-        while not stop.is_set():
+                _orig_loop_once()
+            except Exception as e:  # noqa: BLE001 - record, then re-raise into _speak_loop's handler
+                errors.append(("speak_loop", repr(e)))
+                raise
+        daemon._speak_loop_once = _capture_loop_once
+        _orig_handle = daemon.handle_message
+        def _capture_handle(m):
             try:
-                daemon._dispatch_hotkey(_msg(ops[n % len(ops)], sess))
-                n += 1
-            except Exception as e:  # noqa: BLE001
-                errors.append(("hammer", sess, e))
-                return
+                return _orig_handle(m)
+            except Exception as e:  # noqa: BLE001 - record, then re-raise into _dispatch_hotkey's handler
+                errors.append(("handle_message", repr(e)))
+                raise
+        daemon.handle_message = _capture_handle
+        speak_thread = threading.Thread(target=daemon._speak_loop, daemon=True)
+        speak_thread.start()
 
-    threads = []
-    for s in ("s0", "s1", "s2"):
-        threads.append(threading.Thread(target=feeder, args=(s,), daemon=True))
-        threads.append(threading.Thread(target=hammer, args=(s,), daemon=True))
-    for t in threads:
-        t.start()
+        stop = threading.Event()
 
-    time.sleep(1.0)  # let the interleaving run
-    stop.set()
-    for t in threads:
-        t.join(TIMEOUT)
-        assert not t.is_alive(), "a hammer/feeder thread deadlocked"
+        def feeder(sess):
+            i = 0
+            while not stop.is_set():
+                try:
+                    daemon._dispatch_hotkey(_msg(MsgType.PROSE, sess,
+                        delta="line {0}. ".format(i), index=i, final=False))
+                    i += 1
+                    time.sleep(0.001)                  # brief gaps so the speaker goes idle -> keep-going fires
+                except Exception as e:  # noqa: BLE001
+                    errors.append(("feeder", sess, e))
+                    return
 
-    daemon._running.clear()
-    daemon._wake.set()
-    speak_thread.join(TIMEOUT)
+        def hammer(sess):
+            # CYCLE_SESSION calls sessions.focus() (resets BOTH pointers), then (T4) checks
+            # the landed target: if its stream is stopped, sessions.set_speaker(None)
+            # releases the SPEAKER again right away -- so focus() still parks _foreground
+            # (the workspace) on a stopped stream (including s_bg), but no longer leaves
+            # the SPEAKER parked there. CYCLE_SESSION (T4) ALSO unconditionally sets
+            # voice_state="flowing" on every fire, regardless of the landed target's
+            # stopped state -- a second, independent lift path alongside STOP_SESSION
+            # below. will_attempt(None) is False (no identities registered), so
+            # raise_async never fires -- same no-raise shape as the existing JUMP_WAITING
+            # op.
+            # STOP_ALL (SP3/T5) sets voice_state=stopped-all (suppressing keep-going) and
+            # stops EVERY stream -- including the passive s_bg -- under the one lock.
+            # STOP_SESSION (T4, Fork 4 asymmetric) targets sessions.workspace() when that
+            # stream is stopped, else sessions.speaker() -- NOT "whichever stream is
+            # CURRENTLY speaker()" as pre-T4. So when CYCLE_SESSION has just parked the
+            # workspace on a stopped stream (including s_bg), the next STOP_SESSION in the
+            # rotation un-stops THAT stream (the workspace), calls sessions.set_speaker(fg)
+            # to move the voice onto it, and lifts voice_state to flowing -- this, plus
+            # CYCLE_SESSION's own unconditional lift, are the two ops in this rotation
+            # that can lift stopped-all back to flowing. JUMP_WAITING still can't
+            # (_waiting_target skips every stopped stream, so under stopped-all it always
+            # finds no target and takes the no-lift "nothing waiting" branch -- it lifts
+            # quiet-hold only, where the speaker's stream alone is held). So flowing
+            # windows recur via STOP_SESSION-start and/or CYCLE_SESSION, and keep-going
+            # still fires -- proven by real_keep_going_fires below (NOT the
+            # keep_going_fires[0] counter, which T4 also feeds from on_stop_session's
+            # resume-branch set_speaker(fg) and on_cycle_session's muted-landing
+            # set_speaker(None), so it no longer isolates keep-going alone -- see the
+            # counter's own comment). on_stop_all iterates _streams.values() under the
+            # one lock, so the born-muted read and the enum write are lock-consistent with
+            # the speak loop's gate read (no torn read; F3/F5).
+            ops = [MsgType.STOP_SESSION, MsgType.FLUSH, MsgType.SET_FOREGROUND,
+                   MsgType.JUMP_WAITING, MsgType.CYCLE_SESSION, MsgType.STOP_ALL]
+            n = 0
+            while not stop.is_set():
+                try:
+                    daemon._dispatch_hotkey(_msg(ops[n % len(ops)], sess))
+                    n += 1
+                except Exception as e:  # noqa: BLE001
+                    errors.append(("hammer", sess, e))
+                    return
 
-    # No handler raised (the "list changed size during iteration" class).
-    assert errors == [], "concurrency errors: {0}".format(errors[:3])
-    # The speak thread survived the whole storm.
-    assert not speak_thread.is_alive(), "speak thread died under stress"
-    # The speak loop actually did work — not merely "didn't deadlock at the end".
-    assert runner.calls > 0, "speak loop never spoke anything; the stress window was empty"
-    # This counter is no longer keep-going-exclusive post-T4 (set_speaker() gained two
-    # more legitimate callers -- on_stop_session's resume branch and on_cycle_session's
-    # muted-landing release; see the _counting_set_speaker and hammer() comments
-    # above), so a non-zero count alone no longer PROVES the in-lock keep-going scan
-    # ran under contention -- it can be satisfied entirely by the two new T4 callers.
-    # Genuine keep-going activity is verified separately via an isolated probe that
-    # wraps host._select_keep_going (single call site, host.py:490) and counts its
-    # non-None returns, rather than this set_speaker() shadow.
-    # Kept here as a coarser "the voice moved under contention" signal. (Do NOT weaken
-    # this assertion; if it ever flakes, widen the idle window -- raise the feeder
-    # sleep or extend the storm -- never drop the assertion.)
-    assert keep_going_fires[0] > 0, "keep-going never fired; the idle window was empty"
-    # This guard does NOT bound queue LENGTH. Cap-exempt cues (PAUSE "Paused./
-    # Resumed.", JUMP_WAITING "Jumping to...") use enqueue_front, which is
-    # deliberately NOT subject to _backlog_cap (queue.py:42-45), so under this
-    # synthetic cue-storm a stream legitimately exceeds the cap (verified: ~50% of
-    # isolated runs reach len up to ~1000). Those cues drain and carry no pending-
-    # heard marker, so it is not a leak. The real leak/resurrection invariant lives
-    # in test_reentrant_stop_flush_requeues_item_exactly_once. Here, in the quiescent
-    # end state (storm over, speak thread joined), assert only that every pending-
-    # heard marker still maps to a LIVE queued item or the in-flight claim — no
-    # ORPHANED markers. Cue-volume-independent, so it keeps its teeth no matter how
-    # many cap-exempt cues piled up.
-    with daemon._lock:
-        live_ids = {it.id for st in daemon._streams.values()
-                    for it in st.queue._items}
-        if daemon._current_item is not None:
-            live_ids.add(daemon._current_item.id)
-        orphaned = [k for k in daemon._pending_heard if k not in live_ids]
-        assert orphaned == [], "orphaned pending-heard markers: {0}".format(orphaned[:5])
+        threads = []
+        for s in ("s0", "s1", "s2"):
+            threads.append(threading.Thread(target=feeder, args=(s,), daemon=True))
+            threads.append(threading.Thread(target=hammer, args=(s,), daemon=True))
+        for t in threads:
+            t.start()
+
+        time.sleep(1.0)  # let the interleaving run
+        stop.set()
+        for t in threads:
+            t.join(TIMEOUT)
+            assert not t.is_alive(), "a hammer/feeder thread deadlocked"
+
+        daemon._running.clear()
+        daemon._wake.set()
+        speak_thread.join(TIMEOUT)
+
+        # No handler raised (the "list changed size during iteration" class).
+        assert errors == [], "concurrency errors: {0}".format(errors[:3])
+        # The speak thread survived the whole storm.
+        assert not speak_thread.is_alive(), "speak thread died under stress"
+        # The speak loop actually did work — not merely "didn't deadlock at the end".
+        assert runner.calls > 0, "speak loop never spoke anything; the stress window was empty"
+        # This counter is no longer keep-going-exclusive post-T4 (set_speaker() gained two
+        # more legitimate callers -- on_stop_session's resume branch and on_cycle_session's
+        # muted-landing release; see the _counting_set_speaker and hammer() comments
+        # above), so a non-zero count alone no longer PROVES the in-lock keep-going scan
+        # ran under contention -- it can be satisfied entirely by the two new T4 callers.
+        # Kept as a coarser "the voice moved under contention" signal. Coverage is
+        # RESTORED by the additive real_keep_going_fires assertion directly below, which
+        # is immune to those two callers. (Do NOT weaken this assertion; if it ever
+        # flakes, widen the idle window -- raise the feeder sleep or extend the storm --
+        # never drop the assertion.)
+        assert keep_going_fires[0] > 0, "keep-going never fired; the idle window was empty"
+        # T4 REVIEW FIX: the assertion above lost its exclusivity when T4 added two more
+        # set_speaker() callers (see its comment). This one is immune to them: it counts
+        # non-None returns of _select_keep_going itself (host.py:490, the ONLY call
+        # site), so it can only go non-zero when the in-lock keep-going scan actually
+        # selected a background session -- exactly what the pre-T4 keep_going_fires
+        # assertion proved. ADDITIVE, not a replacement (the never-weaken mandate keeps
+        # the original assertion as-is). (Do NOT weaken this either; if it ever flakes,
+        # widen the idle window -- never drop the assertion.)
+        assert real_keep_going_fires[0] > 0, \
+            "keep-going scan never actually selected a background session; the idle window was empty"
+        # This guard does NOT bound queue LENGTH. Cap-exempt cues (PAUSE "Paused./
+        # Resumed.", JUMP_WAITING "Jumping to...") use enqueue_front, which is
+        # deliberately NOT subject to _backlog_cap (queue.py:42-45), so under this
+        # synthetic cue-storm a stream legitimately exceeds the cap (verified: ~50% of
+        # isolated runs reach len up to ~1000). Those cues drain and carry no pending-
+        # heard marker, so it is not a leak. The real leak/resurrection invariant lives
+        # in test_reentrant_stop_flush_requeues_item_exactly_once. Here, in the quiescent
+        # end state (storm over, speak thread joined), assert only that every pending-
+        # heard marker still maps to a LIVE queued item or the in-flight claim — no
+        # ORPHANED markers. Cue-volume-independent, so it keeps its teeth no matter how
+        # many cap-exempt cues piled up.
+        with daemon._lock:
+            live_ids = {it.id for st in daemon._streams.values()
+                        for it in st.queue._items}
+            if daemon._current_item is not None:
+                live_ids.add(daemon._current_item.id)
+            orphaned = [k for k in daemon._pending_heard if k not in live_ids]
+            assert orphaned == [], "orphaned pending-heard markers: {0}".format(orphaned[:5])
+    finally:
+        host_mod._select_keep_going = _orig_select_keep_going
 
 
 class _ReentrantSpeaker:
