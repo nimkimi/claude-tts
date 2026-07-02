@@ -266,16 +266,6 @@ class SpeechDaemon:
         st.prose_buffer = []
         for text, entry in buf:
             self._enqueue(session, "prose", text, False, entry=entry)
-        # Background-backlog cue: ONCE per turn, when a NON-foreground, non-stopped
-        # session's prose reaches its (now non-empty) queue. Debounced via the
-        # per-stream flag, re-armed only by reset_for_new_prompt (a new prompt =
-        # a new turn) — never per sentence. Decisions carry their own alert earcon,
-        # so this is prose-only.
-        if (not st.waiting_signaled and not st.stopped
-                and session != self.sessions.speaker()
-                and len(st.queue) > 0):
-            self.speaker.earcon("waiting")
-            st.waiting_signaled = True
 
     def _drop_pending(self, items) -> None:
         for it in items:

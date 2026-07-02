@@ -52,16 +52,23 @@ def on_tool(ctx, msg):
 
 @handler(MsgType.EARCON)
 def on_earcon(ctx, msg):
-    session = ctx.session                 # was: msg.get("session", "")
-    # Instant: the Windows earcon backend plays on a separate audio path
-    # that mixes with the speech, so it no longer cuts the reading.
+    session = ctx.session
     kind = msg.get("kind", "")
-    ctx.host.speaker.earcon(kind)
+    # The turn-completion ding is the "something landed" cue (SPEC §11): it fires for
+    # non-speaking sessions AND the muted ex-speaker, and is SUPPRESSED only for the
+    # session you are hearing live (session == speaker() AND voice is flowing). Branch
+    # on turn_done ONLY: choice/plan/permission EARCON msgs are SESSIONLESS
+    # (ctx.session == ""), so the session==speaker() test must never reach them.
     if kind == "turn_done":
-        # End-of-turn boundary: flush any sub-threshold buffered prose so
-        # it is not silently dropped when the assistant produces fewer items
-        # than the minqueue threshold.
-        ctx.host._flush_prose_buffer(session)
+        host = ctx.host
+        if not (session == host.sessions.speaker() and host.voice_state == "flowing"):
+            host.speaker.earcon(kind)
+        # End-of-turn boundary: flush any sub-threshold buffered prose UNCONDITIONALLY
+        # (a message below the minqueue threshold must still be read) — the flush
+        # survives the earcon suppression above.
+        host._flush_prose_buffer(session)
+    else:
+        ctx.host.speaker.earcon(kind)
     return None
 
 

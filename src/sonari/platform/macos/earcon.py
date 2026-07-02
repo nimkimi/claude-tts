@@ -12,7 +12,6 @@ _DEFAULTS = {
     "plan":       "/System/Library/Sounds/Submarine.aiff",
     "error":      "/System/Library/Sounds/Sosumi.aiff",
     "turn_done":  "/System/Library/Sounds/Tink.aiff",
-    "waiting":    "/System/Library/Sounds/Pop.aiff",
 }
 
 

@@ -22,7 +22,6 @@ class SessionStream:
         self.stopped = False                # per-session stop (⌃⌘S / ⌃⌘M); sticky across prompts
         self.warned_immediate = False       # warned once about immediate selection
         self.guided = False                 # received the setup-guidance cue once
-        self.waiting_signaled = False       # background "waiting" earcon fired this turn
 
     def reset_for_new_prompt(self) -> None:
         """A new user prompt (FLUSH): reset playback state with a fresh assembler,
@@ -34,4 +33,3 @@ class SessionStream:
         self.options = None
         self.nav_cursor = None
         self.nav_turn = None
-        self.waiting_signaled = False

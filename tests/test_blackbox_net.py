@@ -159,24 +159,22 @@ def test_prose_ordering_decision_earcon_fires_before_fifo_text():
         ("text", "Applying the change now."),
         ("text", "Run: pytest -q Press the option's number to choose, "
                  "or Escape to cancel."),
-        ("earcon", "turn_done"),
     ]
 
 
 # ---------------------------------------------------------------------------
-# Family: background is earcon-only (waiting + decision earcon, no text)
+# Family: background dings at turn completion, not mid-turn (waiting retired)
 # ---------------------------------------------------------------------------
 
-def test_background_session_is_earcon_only():
+def test_background_session_dings_at_turn_completion():
     daemon, speaker, log, sessions, config = make_net(foreground="fg")
-    prose(daemon, "bg", "Background chatter that must stay silent. ",
+    prose(daemon, "bg", "Background chatter that stays silent until the turn ends. ",
           index=0, final=True)
-    daemon.handle_message(msg(MsgType.CHOICE, "bg", questions=[
-        {"question": "Pick one", "options": [{"label": "A"}, {"label": "B"}]}]))
-    drain(daemon)  # foreground "fg" has nothing -> bg text never spoken
-    # Surprise vs brief hint: CHOICE for a bg session fires no earcon —
-    # only the prose's waiting earcon is emitted; choice earcon is not produced.
-    assert log == [("earcon", "waiting")]
+    drain(daemon)
+    assert log == []                                     # no mid-turn ding (waiting retired)
+    daemon.handle_message(msg(MsgType.EARCON, "bg", kind="turn_done"))
+    drain(daemon)
+    assert log == [("earcon", "turn_done")]              # the "landed" ding at completion (req 16)
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +222,7 @@ def test_turn_done_earcon_flushes_sub_threshold_prose():
     assert log == []  # final alone does NOT flush; prose is held below threshold
     daemon.handle_message(msg(MsgType.EARCON, "fg", kind="turn_done"))
     drain(daemon)
-    assert log == [("earcon", "turn_done"), ("text", "Only one.")]
+    assert log == [("text", "Only one.")]
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +253,9 @@ def test_foreground_gating_only_fg_session_spoken():
     prose(daemon, "a", "alpha. ", final=False)
     prose(daemon, "b", "beta. ", final=False)
     drain(daemon)
-    # Surprise vs brief hint: a waiting earcon fires for session "b" arriving
-    # while "a" is foreground; only "alpha." is spoken (beta stays in bg stream).
-    assert log == [("earcon", "waiting"), ("text", "alpha.")]
+    # SP3: no mid-turn ding fires for session "b" arriving while "a" is foreground
+    # (waiting retired); only "alpha." is spoken (beta stays in bg stream).
+    assert log == [("text", "alpha.")]
 
 
 # ---------------------------------------------------------------------------
@@ -311,11 +309,10 @@ def test_jump_waiting_blocked_session_outranks_prose_only():
     daemon.handle_message(msg(MsgType.JUMP_WAITING, "a"))
     drain(daemon)
     assert sessions.foreground() == "c"
-    # Surprise vs brief hint: a waiting earcon fires before the cancel+jump cue
-    # because session "b"'s prose arrival triggered it; then cut-on-switch cancel,
-    # then the jump announcement and the choice text for session "c".
+    # SP3: session "b"'s prose arrival fires no ding (waiting retired); the log
+    # starts at the cut-on-switch cancel, then the jump announcement and the
+    # choice text for session "c".
     assert log == [
-        ("earcon", "waiting"),
         ("cancel", None),
         ("text", "Jumping to blocked. Bring it forward to type."),
         ("text", "Pick? Option 1: One. Option 2: Two. Press the option's number to "

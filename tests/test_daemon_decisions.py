@@ -174,11 +174,17 @@ def test_jump_decision_drops_pending_and_marks_current_heard():
     assert queue.pop_next().text == "decide"
 
 
-def test_bare_earcon_message_plays_kind():
+def test_bare_earcon_message_suppressed_for_flowing_speaker():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     daemon.handle_message(_msg(MsgType.EARCON, "fg", kind="turn_done"))
-    assert speaker.earcons == ["turn_done"]
+    assert speaker.earcons == []                          # flowing speaker's turn_done suppressed
     assert len(queue) == 0
+
+def test_bare_earcon_message_dings_for_non_speaker():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    sessions.register("bg", cwd="/x/bg")
+    daemon.handle_message(_msg(MsgType.EARCON, "bg", kind="turn_done"))
+    assert speaker.earcons == ["turn_done"]
 
 
 def test_jump_decision_targets_the_focused_session_not_foreground():

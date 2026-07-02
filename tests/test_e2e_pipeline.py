@@ -165,7 +165,6 @@ def test_scripted_session_full_ordering():
         ("earcon", "permission"),
         ("text", "Applying the change now."),
         ("text", "Run: pytest -q Press the option's number to choose, or Escape to cancel."),
-        ("earcon", "turn_done"),
     ]
 
 
@@ -195,9 +194,9 @@ def test_background_session_is_earcon_only():
     drain_queue(daemon, speaker)
 
     # Earcon fired (alerts are cross-session), but no text was spoken.
-    # Stage 3: a "waiting" earcon now also fires when background prose first
-    # reaches its queue, followed by the "choice" decision earcon.
-    assert log == [("earcon", "waiting"), ("earcon", "choice")]
+    # SP3: the "waiting" earcon is retired (no mid-turn ding); the sessionless
+    # "choice" decision earcon still fires immediately.
+    assert log == [("earcon", "choice")]
 
 
 def test_background_reinvocation_does_not_hijack_foreground_voice():

@@ -18,9 +18,4 @@ def test_play_missing_file_is_none(monkeypatch):
 def test_default_earcons_are_macos_system_sounds():
     d = MacEarconBackend().default_earcons()
     assert d["permission"] == "/System/Library/Sounds/Funk.aiff"
-    assert set(d) == {"permission", "choice", "plan", "error", "turn_done", "waiting"}
-
-
-def test_default_earcons_includes_waiting_pop():
-    from sonari.platform.macos.earcon import MacEarconBackend
-    assert MacEarconBackend().default_earcons()["waiting"].endswith("/Pop.aiff")
+    assert set(d) == {"permission", "choice", "plan", "error", "turn_done"}

@@ -35,13 +35,16 @@ def test_voice_busy_predicate_parity_when_aligned():
 
 # --- CHANGE 4 / F5: the ding gate suppresses for the SPEAKER, not foreground ---
 def test_ding_gate_uses_speaker_not_foreground():
+    # SP3: the "landed" ding is turn_done at completion, suppressed for the flowing
+    # SPEAKER (not the foreground). Under divergence (speaker=B, workspace=A) B's
+    # turn_done is suppressed; the non-speaker A's dings.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     sessions.register("B", cwd="/x/B")
-    sessions.set_speaker("B")                      # voice=B, workspace=A
-    daemon._buffer_prose("B", "live from b", None)  # minqueue=1 -> flushes now; B is the speaker
-    assert "waiting" not in speaker.earcons         # never ding the session currently talking
-    daemon._buffer_prose("A", "background a", None) # A is NOT the speaker -> background ding
-    assert speaker.earcons.count("waiting") == 1
+    sessions.set_speaker("B")                            # voice=B, workspace=A
+    daemon.handle_message(_msg(MsgType.EARCON, "B", kind="turn_done"))
+    assert speaker.earcons == []                         # never ding the session talking (speaker)
+    daemon.handle_message(_msg(MsgType.EARCON, "A", kind="turn_done"))
+    assert speaker.earcons == ["turn_done"]               # A is NOT the speaker -> landed ding
 
 
 # --- CHANGE 2 / F1: on_flush cuts only the speaker's own / same-session readout ---

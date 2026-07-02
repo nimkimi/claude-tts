@@ -121,31 +121,16 @@ def test_jump_waiting_skips_a_stopped_background_session():
     assert sessions.foreground() == "a"
     assert queue._items[-1].text == "No session waiting."
 
-# --- waiting earcon (Task 3) --------------------------------------------------
+# --- turn-completion ding (Task 3, SP3: waiting retired) ----------------------
 
-def test_background_prose_fires_one_waiting_earcon():
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    _prose(daemon, "b", "first. second. third. ")       # b is background
-    assert speaker.earcons.count("waiting") == 1         # once per turn, not per sentence
-
-def test_foreground_prose_does_not_fire_waiting():
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    _prose(daemon, "a", "hello. world. ")
-    assert "waiting" not in speaker.earcons
-
-def test_stopped_background_does_not_fire_waiting():
+def test_muted_session_dings_on_turn_completion():
+    # A muted (stopped) BACKGROUND session still dings when its turn completes
+    # (R7:192-193 "its output piles, dinging on turn-completion"). The retired
+    # `waiting` gate had `not st.stopped` and wrongly silenced it.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     daemon._stream("b").stopped = True
-    _prose(daemon, "b", "x. y. ")
-    assert "waiting" not in speaker.earcons
-
-def test_waiting_rearms_after_new_prompt():
-    daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
-    _prose(daemon, "b", "turn one. ")
-    assert speaker.earcons.count("waiting") == 1
-    daemon.handle_message(_msg(MsgType.FLUSH, "b"))      # new prompt to b (still background)
-    _prose(daemon, "b", "turn two. ")
-    assert speaker.earcons.count("waiting") == 2
+    daemon.handle_message(_msg(MsgType.EARCON, "b", kind="turn_done"))
+    assert speaker.earcons == ["turn_done"]
 
 
 # --- session attribution ("who's speaking?") (Task 4) ------------------------
@@ -185,28 +170,18 @@ def test_jump_preamble_does_not_double_announce_the_folder():
     assert "backend. beta." not in speaker.spoken        # no double-announce
 
 
-def test_minqueue_waiting_earcon_fires_at_flush_not_on_chunk():
-    # With minqueue>1 the "waiting" earcon must fire from _flush_prose_buffer
-    # (when the prose actually reaches the queue), NOT when the chunk arrives.
+def test_minqueue_prose_flushes_at_turn_done_no_waiting():
+    # minqueue>1: a sub-threshold message is still read at the turn boundary (the
+    # turn_done flush). The retired `waiting` earcon no longer fires; a background
+    # session's turn_done IS its "landed" ding.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     config["minqueue"] = 3
-    # Send ONE sentence (fewer than minqueue=3) to background session "b".
-    # At this point the buffer is not yet flushed, so earcon must NOT have fired.
-    _prose(daemon, "b", "one sentence. ")
-    assert "waiting" not in speaker.earcons, (
-        "earcon fired on chunk production, not at flush: earcons={0}".format(speaker.earcons)
-    )
-    assert len(stream_queue(daemon, "b")) == 0, (
-        "queue should still be empty before flush: {0}".format(len(stream_queue(daemon, "b")))
-    )
-    # Trigger the turn-boundary flush via the turn_done earcon for session "b".
+    _prose(daemon, "b", "one sentence. ")                # bg, below threshold
+    assert "waiting" not in speaker.earcons
+    assert len(stream_queue(daemon, "b")) == 0           # not flushed yet
     daemon.handle_message(_msg(MsgType.EARCON, "b", kind="turn_done"))
-    assert speaker.earcons.count("waiting") == 1, (
-        "expected exactly 1 waiting earcon after flush, got: {0}".format(speaker.earcons)
-    )
-    assert len(stream_queue(daemon, "b")) > 0, (
-        "queue must be non-empty after flush"
-    )
+    assert speaker.earcons == ["turn_done"]              # bg dings at completion (req 16)
+    assert len(stream_queue(daemon, "b")) > 0            # ... and the buffered prose flushed
 
 
 def test_jump_waiting_with_no_foreground_fires_error_earcon():
