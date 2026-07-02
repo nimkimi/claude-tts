@@ -100,7 +100,14 @@ def on_set_foreground(ctx, msg):
 @handler(MsgType.SESSION_END)
 def on_session_end(ctx, msg):
     session = ctx.session
+    was_speaker = (session == ctx.host.sessions.speaker())
     ctx.host.sessions.unregister(session)
+    # F1/M1: if the departing session WAS the muted speaker holding a quiet-hold, the
+    # enum would otherwise stay "quiet-hold" with _speaker now None -> keep-going
+    # permanently skipped (voice dead) and ⌃⌘W inverts into an error tone. Lift it.
+    # stopped-all STAYS (the other sessions remain individually muted).
+    if was_speaker and ctx.host.voice_state == "quiet-hold":
+        ctx.host.voice_state = "flowing"
     st = ctx.host._streams.get(session)
     if st is not None:
         ctx.host._drop_pending(st.queue.clear())

@@ -51,6 +51,7 @@ def on_stop_session(ctx, msg):
                           mute_exempt=True, at_front=True)
     else:
         st.stopped = True
+        ctx.host.voice_state = "quiet-hold"          # SPEC §6: ⌃⌘S on the speaker -> quiet-hold
         # Cancel only if THIS session is the one in flight, so stopping never cuts
         # another session's utterance (the loop only plays the foreground, so a live
         # claim is the foreground's — the session check is belt-and-suspenders).
@@ -71,6 +72,7 @@ def on_stop_all(ctx, msg):
     # speak loop re-queues it at the front of its own (now stopped) stream.
     for st in ctx.host._streams.values():
         st.stopped = True
+    ctx.host.voice_state = "stopped-all"             # SPEC §6/§270: every session muted
     if ctx.host._current_item is not None:
         ctx.host.speaker.cancel()
     spk = ctx.host.sessions.speaker()

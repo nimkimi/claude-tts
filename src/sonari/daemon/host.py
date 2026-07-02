@@ -187,6 +187,12 @@ class SpeechDaemon:
         s = self._state._streams.get(session)
         if s is None:
             s = SessionStream(queue_cap=self._backlog_cap)
+            if self._state._voice_state == "stopped-all":
+                # Born-muted (F2/M2, SPEC:270-272): a session created while the voice
+                # is stopped-all is born stopped, so the ungated primary pop can't
+                # speak it (the gate covers only the keep-going scan). ONLY under
+                # stopped-all — under quiet-hold a new session piles + dings.
+                s.stopped = True
             self._state._streams[session] = s
         return s
 
