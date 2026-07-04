@@ -1,3 +1,4 @@
+import sonari.ttyutil as ttyutil
 from sonari.sessions import Identity
 from tests.daemon_helpers import make_daemon
 
@@ -105,9 +106,12 @@ def test_jump_waiting_diagnostic_identity_none(capsys):
     assert "sonari[focus]: jump_waiting target=b identity=none will_raise=" in captured.err
 
 
-def test_jump_waiting_diagnostic_identity_present(capsys):
+def test_jump_waiting_diagnostic_identity_present(capsys, monkeypatch):
     # jump_waiting with a target whose identity is present (has tty) should emit
     # a diagnostic line with identity=present.
+    # a's and b's ttys are fictional paths (no real device nodes) -- fake them live
+    # so W1's liveness filter (_waiting_target) doesn't depend on the host's live pty set.
+    monkeypatch.setattr(ttyutil, "tty_alive", lambda tty: True)
     daemon, queue, _s, sessions, _c = make_daemon(foreground="a")
     sessions.register("a", cwd="/work/a")
     sessions.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))

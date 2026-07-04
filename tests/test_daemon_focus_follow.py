@@ -1,5 +1,6 @@
 import threading
 
+import sonari.ttyutil as ttyutil
 from sonari.protocol import MsgType
 from sonari.sessions import Identity
 from sonari.daemon.features import lifecycle
@@ -46,7 +47,10 @@ def test_session_start_stores_identity(monkeypatch):
     assert ident is not None and ident.tty == "/dev/ttys9"
 
 
-def test_jump_attempts_raise_with_target_identity():
+def test_jump_attempts_raise_with_target_identity(monkeypatch):
+    # b's tty is a fictional path (no real device node) -- fake it live so W1's
+    # liveness filter (_waiting_target) doesn't depend on the host's live pty set.
+    monkeypatch.setattr(ttyutil, "tty_alive", lambda tty: True)
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     sessions.register("b", cwd="/work/backend")
     sessions.set_identity("b", _ident())
@@ -74,12 +78,15 @@ def test_jump_adds_cue_when_no_raise_will_happen():
         "Jumping to backend. Bring it forward to type."
 
 
-def test_non_raising_jump_still_bumps_generation_so_it_supersedes():
+def test_non_raising_jump_still_bumps_generation_so_it_supersedes(monkeypatch):
     # FIX 1: the generation must advance on EVERY jump, not only raising ones.
     # Trace a double-jump A->B where B is non-followable (no identity). If the bump
     # lives inside `if will_raise:`, B does NOT advance the generation, so an
     # in-flight raise(A) tagged with A's generation stays "current" and wrongly
     # yanks focus back to A while the voice is on B. The bump must run on every jump.
+    # A's tty is a fictional path (no real device node) -- fake it live so W1's
+    # liveness filter (_waiting_target) doesn't depend on the host's live pty set.
+    monkeypatch.setattr(ttyutil, "tty_alive", lambda tty: True)
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     sessions.register("a", cwd="/work/alpha")
     sessions.set_identity("a", _ident())          # A is followable -> will raise
@@ -107,7 +114,10 @@ def test_non_raising_jump_still_bumps_generation_so_it_supersedes():
     assert ident.tty == "/dev/ttys9" and gen == 1
 
 
-def test_raise_failure_callback_enqueues_cue():
+def test_raise_failure_callback_enqueues_cue(monkeypatch):
+    # b's tty is a fictional path (no real device node) -- fake it live so W1's
+    # liveness filter (_waiting_target) doesn't depend on the host's live pty set.
+    monkeypatch.setattr(ttyutil, "tty_alive", lambda tty: True)
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
     sessions.register("b", cwd="/work/backend")
     sessions.set_identity("b", _ident())
