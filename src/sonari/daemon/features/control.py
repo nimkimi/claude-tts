@@ -146,8 +146,9 @@ def on_status(ctx, msg):
 @handler(MsgType.WHERE_AM_I)
 def on_where_am_i(ctx, msg):
     # ⌃⌘W "where am I": a terse SPOKEN status (distinct from the CLI STATUS dict),
-    # barge-in + interjection-resume per §7. Plain text for sub-project B (spearcon /
-    # pitch polish is sub-project D): "{folder}. {Playing|Stopped}. {N} waiting."
+    # barge-in + interjection-resume per §7. Plain speech end-to-end (SP3.1 W3):
+    # "Voice: {folder}, {state}.[ Keyboard: {folder}.] {N} waiting, {M} muted." —
+    # the Keyboard clause only when the workspace resolves to a different session.
     host = ctx.host
     # Report the SPEAKER's state (voice-state), not the workspace. §8 reconciliation:
     # ⌃⌘W answers "what am I hearing?" — in the keep-going era the speaker may differ
