@@ -235,9 +235,13 @@ def test_stop_emits_turn_done_earcon():
     ]
 
 
-def test_user_prompt_submit_sets_foreground_then_flush():
+def test_user_prompt_submit_sets_foreground_then_flush(monkeypatch):
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    monkeypatch.delenv("ITERM_SESSION_ID", raising=False)
+    monkeypatch.setattr(hooks_entry.ttyutil, "controlling_tty", lambda: "")
     assert handle_event("UserPromptSubmit", {"session_id": "sess-9"}) == [
-        {"v": PROTOCOL_VERSION, "type": MsgType.SET_FOREGROUND, "session": "sess-9", "cwd": ""},
+        {"v": PROTOCOL_VERSION, "type": MsgType.SET_FOREGROUND, "session": "sess-9",
+         "cwd": "", "term_program": "", "iterm_session_id": "", "tty": ""},
         {"v": PROTOCOL_VERSION, "type": MsgType.FLUSH, "session": "sess-9"},
     ]
 

@@ -80,14 +80,22 @@ def on_set_foreground(ctx, msg):
             ctx.host.sessions.set_foreground(session, cwd=cwd)
     else:
         ctx.host.sessions.register(session, cwd=cwd)     # denied: ding + accrue
-    if t == MsgType.SESSION_START:
-        ctx.host.sessions.register(session, cwd=cwd)
+    # Identity (re)capture — piggybacked on ANY message carrying identity fields:
+    # both SESSION_START and UserPromptSubmit's SET_FOREGROUND supply them, so a
+    # post-restart session re-populates its tty on its next prompt (W4). Guard on
+    # "field present", not message type. set_identity's don't-clobber-with-empties
+    # rule keeps an intermittently-empty best-effort tty from destroying a good value,
+    # so refreshing every prompt is safe. (register/set_foreground never touch
+    # _identities, so this ordering is independent of the SESSION_START register below.)
+    if msg.get("term_program") or msg.get("tty") or msg.get("iterm_session_id"):
         from sonari.sessions import Identity
         ctx.host.sessions.set_identity(session, Identity(
             term_program=msg.get("term_program", ""),
             tty=msg.get("tty", ""),
             iterm_session_id=msg.get("iterm_session_id", ""),
         ))
+    if t == MsgType.SESSION_START:
+        ctx.host.sessions.register(session, cwd=cwd)
         _maybe_guide_setup(ctx, session, msg.get("plugin_version", ""))
         if ctx.host._spearcons is not None:
             # Pre-render spearcons for the known roster in the background (Popen,

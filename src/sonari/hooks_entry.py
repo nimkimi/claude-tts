@@ -93,7 +93,10 @@ def handle_event(event: str, payload: dict) -> list[dict]:
     if event == "UserPromptSubmit":
         return [
             _msg(type=MsgType.SET_FOREGROUND, session=session,
-                 cwd=payload.get("cwd", "")),
+                 cwd=payload.get("cwd", ""),
+                 term_program=os.environ.get("TERM_PROGRAM", ""),
+                 iterm_session_id=os.environ.get("ITERM_SESSION_ID", ""),
+                 tty=ttyutil.controlling_tty()),
             _msg(type=MsgType.FLUSH, session=session),
         ]
 
