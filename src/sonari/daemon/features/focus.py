@@ -15,9 +15,11 @@ def _waiting_target(ctx, exclude):
     by session insertion order. Excludes *exclude* (the current foreground) and
     the current speaker() — both are already receiving attention."""
     blocked, prose = [], []
-    spk = ctx.host.sessions.speaker()
+    sessions = ctx.host.sessions
+    spk = sessions.speaker()
     for sess, st in ctx.host._streams.items():          # insertion-ordered
-        if sess == exclude or sess == spk or st.stopped or len(st.queue) == 0:
+        if (sess == exclude or sess == spk or st.stopped
+                or len(st.queue) == 0 or not sessions.is_live(sess)):
             continue
         (blocked if st.queue.has_decision() else prose).append(sess)
     ordered = blocked + prose
@@ -116,9 +118,12 @@ def on_cycle_session(ctx, msg):
     # ⌃⌘Tab / ⌃⌘⇧Tab: cycle the VOICE through the roster in insertion order, wrapping.
     # Raises the target window (a deliberate cycle is a workspace action).
     sessions = ctx.host.sessions
-    # Fork 2 = KEEP: the roster INCLUDES muted sessions. Filter at the CALL SITE (never
-    # in session_ids()) so the insertion-order pins in test_sessions.py survive.
-    roster = sessions.session_ids()
+    # Fork 2 = KEEP: the roster INCLUDES muted sessions (filter at the CALL SITE, never
+    # in session_ids(), so the insertion-order pins in test_sessions.py survive). W1:
+    # also drop PHANTOM sessions (closed terminal -> dead tty node) via is_live — a pure
+    # read. is_live is independent of `stopped`, so a muted-but-live session stays
+    # cycle-reachable (R7); only muted+dead (or active+dead) drops.
+    roster = [s for s in sessions.session_ids() if sessions.is_live(s)]
     if len(roster) < 2:
         ctx.host.speaker.earcon("error")          # <2 sessions: confirm fired, no silent no-op
         return None

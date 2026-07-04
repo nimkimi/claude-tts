@@ -1,4 +1,5 @@
 """Cycle sessions (⌃⌘Tab / ⌃⌘⇧Tab) — roster navigation in insertion order."""
+import sonari.ttyutil as ttyutil
 from sonari.sessions import Identity
 from tests.daemon_helpers import make_daemon
 from tests.test_daemon_focus_follow import RecordingRaiseService
@@ -43,9 +44,12 @@ def test_cycle_with_fewer_than_two_sessions_errors_and_does_not_switch():
     assert sessions.foreground() == "A"          # unchanged
 
 
-def test_cycle_raises_target_window():
+def test_cycle_raises_target_window(monkeypatch):
     # §8 cycle CHANGE row (R5/R12): cycle is a deliberate navigation, so the
     # workspace (terminal window) must follow, mirroring on_jump_waiting's raise.
+    # B's tty is a fictional path (no real device node) -- fake it live so W1's
+    # liveness filter (focus.py) doesn't treat this raise-behavior test as a phantom.
+    monkeypatch.setattr(ttyutil, "tty_alive", lambda tty: True)
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
     rs = RecordingRaiseService(will=True)
     daemon.raise_service = rs

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sonari import ttyutil
+
 
 @dataclass
 class Identity:
@@ -132,6 +134,13 @@ class SessionManager:
 
     def identity(self, session: str) -> "Identity | None":
         return self._identities.get(session)
+
+    def is_live(self, session: str) -> bool:
+        """True if *session*'s terminal is still open (its captured tty device node
+        exists). Fail-open: an unknown identity or empty tty -> live (never hide a
+        live session). Pure read over _identities; writes nothing."""
+        ident = self._identities.get(session)
+        return ttyutil.tty_alive(ident.tty if ident is not None else "")
 
     def focus(self, session: str, cwd=None) -> None:
         """Explicitly move the voice to *session* (the jump-to-waiting hotkey):

@@ -35,6 +35,19 @@ def _normalize(tty: str) -> str:
     return "/dev/" + tty
 
 
+def tty_alive(tty: str) -> bool:
+    """True if this tty's device node currently exists — a timestamp-free liveness
+    signal for a terminal session: on macOS the pty slave node vanishes the instant
+    its terminal closes. Empty/unknown tty -> True (fail OPEN: never hide a live
+    session whose best-effort capture returned '')."""
+    if not tty:
+        return True
+    try:
+        return os.path.exists(tty)
+    except OSError:      # belt-and-suspenders; a weird path can never classify live as dead
+        return True
+
+
 def controlling_tty(pid: "int | None" = None, ps_runner=None) -> str:
     """First ancestor's real controlling tty as /dev/ttysNNN, else ''. Never raises."""
     runner = ps_runner or _default_ps
