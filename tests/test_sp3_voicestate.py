@@ -35,13 +35,13 @@ def test_gate_noop_keep_going_fires_when_flowing():
     assert any(s and "from bg" in s for s in speaker.spoken)
 
 
-# --- ⌃⌘W flowing wording is UNCHANGED (Nima's ear-approved SP-B grammar preserved) ---
-def test_where_am_i_flowing_wording_unchanged():
+# --- ⌃⌘W flowing wording (W3 both-sides + counts grammar) ---
+def test_where_am_i_flowing_wording():
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="fg")
     sessions.set_foreground("fg", cwd="/x/work")
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["work. Playing. 0 waiting."]
+    assert speaker.spoken == ["Voice: work, Playing. 0 waiting, 0 muted."]
 
 
 # --- state-aware None-branch: speaker() None but a workspace exists + flowing

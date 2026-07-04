@@ -76,23 +76,22 @@ def test_jump_waiting_uses_spearcon_then_keeps_actionable_suffix_on_hit():
     assert not any("Jumping to" in it.text for it in items)      # verb dropped (ear-tunable)
 
 
-def test_where_am_i_splits_spearcon_then_state_on_hit():
+def test_where_am_i_no_spearcon_split_single_cue_on_hit():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="fg")
     sessions.set_foreground("fg", cwd="/x/work")
-    p = _hit(daemon, "work")
+    p = _hit(daemon, "work")                      # spearcon available, but ⌃⌘W no longer splits
     daemon.handle_message({"type": "where_am_i", "session": "fg"})
-    daemon._speak_loop_once()                 # spearcon plays first
-    daemon._speak_loop_once()                 # then the state speech
-    assert speaker.audio_paths[0] == p
-    assert speaker.spoken[-1] == "Playing. 0 waiting."
+    daemon._speak_loop_once()
+    assert speaker.spoken == ["Voice: work, Playing. 0 waiting, 0 muted."]
+    assert p not in speaker.audio_paths           # the folder spearcon is NOT played for ⌃⌘W
 
 
-def test_where_am_i_miss_keeps_combined_cue():
+def test_where_am_i_single_cue_on_miss():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="fg")
     sessions.set_foreground("fg", cwd="/x/work")
     daemon.handle_message({"type": "where_am_i", "session": "fg"})
     daemon._speak_loop_once()
-    assert speaker.spoken == ["work. Playing. 0 waiting."]   # unchanged on miss
+    assert speaker.spoken == ["Voice: work, Playing. 0 waiting, 0 muted."]   # unchanged on miss
 
 
 def test_session_start_pregenerates_in_background():

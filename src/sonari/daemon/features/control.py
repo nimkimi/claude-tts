@@ -182,10 +182,8 @@ def on_where_am_i(ctx, msg):
         return None
     # Capture the in-flight item BEFORE cancel so we can resume it afterwards.
     cur = host._current_item
-    # Capture entry now: cancel() doesn't touch _pending_heard, but grabbing it here
-    # keeps the invariant that we read all in-flight state before any mutation.
     entry = host._pending_heard.get(cur.id) if cur is not None else None
-    folder = host.sessions.folder(fg) or "Unknown session"
+    voice_folder = host.sessions.folder(fg) or "Unknown session"
     st = host._streams.get(fg)
     vs = host.voice_state
     if vs == "stopped-all":
@@ -194,31 +192,35 @@ def on_where_am_i(ctx, msg):
         state = "On hold"
     else:
         state = "Stopped" if (st is not None and st.stopped) else "Playing"
-    # Waiting = background sessions with live, non-stopped backlog (mirrors _waiting_target).
-    waiting = sum(1 for sess, s in host._streams.items()
-                  if sess != fg and not s.stopped and len(s.queue) > 0)
+    # One pass over the BACKGROUND streams (fg excluded, mirroring _waiting_target):
+    # waiting = live non-stopped backlog; muted = individually-stopped sessions. The
+    # muted count is independent of voice_state (per-stream st.stopped, not the enum).
+    waiting = muted = 0
+    for sess, s in host._streams.items():
+        if sess == fg:
+            continue
+        if s.stopped:
+            muted += 1
+        elif len(s.queue) > 0:
+            waiting += 1
+    # Keyboard clause ONLY when the workspace (keyboard) resolves to a session other
+    # than the voice — otherwise there is nothing to disambiguate.
+    ws = host.sessions.workspace()
+    diverged = ws is not None and ws != fg
+    kbd = (" Keyboard: {0}.".format(host.sessions.folder(ws) or "Unknown session")
+           if diverged else "")
+    text = "Voice: {0}, {1}.{2} {3} waiting, {4} muted.".format(
+        voice_folder, state, kbd, waiting, muted)
     host.speaker.cancel()                          # barge-in: cut the current utterance
     # Resume-after-interjection: re-queue the interrupted item FIRST so it ends up
-    # DEEPEST (the status cue / spearcon are appendleft'd in front of it below).
+    # DEEPEST (the status cue is appendleft'd in front of it below).
     if cur is not None:
         host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
                       entry=entry, mute_exempt=cur.mute_exempt,
                       pause_exempt=cur.pause_exempt, names_session=cur.names_session,
                       audio_path=cur.audio_path, at_front=True)
-    spearcon = host._spearcon_path(folder)
-    if spearcon:
-        # Spearcon names the session (replaces the spoken folder); state + count stay
-        # speech. Enqueue state FIRST (at_front), then the spearcon (at_front) so the
-        # head order is: spearcon, state, [resumed item].
-        host._enqueue(fg, "prose", "{0}. {1} waiting.".format(state, waiting),
-                      False, mute_exempt=True, pause_exempt=True, at_front=True)
-        host._enqueue(fg, "prose", folder, False, audio_path=spearcon,
-                      mute_exempt=True, pause_exempt=True, at_front=True,
-                      names_session=True)
-    else:
-        host._enqueue(fg, "prose",
-                      "{0}. {1}. {2} waiting.".format(folder, state, waiting),
-                      False, mute_exempt=True, pause_exempt=True, at_front=True)
+    host._enqueue(fg, "prose", text, False,
+                  mute_exempt=True, pause_exempt=True, at_front=True)
     return None
 
 

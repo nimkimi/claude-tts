@@ -93,8 +93,9 @@ def test_cycle_session_parity_when_speaker_equals_foreground():
 # ⌃⌘W — on_where_am_i reports speaker()
 # ---------------------------------------------------------------------------
 
-def test_where_am_i_reports_speaker_folder_under_divergence():
-    """⌃⌘W under divergence: reports B's (speaker) state, not A's (workspace)."""
+def test_where_am_i_reports_both_voice_and_keyboard_folders_under_divergence():
+    """⌃⌘W under divergence: reports B's (speaker/voice) state AND A's (keyboard)
+    folder — W3 adds the keyboard clause instead of hiding it."""
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     sessions.register("A", cwd="/x/alpha")
     sessions.register("B", cwd="/x/bravo")
@@ -102,6 +103,5 @@ def test_where_am_i_reports_speaker_folder_under_divergence():
     sessions.set_speaker("B")                          # voice=B, workspace=A
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
     daemon._speak_loop_once()
-    # Status must mention B's folder ("bravo"), not A's ("alpha").
-    assert any(s and "bravo" in s for s in speaker.spoken)
-    assert not any(s and "alpha" in s for s in speaker.spoken)
+    assert any(s and "Voice: bravo" in s for s in speaker.spoken)
+    assert any(s and "Keyboard: alpha" in s for s in speaker.spoken)
