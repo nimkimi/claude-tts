@@ -6,18 +6,18 @@ def _two(daemon, sessions):
     sessions.register("B", cwd="/x/bravo")
 
 
-def test_cycle_next_chirps_up():
+def test_cycle_next_does_not_chirp():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="A")
     _two(daemon, sessions); sessions.set_foreground("A")
     daemon.handle_message({"type": "cycle_session", "direction": "next"})
-    assert speaker.pitches == ["up"]
+    assert speaker.pitches == []
 
 
-def test_cycle_prev_chirps_down():
+def test_cycle_prev_does_not_chirp():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="A")
     _two(daemon, sessions); sessions.set_foreground("A")
     daemon.handle_message({"type": "cycle_session", "direction": "prev"})
-    assert speaker.pitches == ["down"]
+    assert speaker.pitches == []
 
 
 def test_cycle_under_two_sessions_does_not_chirp():
@@ -32,12 +32,12 @@ def _seed(daemon, s="fg"):
     h.record(s, "prose", "m1")
 
 
-def test_nav_next_chirps_up_prev_chirps_down():
+def test_nav_next_prev_do_not_chirp():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="fg")
     _seed(daemon)
     daemon.handle_message({"type": "nav", "to": "next", "session": "fg"})
     daemon.handle_message({"type": "nav", "to": "prev", "session": "fg"})
-    assert speaker.pitches == ["up", "down"]
+    assert speaker.pitches == []
 
 
 def test_nav_first_last_do_not_chirp():
@@ -48,14 +48,14 @@ def test_nav_first_last_do_not_chirp():
     assert speaker.pitches == []
 
 
-def test_nav_response_chirps_directionally():
+def test_nav_response_does_not_chirp():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="fg")
     h = daemon.history
     h.record("fg", "prose", "t0"); h.end_message("fg"); h.start_turn("fg")
     h.record("fg", "prose", "t1")
     daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})
     daemon.handle_message({"type": "nav", "to": "next_response", "session": "fg"})
-    assert speaker.pitches == ["down", "up"]
+    assert speaker.pitches == []
 
 
 def test_answer_allow_chirps_up_deny_chirps_down():

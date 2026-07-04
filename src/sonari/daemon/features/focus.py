@@ -129,7 +129,6 @@ def on_cycle_session(ctx, msg):
     cur = roster.index(fg) if fg in roster else 0
     step = 1 if msg.get("direction", "next") == "next" else -1
     target = roster[(cur + step) % len(roster)]
-    ctx.host.speaker.pitch("up" if step == 1 else "down")   # directional chirp first
     sessions.focus(target)                        # workspace + voice -> target; raises
     ctx.host.speaker.cancel()
     ctx.host.voice_state = "flowing"              # cycle is a deliberate re-engage (req 9)
