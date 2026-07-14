@@ -54,7 +54,7 @@ def test_default_keymap_macos_uses_ctrl_cmd(mac):
         "stop_session", "stop_all", "jump_waiting",
         "jump_decision", "where_am_i", "faster", "slower",
         "nav_prev_response", "nav_next_response",
-        "cycle_session_next", "cycle_session_prev",
+        "chooser_step_next", "chooser_step_prev",
         "approve", "deny",
     }
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
@@ -65,8 +65,8 @@ def test_default_keymap_macos_uses_ctrl_cmd(mac):
     assert "nav_first" not in d and "nav_last" not in d
     assert d["nav_prev_response"] == {"key": "up", "mods": ["ctrl", "cmd"]}
     assert d["nav_next_response"] == {"key": "down", "mods": ["ctrl", "cmd"]}
-    assert d["cycle_session_next"] == {"key": "tab", "mods": ["ctrl", "cmd"]}
-    assert d["cycle_session_prev"] == {"key": "tab", "mods": ["ctrl", "cmd", "shift"]}
+    assert d["chooser_step_next"] == {"key": "tab", "mods": ["ctrl", "cmd"]}
+    assert d["chooser_step_prev"] == {"key": "tab", "mods": ["ctrl", "cmd", "shift"]}
 
 
 # --- resolve_keymap ---------------------------------------------------------
@@ -219,7 +219,7 @@ def test_write_resolved_no_tmp_leftover(monkeypatch, tmp_path):
 
 def test_no_two_default_actions_share_a_key():
     # Default bindings may share a key only when the modifier chord differs
-    # (sub-project B: cycle_session_next/cycle_session_prev both use "tab" but differ by +Shift).
+    # (sub-project B: chooser_step_next/chooser_step_prev both use "tab" but differ by +Shift).
     # The invariant is no two actions resolve to the same *hotkey* (key + mods pair).
     from sonari.keymap import default_keymap
     chords = [(b["key"], tuple(b["mods"])) for b in default_keymap().values()]
@@ -267,19 +267,19 @@ def test_response_nav_default_is_ctrl_cmd_arrows_no_shift(mac):
     assert d["nav_next_response"] == {"key": "down", "mods": ["ctrl", "cmd"]}
 
 
-def test_cycle_session_default_bindings_on_macos(mac):
+def test_chooser_step_default_bindings_on_macos(mac):
     d = keymap.default_keymap()
-    assert d["cycle_session_next"] == {"key": "tab", "mods": ["ctrl", "cmd"]}
-    assert d["cycle_session_prev"] == {"key": "tab", "mods": ["ctrl", "cmd", "shift"]}
+    assert d["chooser_step_next"] == {"key": "tab", "mods": ["ctrl", "cmd"]}
+    assert d["chooser_step_prev"] == {"key": "tab", "mods": ["ctrl", "cmd", "shift"]}
 
 
 def test_b_action_messages_present():
     assert keymap.ACTION_MESSAGES["jump_decision"] == {"type": "jump_decision"}
     assert keymap.ACTION_MESSAGES["where_am_i"] == {"type": "where_am_i"}
-    assert keymap.ACTION_MESSAGES["cycle_session_next"] == {
-        "type": "cycle_session", "direction": "next"}
-    assert keymap.ACTION_MESSAGES["cycle_session_prev"] == {
-        "type": "cycle_session", "direction": "prev"}
+    assert keymap.ACTION_MESSAGES["chooser_step_next"] == {
+        "type": "chooser_step", "direction": "next"}
+    assert keymap.ACTION_MESSAGES["chooser_step_prev"] == {
+        "type": "chooser_step", "direction": "prev"}
 
 
 def test_full_default_keymap_resolves_without_duplicate_hotkeys(mac):
@@ -288,7 +288,7 @@ def test_full_default_keymap_resolves_without_duplicate_hotkeys(mac):
     assert len(pairs) == len(set(pairs)), "duplicate (keyCode, modifiers) in default keymap"
     actions = {e["action"] for e in resolved}
     assert {"jump_decision", "where_am_i", "faster", "slower",
-            "cycle_session_next", "cycle_session_prev",
+            "chooser_step_next", "chooser_step_prev",
             "nav_prev_response", "nav_next_response"} <= actions
 
 
@@ -322,3 +322,15 @@ def test_approve_deny_resolve_to_correct_keycodes(mac):
     assert deny_entry["modifiers"] == 4352  # ctrl | cmd
     assert json.loads(approve_entry["message"]) == {"type": "answer_permission", "behavior": "allow"}
     assert json.loads(deny_entry["message"]) == {"type": "answer_permission", "behavior": "deny"}
+
+
+def test_resolved_default_keymap_has_chooser_and_no_cycle(mac):
+    # Spec §10: the resolved keymap hotkeyd reads contains the chooser actions
+    # and none of the deleted cycle ones.
+    resolved = keymap.resolve_keymap(keymap.default_keymap())
+    actions = {e["action"] for e in resolved}
+    assert {"chooser_step_next", "chooser_step_prev"} <= actions
+    assert not any(a.startswith("cycle_session") for a in actions)
+    msgs = [json.loads(e["message"]) for e in resolved]
+    assert {"type": "chooser_step", "direction": "next"} in msgs
+    assert not any(m.get("type") == "cycle_session" for m in msgs)

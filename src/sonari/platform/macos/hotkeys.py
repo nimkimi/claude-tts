@@ -111,13 +111,14 @@ class MacHotkeyBackend:
     def extra_default_bindings(self) -> dict:
         # Sub-project B nav grammar (Ctrl+Cmd base chord):
         #  - between-response nav = ⌃⌘↑ / ⌃⌘↓ (frees the old ⌃⌘⇧←/→ chord),
-        #  - cycle sessions      = ⌃⌘Tab (next) / ⌃⌘⇧Tab (prev).
+        #  - the session chooser  = ⌃⌘Tab (step next) / ⌃⌘⇧Tab (step prev); digits/commit/
+        #    cancel are hotkeyd-FSM-internal, not keymap actions.
         base = list(self.default_mods())
         return {
             "nav_prev_response": {"key": "up", "mods": list(base)},
             "nav_next_response": {"key": "down", "mods": list(base)},
-            "cycle_session_next": {"key": "tab", "mods": list(base)},
-            "cycle_session_prev": {"key": "tab", "mods": base + ["shift"]},
+            "chooser_step_next": {"key": "tab", "mods": list(base)},
+            "chooser_step_prev": {"key": "tab", "mods": base + ["shift"]},
         }
 
     def reload(self, dispatch=None) -> None:

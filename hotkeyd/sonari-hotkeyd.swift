@@ -19,6 +19,7 @@ import Cocoa
 let kHotKeySignature: OSType = 0x534F4E49  // 'SONI'
 
 struct HotkeyEntry {
+    let action: String
     let keyCode: UInt32
     let modifiers: UInt32
     let message: String
@@ -46,12 +47,14 @@ func loadEntries() -> [HotkeyEntry] {
     }
     var entries: [HotkeyEntry] = []
     for obj in array {
-        guard let keyCode = obj["keyCode"] as? Int,
+        guard let action = obj["action"] as? String,
+              let keyCode = obj["keyCode"] as? Int,
               let modifiers = obj["modifiers"] as? Int,
               let message = obj["message"] as? String else {
             continue
         }
         entries.append(HotkeyEntry(
+            action: action,
             keyCode: UInt32(keyCode),
             modifiers: UInt32(modifiers),
             message: message))
@@ -151,6 +154,84 @@ func pollFocus() {
     }
 }
 
+// --- Chooser-mode FSM (spec §5). On a chooser_step_* fire: enter mode + send the
+// step. While in mode: ⌃⌘1-9 are dynamically registered (they must NEVER shadow
+// other apps otherwise); a ~40 ms poll of the CURRENT modifier state
+// (NSEvent.modifierFlags — permission-free: no event tap, no new TCC, verified
+// 2026-07-14) detects ⌃ or ⌘ release -> CHOOSER_COMMIT; a 30 s cap ->
+// CHOOSER_CANCEL. Shift is deliberately NOT monitored: ⇧ toggles step direction
+// and is released between steps — its release must never commit. Exit always
+// unregisters the digits and stops both timers. The 0.5 s focus poller below is
+// untouched. ---
+let chooserDigitKeyCodes: [Int: UInt32] = [   // kVK_ANSI_1...kVK_ANSI_9
+    1: 18, 2: 19, 3: 20, 4: 21, 5: 23, 6: 22, 7: 26, 8: 28, 9: 25,
+]
+let kChooserDigitIDBase: UInt32 = 1000        // id space above the resolved entries
+var chooserMode = false
+var chooserDigitRefs: [EventHotKeyRef] = []
+var chooserReleaseTimer: Timer? = nil
+var chooserCapTimer: Timer? = nil
+var chooserRequiredFlags: NSEvent.ModifierFlags = []
+
+func carbonToNSFlags(_ mask: UInt32) -> NSEvent.ModifierFlags {
+    var flags: NSEvent.ModifierFlags = []
+    if mask & 4096 != 0 { flags.insert(.control) }   // controlKey
+    if mask & 256 != 0 { flags.insert(.command) }    // cmdKey
+    if mask & 2048 != 0 { flags.insert(.option) }    // optionKey
+    // shiftKey (512) EXCLUDED: its release steps direction, never commits.
+    return flags
+}
+
+func chooserSend(_ obj: [String: Any]) {
+    if let line = jsonLine(obj) { sendMessage(line) }
+}
+
+func exitChooserMode() {
+    guard chooserMode else { return }
+    chooserMode = false
+    for ref in chooserDigitRefs { UnregisterEventHotKey(ref) }
+    chooserDigitRefs = []
+    chooserReleaseTimer?.invalidate()
+    chooserReleaseTimer = nil
+    chooserCapTimer?.invalidate()
+    chooserCapTimer = nil
+}
+
+func enterChooserMode(entryModifiers: UInt32) {
+    guard !chooserMode else { return }
+    chooserMode = true
+    chooserRequiredFlags = carbonToNSFlags(entryModifiers)
+    // Register the digits on the entry chord minus shift (⇧Tab also enters mode).
+    let digitMods = entryModifiers & ~UInt32(512)
+    for (digit, keyCode) in chooserDigitKeyCodes {
+        var ref: EventHotKeyRef?
+        let hotKeyID = EventHotKeyID(signature: kHotKeySignature,
+                                     id: kChooserDigitIDBase + UInt32(digit))
+        if RegisterEventHotKey(keyCode, digitMods, hotKeyID,
+                               GetApplicationEventTarget(), 0, &ref) == noErr,
+           let r = ref {
+            chooserDigitRefs.append(r)
+        }
+    }
+    // Release poll: commit the moment a required modifier is observed released.
+    let poll = Timer(timeInterval: 0.04, repeats: true) { _ in
+        let held = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if !chooserRequiredFlags.isSubset(of: held) {
+            chooserSend(["type": "chooser_commit"])
+            exitChooserMode()
+        }
+    }
+    RunLoop.main.add(poll, forMode: .common)
+    chooserReleaseTimer = poll
+    // Safety cap: a wedged chord cancels rather than committing somewhere random.
+    let cap = Timer(timeInterval: 30.0, repeats: false) { _ in
+        chooserSend(["type": "chooser_cancel"])
+        exitChooserMode()
+    }
+    RunLoop.main.add(cap, forMode: .common)
+    chooserCapTimer = cap
+}
+
 // Index entries by their hotkey id so the handler can look up the message.
 var entriesByID: [UInt32: HotkeyEntry] = [:]
 
@@ -166,8 +247,18 @@ let hotKeyHandler: EventHandlerUPP = { (_ nextHandler, _ theEvent, _ userData) -
         &hkID
     )
     if status == noErr && hkID.signature == kHotKeySignature {
-        if let entry = entriesByID[hkID.id] {
-            sendMessage(entry.message)
+        if hkID.id >= kChooserDigitIDBase {
+            // A chooser digit — registered only while in mode: teleport + exit (§5).
+            let digit = Int(hkID.id - kChooserDigitIDBase)
+            chooserSend(["type": "chooser_digit", "digit": digit])
+            exitChooserMode()
+        } else if let entry = entriesByID[hkID.id] {
+            if entry.action == "chooser_step_next" || entry.action == "chooser_step_prev" {
+                enterChooserMode(entryModifiers: entry.modifiers)
+                sendMessage(entry.message)    // the first step opens daemon-side
+            } else {
+                sendMessage(entry.message)
+            }
         }
     }
     return noErr

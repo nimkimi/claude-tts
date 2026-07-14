@@ -37,8 +37,8 @@ ACTION_MESSAGES = {
     "stop_all": {"type": "stop_all"},   # ⌃⌘M: stop every session
     "jump_waiting": {"type": "jump_waiting"},  # switch voice to a waiting background session
     "jump_decision": {"type": "jump_decision"},   # ⌃⌘D: jump to the question/decision
-    "cycle_session_next": {"type": "cycle_session", "direction": "next"},  # ⌃⌘Tab
-    "cycle_session_prev": {"type": "cycle_session", "direction": "prev"},  # ⌃⌘⇧Tab
+    "chooser_step_next": {"type": "chooser_step", "direction": "next"},   # ⌃⌘Tab (chord held)
+    "chooser_step_prev": {"type": "chooser_step", "direction": "prev"},   # ⌃⌘⇧Tab
     "where_am_i": {"type": "where_am_i"},          # ⌃⌘W: terse spoken status
     "approve": {"type": "answer_permission", "behavior": "allow"},     # ⌃⌘Return: approve permission prompt
     "deny": {"type": "answer_permission", "behavior": "deny"},         # ⌃⌘Escape: deny permission prompt
@@ -49,7 +49,7 @@ ACTION_MESSAGES = {
 # Shared action -> default key. The chord modifiers are platform-defaulted (macOS:
 # Ctrl+Cmd; Windows: Ctrl+Shift+Alt) via the active backend's default_mods().
 # nav_first/nav_last remain valid actions but ship UNBOUND so ⌃⌘↑/↓ can own
-# response-nav (extra_default_bindings). Per-platform extras (cycle, response-nav)
+# response-nav (extra_default_bindings). Per-platform extras (chooser, response-nav)
 # are NOT listed here — they live in extra_default_bindings().
 _DEFAULT_KEYS = {
     "nav_prev": "left", "nav_next": "right",
@@ -72,7 +72,7 @@ def default_keymap() -> dict:
 
     The `_DEFAULT_KEYS` actions all share the platform's `default_mods()` chord.
     `extra_default_bindings()` adds any per-platform binding that the uniform chord
-    can't express (on macOS's Ctrl+Cmd: response-nav = ↑/↓ and cycle = Tab/⇧Tab; on
+    can't express (on macOS's Ctrl+Cmd: response-nav = ↑/↓ and the chooser = Tab/⇧Tab; on
     Windows the base chord already spends Shift, so response-nav gets distinct keys)."""
     from sonari.platform import get_platform
     hk = get_platform().hotkey
