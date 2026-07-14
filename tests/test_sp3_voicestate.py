@@ -41,7 +41,7 @@ def test_where_am_i_flowing_wording():
     sessions.set_foreground("fg", cwd="/x/work")
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: work, Playing. 0 waiting, 0 muted."]
+    assert speaker.spoken == ["Voice: work 1, Playing. 0 waiting, 0 muted."]
 
 
 # --- state-aware None-branch: speaker() None but a workspace exists + flowing

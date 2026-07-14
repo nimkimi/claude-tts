@@ -99,6 +99,9 @@ class SpeechDaemon:
         # None. Mutated ONLY under self._lock (all chooser handlers run inside
         # _state.transaction()); the speak loop never reads it.
         self._chooser = None
+        # ⌃⌘W double-press detection (spec §7): the monotonic time of the last
+        # WHERE_AM_I, daemon-side. Written under the handler lock.
+        self._last_where_ts = None
         # Diagnostics: wall-clock start time and monotonic drain heartbeat.
         # _last_drain is None until the first item drains; updated as a bare
         # assignment in note_spoken (no lock — a float write is atomic in CPython,

@@ -10,6 +10,40 @@ from sonari.daemon.limits import RATE_MIN, RATE_MAX, MINQUEUE_MIN, MINQUEUE_MAX
 # The three known verbosity levels (must match on_cycle_verbosity order).
 VERBOSITY_LEVELS = ("everything", "medium", "quiet")
 
+# Injectable clock for the ⌃⌘W double-press window (tests patch control._now).
+_now = time.monotonic
+
+# A second WHERE_AM_I within this window escalates to the numbered roster (§7).
+W_DOUBLE_S = 2.0
+
+
+def _numbered(host, session):
+    """'{folder} {n}' — the spoken name+number for a session ('Unknown session'
+    fallback; the number is omitted only if the session is somehow unregistered)."""
+    folder = host.sessions.folder(session) or "Unknown session"
+    n = host.sessions.number(session)
+    return "{0} {1}".format(folder, n) if n is not None else folder
+
+
+def _roster_text(host):
+    """The numbered roster (double-⌃⌘W, §7): EVERY registered session in NUMBER
+    order, '{n}, {folder}[, muted][, {k} waiting].' — waiting is that stream's
+    queue length when > 0. Unfiltered, like the summary's counts (plan D4)."""
+    sessions = host.sessions
+    ids = sorted(sessions.session_ids(), key=lambda s: sessions.number(s) or 0)
+    parts = []
+    for s in ids:
+        seg = "{0}, {1}".format(sessions.number(s),
+                                sessions.folder(s) or "another session")
+        st = host._streams.get(s)
+        if st is not None and st.stopped:
+            seg += ", muted"
+        k = len(st.queue) if st is not None else 0
+        if k > 0:
+            seg += ", {0} waiting".format(k)
+        parts.append(seg + ".")
+    return " ".join(parts)
+
 
 def _clamp_int(raw, lo, hi):
     """Return int(raw) clamped to [lo, hi], or None if raw is not a valid int."""
@@ -150,6 +184,13 @@ def on_where_am_i(ctx, msg):
     # "Voice: {folder}, {state}.[ Keyboard: {folder}.] {N} waiting, {M} muted." —
     # the Keyboard clause only when the workspace resolves to a different session.
     host = ctx.host
+    # Double-press escalation (§7): a second W within the window speaks the
+    # numbered roster instead of repeating the summary. Detection is daemon-side
+    # (no new binding); the clock is module-level for test injection.
+    now = _now()
+    prev_ts = host._last_where_ts
+    host._last_where_ts = now
+    roster = prev_ts is not None and (now - prev_ts) <= W_DOUBLE_S
     # Report the SPEAKER's state (voice-state), not the workspace. §8 reconciliation:
     # ⌃⌘W answers "what am I hearing?" — in the keep-going era the speaker may differ
     # from the foreground, so the status cue is enqueued to the speaker's stream
@@ -174,7 +215,8 @@ def on_where_am_i(ctx, msg):
         playable = ws is not None and not (ws_st is not None and ws_st.stopped)
         if playable:
             vs = host.voice_state
-            cue = ("All stopped." if vs == "stopped-all"
+            cue = (_roster_text(host) if roster
+                   else "All stopped." if vs == "stopped-all"
                    else "On hold." if vs == "quiet-hold"
                    else "Nothing playing.")
             host._enqueue(ws, "prose", cue, False, mute_exempt=True, pause_exempt=True)
@@ -184,7 +226,7 @@ def on_where_am_i(ctx, msg):
     # Capture the in-flight item BEFORE cancel so we can resume it afterwards.
     cur = host._current_item
     entry = host._pending_heard.get(cur.id) if cur is not None else None
-    voice_folder = host.sessions.folder(fg) or "Unknown session"
+    voice_folder = _numbered(host, fg)
     st = host._streams.get(fg)
     vs = host.voice_state
     if vs == "stopped-all":
@@ -208,10 +250,13 @@ def on_where_am_i(ctx, msg):
     # than the voice — otherwise there is nothing to disambiguate.
     ws = host.sessions.workspace()
     diverged = ws is not None and ws != fg
-    kbd = (" Keyboard: {0}.".format(host.sessions.folder(ws) or "Unknown session")
+    kbd = (" Keyboard: {0}.".format(_numbered(host, ws))
            if diverged else "")
-    text = "Voice: {0}, {1}.{2} {3} waiting, {4} muted.".format(
-        voice_folder, state, kbd, waiting, muted)
+    if roster:
+        text = _roster_text(host)
+    else:
+        text = "Voice: {0}, {1}.{2} {3} waiting, {4} muted.".format(
+            voice_folder, state, kbd, waiting, muted)
     host.speaker.cancel()                          # barge-in: cut the current utterance
     # Resume-after-interjection: re-queue the interrupted item FIRST so it ends up
     # DEEPEST (the status cue is appendleft'd in front of it below).

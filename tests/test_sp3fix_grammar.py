@@ -17,7 +17,7 @@ def test_where_am_i_names_both_folders_and_counts_under_divergence():
     daemon._stream("D").stopped = True                  # a muted background
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: api, Playing. Keyboard: web. 1 waiting, 1 muted."]
+    assert speaker.spoken == ["Voice: api 2, Playing. Keyboard: web 1. 1 waiting, 1 muted."]
 
 
 # --- no divergence -> NO Keyboard clause ---
@@ -26,7 +26,7 @@ def test_where_am_i_omits_keyboard_clause_when_not_diverged():
     sessions.set_foreground("fg", cwd="/x/work")        # voice == keyboard == fg
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: work, Playing. 0 waiting, 0 muted."]
+    assert speaker.spoken == ["Voice: work 1, Playing. 0 waiting, 0 muted."]
     assert not any(s and "Keyboard:" in s for s in speaker.spoken)
 
 
@@ -38,4 +38,4 @@ def test_where_am_i_muted_count_is_background_stopped_streams():
     daemon._stream("b2").stopped = True                 # two individually-muted backgrounds
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: work, Playing. 0 waiting, 2 muted."]
+    assert speaker.spoken == ["Voice: work 1, Playing. 0 waiting, 2 muted."]

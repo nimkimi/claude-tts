@@ -93,17 +93,21 @@ def test_session_start_enqueues_one_cue_when_not_installed(monkeypatch):
     daemon.handle_message(_ss("s1"))
     # SESSION_START sets s1 foreground; the cue lands in s1's own stream.
     q = stream_queue(daemon, "s1")
-    assert len(q) == 1
+    assert len(q) == 2                       # the registration announce + the guidance cue
+    first = q.pop_next()
+    assert first.text == "Another session, 1."   # announce leads (names the session)
     item = q.pop_next()
     assert item.kind == "prose"
     assert "slash sonari install" in item.text.lower()
 
 
-def test_session_start_silent_when_ok(monkeypatch):
+def test_session_start_announce_only_when_ok(monkeypatch):
     daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
     monkeypatch.setattr(lifecycle, "_setup_health", lambda v: ("ok", None))
     daemon.handle_message(_ss("s1"))
-    assert len(queue) == 0
+    q = stream_queue(daemon, "s1")
+    assert len(q) == 1                       # ONLY the announce; no guidance cue
+    assert q.pop_next().text == "Another session, 1."
 
 
 def test_session_start_cue_throttled_per_session(monkeypatch):
@@ -112,7 +116,7 @@ def test_session_start_cue_throttled_per_session(monkeypatch):
                         lambda v: ("not_installed", "RUN slash sonari install"))
     daemon.handle_message(_ss("s1"))
     daemon.handle_message(_ss("s1"))  # same session again
-    assert len(stream_queue(daemon, "s1")) == 1  # only ONE cue (in s1's stream)
+    assert len(stream_queue(daemon, "s1")) == 2  # 1 announce (first start only) + 1 cue; neither repeats
 
 
 def test_session_end_clears_throttle_so_cue_can_fire_again(monkeypatch):
@@ -120,12 +124,12 @@ def test_session_end_clears_throttle_so_cue_can_fire_again(monkeypatch):
     monkeypatch.setattr(lifecycle, "_setup_health",
                         lambda v: ("not_installed", "RUN slash sonari install"))
     daemon.handle_message(_ss("s1"))
-    assert len(stream_queue(daemon, "s1")) == 1
+    assert len(stream_queue(daemon, "s1")) == 2   # announce + guidance cue
     stream_queue(daemon, "s1").pop_next()
     daemon.handle_message(_se("s1"))     # drops s1's stream + throttle
     daemon.handle_message(_ss("s1"))  # new session lifecycle, same id
     # SESSION_END destroyed the old stream; the cue fires again into the fresh one.
-    assert len(stream_queue(daemon, "s1")) == 1
+    assert len(stream_queue(daemon, "s1")) == 2   # end cleared the stream; both fire again
 
 
 def test_setup_health_exception_never_breaks_session(monkeypatch):
