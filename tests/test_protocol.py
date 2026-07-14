@@ -82,6 +82,10 @@ def test_msgtype_has_every_constant_with_exact_values():
         "WHERE_AM_I": "where_am_i",
         "PERMISSION_REQUEST": "permission_request",
         "ANSWER_PERMISSION": "answer_permission",
+        "CHOOSER_STEP": "chooser_step",
+        "CHOOSER_DIGIT": "chooser_digit",
+        "CHOOSER_COMMIT": "chooser_commit",
+        "CHOOSER_CANCEL": "chooser_cancel",
     }
     for name, value in expected.items():
         assert hasattr(MsgType, name), f"MsgType missing {name}"
@@ -126,6 +130,10 @@ def test_msgtype_defines_no_extra_string_constants():
         "WHERE_AM_I": "where_am_i",
         "PERMISSION_REQUEST": "permission_request",
         "ANSWER_PERMISSION": "answer_permission",
+        "CHOOSER_STEP": "chooser_step",
+        "CHOOSER_DIGIT": "chooser_digit",
+        "CHOOSER_COMMIT": "chooser_commit",
+        "CHOOSER_CANCEL": "chooser_cancel",
     }
     assert actual == expected
 

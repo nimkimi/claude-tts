@@ -27,6 +27,7 @@ from sonari.daemon.features import playback  # noqa: F401
 from sonari.daemon.features import focus  # noqa: F401
 from sonari.daemon.features import prose  # noqa: F401
 from sonari.daemon.features import hotkeys  # noqa: F401
+from sonari.daemon.features import chooser  # noqa: F401
 
 
 def _stream_quiescent(st) -> bool:
@@ -94,6 +95,10 @@ class SpeechDaemon:
         # Mutated ONLY under self._lock (handlers); the Event is waited on ONLY outside
         # the lock (in _handle_message_guarded, after the transaction exits).
         self._pending_decisions: dict = {}
+        # The open session-chooser gesture (features/chooser.py ChooserState), or
+        # None. Mutated ONLY under self._lock (all chooser handlers run inside
+        # _state.transaction()); the speak loop never reads it.
+        self._chooser = None
         # Diagnostics: wall-clock start time and monotonic drain heartbeat.
         # _last_drain is None until the first item drains; updated as a bare
         # assignment in note_spoken (no lock — a float write is atomic in CPython,

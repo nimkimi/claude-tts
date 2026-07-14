@@ -38,6 +38,10 @@ class MsgType:
     WHERE_AM_I = "where_am_i"   # ⌃⌘W: terse SPOKEN status (barge-in + interjection-resume)
     PERMISSION_REQUEST = "permission_request"   # PermissionRequest hook: BLOCKING ask; daemon replies {"decision": ...}
     ANSWER_PERMISSION = "answer_permission"     # ⌃⌘⏎/⌃⌘⎋: answer the focused session's pending decision (msg["behavior"])
+    CHOOSER_STEP = "chooser_step"       # ⌃⌘Tab held: step the chooser (msg["direction"]); the first step opens
+    CHOOSER_DIGIT = "chooser_digit"     # ⌃⌘1-9 while held: instant commit to that session number (msg["digit"])
+    CHOOSER_COMMIT = "chooser_commit"   # chord released: land on the current candidate
+    CHOOSER_CANCEL = "chooser_cancel"   # 30 s cap / hotkeyd death: restore the capture, move nothing
 
 
 def encode(msg: dict) -> bytes:

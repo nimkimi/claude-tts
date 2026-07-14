@@ -96,7 +96,7 @@ def test_assert_complete_raises_on_missing_type():
 
 
 # ------------------------------------------------------------------ #
-# Task 3.5 pins — all 31 MsgType keys present + negative guard        #
+# Task 3.5 pins — all 35 MsgType keys present + negative guard        #
 # ------------------------------------------------------------------ #
 # NOTE: "pins" here = test fixtures pinned to the protocol, unrelated to the
 # (now-removed) pin_toggle feature.
@@ -105,7 +105,7 @@ def test_assert_complete_raises_on_missing_type():
 # by attribute name ensures the pin tracks protocol changes automatically.
 from sonari.protocol import MsgType as _MsgType
 
-ALL_31 = [
+ALL_TYPES = [
     _MsgType.PROSE, _MsgType.CHOICE, _MsgType.PLAN, _MsgType.PERMISSION,
     _MsgType.EARCON, _MsgType.FLUSH, _MsgType.TOOL,
     _MsgType.SESSION_START, _MsgType.SESSION_END, _MsgType.SET_FOREGROUND,
@@ -117,14 +117,16 @@ ALL_31 = [
     _MsgType.REREAD_OPTIONS, _MsgType.CYCLE_VERBOSITY, _MsgType.RELOAD_KEYMAP,
     _MsgType.OS_FOCUS, _MsgType.CYCLE_SESSION, _MsgType.WHERE_AM_I,
     _MsgType.PERMISSION_REQUEST, _MsgType.ANSWER_PERMISSION,
+    _MsgType.CHOOSER_STEP, _MsgType.CHOOSER_DIGIT,
+    _MsgType.CHOOSER_COMMIT, _MsgType.CHOOSER_CANCEL,
 ]
 
 
-def test_all_31_msgtypes_registered():
+def test_all_msgtypes_registered():
     """Every known MsgType must have a handler after the package is imported."""
     import sonari.daemon  # noqa: F401 — side-effect: registers all @handler thunks
     import sonari.daemon.registry as reg
-    missing = [t for t in ALL_31 if t not in reg.HANDLERS]
+    missing = [t for t in ALL_TYPES if t not in reg.HANDLERS]
     assert missing == [], "Missing handlers: {0}".format(missing)
 
 
@@ -152,7 +154,7 @@ def test_negative_assert_complete_names_missing_type():
     popped = reg.HANDLERS.pop("ping")
     try:
         with pytest.raises(AssertionError) as exc_info:
-            reg.assert_complete(ALL_31)
+            reg.assert_complete(ALL_TYPES)
         assert "ping" in str(exc_info.value)
     finally:
         reg.HANDLERS["ping"] = popped
