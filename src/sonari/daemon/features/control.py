@@ -10,39 +10,39 @@ from sonari.daemon.limits import RATE_MIN, RATE_MAX, MINQUEUE_MIN, MINQUEUE_MAX
 # The three known verbosity levels (must match on_cycle_verbosity order).
 VERBOSITY_LEVELS = ("everything", "medium", "quiet")
 
-# Injectable clock for the ⌃⌘W double-press window (tests patch control._now).
-_now = time.monotonic
-
-# A second WHERE_AM_I within this window escalates to the numbered roster (§7).
-W_DOUBLE_S = 2.0
-
 
 def _numbered(host, session):
-    """'{folder} {n}' — the spoken name+number for a session ('Unknown session'
-    fallback; the number is omitted only if the session is somehow unregistered)."""
-    folder = host.sessions.folder(session) or "Unknown session"
+    """'{folder} {n}' — the spoken name+number for a session ('another session'
+    fallback, §7; the number is omitted only if the session is somehow
+    unregistered)."""
+    folder = host.sessions.folder(session) or "another session"
     n = host.sessions.number(session)
     return "{0} {1}".format(folder, n) if n is not None else folder
 
 
-def _roster_text(host):
-    """The numbered roster (double-⌃⌘W, §7): EVERY registered session in NUMBER
-    order, '{n}, {folder}[, muted][, {k} waiting].' — waiting is that stream's
-    queue length when > 0. Unfiltered, like the summary's counts (plan D4)."""
+def _also_clause(host, exclude=()):
+    """The holistic ⌃⌘W 'Also:' map (§7): every registered session NOT in
+    *exclude*, in NUMBER order, entries '{n} {folder}[, muted][, {k} waiting]'
+    joined by '; ' — number-first, because the Also-list is the teleport
+    dial-pad. Returns ' Also: {entries}.' (leading space, appendable to the
+    lead sentence) or '' when no entries remain: the ABSENT landmark is the
+    "no other sessions" signal, the same trained pattern as the Keyboard
+    clause. Unfiltered by liveness, like the old counts (plan D4)."""
     sessions = host.sessions
-    ids = sorted(sessions.session_ids(), key=lambda s: sessions.number(s) or 0)
+    ids = sorted((s for s in sessions.session_ids() if s not in exclude),
+                 key=lambda s: sessions.number(s) or 0)
     parts = []
     for s in ids:
-        seg = "{0}, {1}".format(sessions.number(s),
-                                sessions.folder(s) or "another session")
+        seg = "{0} {1}".format(sessions.number(s),
+                               sessions.folder(s) or "another session")
         st = host._streams.get(s)
         if st is not None and st.stopped:
             seg += ", muted"
         k = len(st.queue) if st is not None else 0
         if k > 0:
             seg += ", {0} waiting".format(k)
-        parts.append(seg + ".")
-    return " ".join(parts)
+        parts.append(seg)
+    return " Also: {0}.".format("; ".join(parts)) if parts else ""
 
 
 def _clamp_int(raw, lo, hi):
@@ -179,18 +179,13 @@ def on_status(ctx, msg):
 
 @handler(MsgType.WHERE_AM_I)
 def on_where_am_i(ctx, msg):
-    # ⌃⌘W "where am I": a terse SPOKEN status (distinct from the CLI STATUS dict),
-    # barge-in + interjection-resume per §7. Plain speech end-to-end (SP3.1 W3):
-    # "Voice: {folder}, {state}.[ Keyboard: {folder}.] {N} waiting, {M} muted." —
-    # the Keyboard clause only when the workspace resolves to a different session.
+    # ⌃⌘W "where am I": ONE holistic SPOKEN readout (§7, amended 2026-07-14 —
+    # the double-press roster is deleted), barge-in + interjection-resume
+    # unchanged. Plain speech end-to-end (SP3.1 W3):
+    # "Voice: {folder} {n}, {state}.[ Keyboard: {folder} {n}.][ Also: {entries}.]"
+    # — the Keyboard clause only when the workspace resolves to a different
+    # session; the Also-map names every OTHER registered session.
     host = ctx.host
-    # Double-press escalation (§7): a second W within the window speaks the
-    # numbered roster instead of repeating the summary. Detection is daemon-side
-    # (no new binding); the clock is module-level for test injection.
-    now = _now()
-    prev_ts = host._last_where_ts
-    host._last_where_ts = now
-    roster = prev_ts is not None and (now - prev_ts) <= W_DOUBLE_S
     # Report the SPEAKER's state (voice-state), not the workspace. §8 reconciliation:
     # ⌃⌘W answers "what am I hearing?" — in the keep-going era the speaker may differ
     # from the foreground, so the status cue is enqueued to the speaker's stream
@@ -215,10 +210,11 @@ def on_where_am_i(ctx, msg):
         playable = ws is not None and not (ws_st is not None and ws_st.stopped)
         if playable:
             vs = host.voice_state
-            cue = (_roster_text(host) if roster
-                   else "All stopped." if vs == "stopped-all"
+            # State-cue lead + the FULL map (§7): with no voice session to
+            # anchor on, "Also:" covers ALL registered sessions, no exclusions.
+            cue = ("All stopped." if vs == "stopped-all"
                    else "On hold." if vs == "quiet-hold"
-                   else "Nothing playing.")
+                   else "Nothing playing.") + _also_clause(host)
             host._enqueue(ws, "prose", cue, False, mute_exempt=True, pause_exempt=True)
         else:
             host.speaker.earcon("error")
@@ -230,33 +226,22 @@ def on_where_am_i(ctx, msg):
     st = host._streams.get(fg)
     vs = host.voice_state
     if vs == "stopped-all":
-        state = "All stopped"
+        state = "all stopped"
     elif vs == "quiet-hold":
-        state = "On hold"
+        state = "on hold"
     else:
-        state = "Stopped" if (st is not None and st.stopped) else "Playing"
-    # One pass over the BACKGROUND streams (fg excluded, mirroring _waiting_target):
-    # waiting = live non-stopped backlog; muted = individually-stopped sessions. The
-    # muted count is independent of voice_state (per-stream st.stopped, not the enum).
-    waiting = muted = 0
-    for sess, s in host._streams.items():
-        if sess == fg:
-            continue
-        if s.stopped:
-            muted += 1
-        elif len(s.queue) > 0:
-            waiting += 1
+        state = "stopped" if (st is not None and st.stopped) else "playing"
     # Keyboard clause ONLY when the workspace (keyboard) resolves to a session other
     # than the voice — otherwise there is nothing to disambiguate.
     ws = host.sessions.workspace()
     diverged = ws is not None and ws != fg
     kbd = (" Keyboard: {0}.".format(_numbered(host, ws))
            if diverged else "")
-    if roster:
-        text = _roster_text(host)
-    else:
-        text = "Voice: {0}, {1}.{2} {3} waiting, {4} muted.".format(
-            voice_folder, state, kbd, waiting, muted)
+    # The Also-map excludes the voice session and, when diverged, the keyboard
+    # session — both are already named by their own clauses (§7).
+    exclude = (fg, ws) if diverged else (fg,)
+    text = "Voice: {0}, {1}.{2}{3}".format(
+        voice_folder, state, kbd, _also_clause(host, exclude))
     host.speaker.cancel()                          # barge-in: cut the current utterance
     # Resume-after-interjection: re-queue the interrupted item FIRST so it ends up
     # DEEPEST (the status cue is appendleft'd in front of it below).

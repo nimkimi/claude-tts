@@ -84,7 +84,7 @@ def test_where_am_i_no_spearcon_split_single_cue_on_hit():
     p = _hit(daemon, "work")                      # spearcon available, but ⌃⌘W no longer splits
     daemon.handle_message({"type": "where_am_i", "session": "fg"})
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: work 1, Playing. 0 waiting, 0 muted."]
+    assert speaker.spoken == ["Voice: work 1, playing."]
     assert p not in speaker.audio_paths           # the folder spearcon is NOT played for ⌃⌘W
 
 
@@ -93,7 +93,7 @@ def test_where_am_i_single_cue_on_miss():
     sessions.set_foreground("fg", cwd="/x/work")
     daemon.handle_message({"type": "where_am_i", "session": "fg"})
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: work 1, Playing. 0 waiting, 0 muted."]   # unchanged on miss
+    assert speaker.spoken == ["Voice: work 1, playing."]   # unchanged on miss
 
 
 def test_session_start_pregenerates_in_background():

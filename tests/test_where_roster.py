@@ -1,7 +1,9 @@
-"""Spec §6/§7: numbers in the ⌃⌘W clauses, the double-press roster (2.0 s,
-daemon-side, injectable clock), and the verbosity-gated registration announce."""
+"""Spec §6/§7 (amended 2026-07-14): the single-press holistic ⌃⌘W readout —
+"Voice: {folder} {n}, {state}.[ Keyboard: {folder} {n}.][ Also: {entries}.]" —
+and the verbosity-gated registration announce. The double-press roster is
+DELETED (owner amendment: one press announces everything)."""
 from sonari.protocol import MsgType
-from sonari.daemon.features import control, lifecycle
+from sonari.daemon.features import lifecycle
 from tests.daemon_helpers import make_daemon, stream_queue
 
 
@@ -10,73 +12,70 @@ def _msg(t, session, **kw):
     return {"v": PROTOCOL_VERSION, "type": t, "session": session, **kw}
 
 
-def _clock(monkeypatch, start=100.0):
-    t = {"v": start}
-    monkeypatch.setattr(control, "_now", lambda: t["v"])
-    return t
+# --- (a) the full merged string: divergence + a muted third + a waiting fourth ---
+def test_holistic_w_speaks_the_full_merged_string_under_divergence():
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.set_foreground("A", cwd="/x/web")          # keyboard, number 1
+    sessions.register("B", cwd="/x/api")                # number 2
+    sessions.set_speaker("B")                           # voice=B (api); kbd=A (web) -> diverged
+    sessions.register("C", cwd="/x/etl")                # number 3, muted
+    daemon._stream("C").stopped = True
+    sessions.register("D", cwd="/x/logs")               # number 4, 2 waiting
+    daemon._enqueue("D", "prose", "d1", False)
+    daemon._enqueue("D", "prose", "d2", False)
+    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
+    daemon._speak_loop_once()
+    assert speaker.spoken == [
+        "Voice: api 2, playing. Keyboard: web 1. Also: 3 etl, muted; 4 logs, 2 waiting."
+    ]
 
 
-# --- double-press detection: 1.9 s escalates, 2.1 s does not ---
-def test_double_press_within_2s_escalates_to_the_roster(monkeypatch):
-    t = _clock(monkeypatch)
+# --- (b) no other sessions -> NO "Also:" clause (the absence IS the signal) ---
+def test_no_other_sessions_omits_the_also_clause():
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
     sessions.set_foreground("A", cwd="/x/web")
-    sessions.register("B", cwd="/x/api")
+    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
+    daemon._speak_loop_once()
+    assert speaker.spoken == ["Voice: web 1, playing."]
+
+
+# --- (c) speaker None after stop_all -> state cue + the FULL map (no exclusions) ---
+def test_speaker_none_after_stop_all_reads_state_cue_plus_full_map():
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground=None)
+    sessions.focus("A", cwd="/x/web")                   # number 1; workspace=A, NO stream yet
+    sessions.register("B", cwd="/x/api")                # number 2
     daemon._enqueue("B", "prose", "b1", False)
-    daemon._enqueue("B", "prose", "b2", False)
-    daemon._stream("B").stopped = True                  # muted AND 2 waiting
+    sessions.set_speaker(None)                          # idle voice, workspace stays A
+    daemon.handle_message(_msg(MsgType.STOP_ALL, ""))   # speaker None -> no cue; B muted
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
-    daemon._speak_loop_once()
-    assert speaker.spoken[-1] == "Voice: web 1, Playing. 0 waiting, 1 muted."
-    t["v"] += 1.9
-    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
-    daemon._speak_loop_once()
-    assert speaker.spoken[-1] == "1, web. 2, api, muted, 2 waiting."
+    assert speaker.earcons == []                        # playable workspace: no error tone
+    items = list(stream_queue(daemon, "A")._items)
+    assert [it.text for it in items] == [
+        "All stopped. Also: 1 web; 2 api, muted, 1 waiting."
+    ]
+    assert items[0].mute_exempt and items[0].pause_exempt   # delivery flags unchanged
 
 
-def test_slow_second_press_repeats_the_summary(monkeypatch):
-    t = _clock(monkeypatch)
+# --- (d) the exclusion rule: the Keyboard-clause session does NOT reappear in Also ---
+def test_keyboard_session_does_not_reappear_in_the_also_map():
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.set_foreground("A", cwd="/x/web")          # kbd, number 1
+    sessions.register("B", cwd="/x/api")                # voice, number 2
+    sessions.set_speaker("B")
+    sessions.register("C", cwd="/x/etl")                # number 3 -> the ONLY Also entry
+    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
+    daemon._speak_loop_once()
+    assert speaker.spoken == ["Voice: api 2, playing. Keyboard: web 1. Also: 3 etl."]
+
+
+# --- (e) unknown folder -> "{n} another session" ---
+def test_unknown_folder_in_the_also_map_says_another_session():
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
     sessions.set_foreground("A", cwd="/x/web")
+    sessions.register("C")                              # no cwd -> unknown folder, number 2
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
     daemon._speak_loop_once()
-    t["v"] += 2.1
-    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
-    daemon._speak_loop_once()
-    assert speaker.spoken[-1] == "Voice: web 1, Playing. 0 waiting, 0 muted."
-
-
-def test_roster_lists_all_sessions_in_number_order(monkeypatch):
-    t = _clock(monkeypatch)
-    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
-    sessions.set_foreground("A", cwd="/x/web")
-    sessions.register("B", cwd="/x/api")
-    sessions.register("C")                              # unknown folder
-    daemon._enqueue("C", "prose", "c1", False)
-    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
-    daemon._speak_loop_once()
-    t["v"] += 0.5
-    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
-    daemon._speak_loop_once()
-    assert speaker.spoken[-1] == "1, web. 2, api. 3, another session, 1 waiting."
-
-
-def test_roster_delivery_barges_in_and_resumes_like_the_summary(monkeypatch):
-    from sonari.queue import SpeechItem
-    t = _clock(monkeypatch)
-    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
-    sessions.set_foreground("A", cwd="/x/web")
-    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
-    daemon._speak_loop_once()
-    daemon._current_item = SpeechItem(id=905, session="A", kind="prose",
-                                      text="interrupted", is_decision=False)
-    t["v"] += 1.0
-    cancels_before = speaker.cancels
-    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
-    assert speaker.cancels == cancels_before + 1        # barge-in
-    texts = [it.text for it in daemon._stream("A").queue._items]
-    assert texts[0] == "1, web."                        # roster first
-    assert texts[1] == "interrupted"                    # then the resume
+    assert speaker.spoken == ["Voice: web 1, playing. Also: 2 another session."]
 
 
 # --- the registration announce ---
