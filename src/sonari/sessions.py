@@ -137,6 +137,9 @@ class SessionManager:
             # it anymore (the OS never gives a node to two terminals): clear their
             # claim — a stale tty must never match os_focus or raise a foreign
             # window — and fail-close their liveness until they re-assert (W4).
+            # Accepted edge: two ALIVE sessions can briefly share one tty (a
+            # suspended `claude` plus a fresh one in the same window) — latest
+            # asserter wins and the loser self-heals on its own next prompt.
             for other, ident in self._identities.items():
                 if other != session and ident.tty == identity.tty:
                     self._identities[other] = Identity(
@@ -145,6 +148,12 @@ class SessionManager:
                         iterm_session_id=ident.iterm_session_id,
                     )
                     self._tty_evicted.add(other)
+                    if self._os_focused_session == other:
+                        # The pin recorded "this tty's window is frontmost"; the
+                        # tty just proved to be *session*'s terminal, so the pin
+                        # belongs to the new claimant (hotkeyd dedupes unchanged
+                        # focus signals, so nothing else would ever repair it).
+                        self._os_focused_session = session
             self._tty_evicted.discard(session)
         existing = self._identities.get(session)
         if existing is None:

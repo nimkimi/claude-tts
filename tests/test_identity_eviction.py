@@ -102,6 +102,32 @@ def test_os_focus_resolves_to_new_claimant(monkeypatch):
     assert m.focused_session() == "fresh"         # pre-fix: first-match returned "stale"
 
 
+# --- 6b. an os-focus pin made BEFORE the recycler registers transfers to it ---
+#         (hotkeyd's focus signal beats the SessionStart hook round-trip, and its
+#         dedupe won't re-send an unchanged tty — the pin must not stay on the ghost)
+def test_os_focus_pin_transfers_to_new_claimant_on_eviction(monkeypatch):
+    _liveness(monkeypatch, dead=set())
+    m = SessionManager()
+    m.register("stale"); _ident(m, "stale", "/dev/ttysT")
+    m.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttysT")
+    assert m.focused_session() == "stale"         # pinned before the new claimant exists
+    m.register("fresh"); _ident(m, "fresh", "/dev/ttysT")
+    # The pin meant "ttysT's window is frontmost"; ttysT just proved to be fresh's.
+    assert m.focused_session() == "fresh"
+    assert m.workspace() == "fresh"
+
+
+# --- 6d. a post-eviction focus signal cannot re-pin the ghost (its claim is gone) ---
+def test_os_focus_cannot_match_evicted_session(monkeypatch):
+    _liveness(monkeypatch, dead=set())
+    m = SessionManager()
+    m.set_foreground("home")
+    m.register("stale"); _ident(m, "stale", "/dev/ttysT")
+    m.register("fresh"); _ident(m, "fresh", "/dev/ttysT")
+    m.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttysT")
+    assert m.focused_session() == "fresh"         # only the new claimant can match
+
+
 # --- 7. the ring: a recycled node no longer REVIVES the phantom in ⌃⌘Tab ---
 def test_cycle_skips_evicted_phantom_after_recycle(monkeypatch):
     _liveness(monkeypatch, dead=set())            # node exists again (recycled)
