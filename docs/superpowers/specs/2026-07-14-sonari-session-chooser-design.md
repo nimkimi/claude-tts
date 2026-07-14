@@ -103,14 +103,31 @@ quiet). Numbers are NOT injected into content attribution prefixes or jump cues
 (noise). Numbers > 9 are spoken but unreachable by digit teleport (accepted
 edge; realistic fleet ≤ 5).
 
-## 7. ⌃⌘W double-press roster
+## 7. ⌃⌘W — one holistic readout (AMENDED 2026-07-14, owner: "double-press is
+overkill; announce everything on one press, holistic but not too long")
 
-A second `WHERE_AM_I` arriving within 2.0 s of the previous one escalates to the
-roster instead of repeating the summary: sessions in NUMBER order,
-"{number}, {folder}[, muted][, {k} waiting]." per session, waiting = that
-stream's queue length when > 0. Same delivery flags as the summary
-(speaker-stream, mute/pause-exempt, at_front, barge-in + resume). Detection is
-daemon-side — no new binding.
+A single `WHERE_AM_I` speaks everything; the double-press escalation is DELETED
+(dead code out: the 2.0 s window, its timestamp state, its tests). Grammar:
+
+    "Voice: {folder} {n}, {state}.[ Keyboard: {folder} {n}.][ Also: {entries}.]"
+
+- Lead: state ∈ playing | stopped | on hold | all stopped (lowercase). Keyboard
+  clause only when workspace() differs from the voice — unchanged rule.
+- "Also:" = every OTHER registered session (excluding the voice session and,
+  when diverged, the keyboard session), NUMBER order, entries
+  "{n} {folder}[, muted][, {k} waiting]" joined by "; ". Number-first — the
+  Also-list is the teleport dial-pad. OMITTED entirely when no others exist
+  (the absence of the landmark is the signal, same trained pattern as the
+  Keyboard clause). The anonymous "{N} waiting, {M} muted" counts are DELETED —
+  the map names them instead.
+- Speaker None keeps the state-cue lead ("Nothing playing." / "On hold." /
+  "All stopped.") followed by the full map ("Also:" over all registered
+  sessions). Folder unknown → "another session". Delivery flags unchanged
+  (capture-and-requeue, barge-in, mute/pause-exempt, at_front, speaker-stream
+  or playable-workspace fallback).
+
+Digits dial (owner, same session): teleport digits stay IN-HOLD ONLY for now —
+he tests the Tab-first gesture in day-to-day use; reopen on his verdict.
 
 ## 8. Recency (MRU)
 
