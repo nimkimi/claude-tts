@@ -149,8 +149,8 @@ chooser messages.
 
 Unit: numbering (lowest-free, stable, holes, >9), MRU update rules (incl. NOT on
 set_speaker), chooser open/step/wrap/digit/commit/cancel/stale, muted-commit
-keep-go parity, eviction+dead-tty filtering through the chooser, W double-press
-window (1.9 s yes / 2.1 s no), interrupted-item capture/resume, verbosity-gated
+keep-go parity, eviction+dead-tty filtering through the chooser, the single-press
+holistic W string (lead/keyboard/Also clauses + omission rules, §7 as amended), interrupted-item capture/resume, verbosity-gated
 announce. hotkeyd: builds via the existing swiftc path; resolved keymap contains
 the new actions and NOT the cycle ones. Live checklist for the owner's ear pass
 ships with the build report.

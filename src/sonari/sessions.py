@@ -54,7 +54,7 @@ class SessionManager:
         self._tty_evicted: "set[str]" = set()
         # Stable spoken session numbers (chooser spec §6): lowest free >= 1 at
         # registration, stable for the session's lifetime, freed on unregister.
-        # Spoken in chooser previews, the W roster, the ⌃⌘W clauses, and the
+        # Spoken in chooser previews, the W Also-map, the ⌃⌘W clauses, and the
         # registration announce. NEVER injected into content attribution
         # prefixes or jump cues (noise).
         self._numbers: "dict[str, int]" = {}
@@ -137,7 +137,7 @@ class SessionManager:
 
     def session_ids(self) -> "list[str]":
         """All registered session ids in insertion order — the roster (chooser snapshot /
-        W roster). Encapsulates the private _sessions dict so handlers don't poke it directly."""
+        W Also-map). Encapsulates the private _sessions dict so handlers don't poke it directly."""
         return list(self._sessions.keys())
 
     def is_foreground(self, session: str) -> bool:
