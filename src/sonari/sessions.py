@@ -45,6 +45,13 @@ class SessionManager:
         # will advance _speaker on its own, diverging from _foreground (= last-acted).
         self._os_focused_session: "str | None" = None    # session in the OS-focused terminal
         self._identities: "dict[str, Identity]" = {}
+        # Sessions whose tty claim was taken over by another session (the node was
+        # recycled by a NEW terminal — pty names reuse the lowest free number, so a
+        # long-lived roster WILL see this). Fail-CLOSED in is_live until the session
+        # re-asserts a tty itself (W4 re-captures on every prompt, so an alive session
+        # heals on its next submit; a dead one stays out of the ring instead of
+        # reviving as a phantom).
+        self._tty_evicted: "set[str]" = set()
 
     def _record(self, session: str, cwd) -> None:
         folder = _basename(cwd)
@@ -99,6 +106,7 @@ class SessionManager:
     def unregister(self, session: str) -> None:
         self._sessions.pop(session, None)
         self._identities.pop(session, None)
+        self._tty_evicted.discard(session)
         if self._foreground == session:
             self._foreground = None
         if self._speaker == session:
@@ -122,6 +130,22 @@ class SessionManager:
         and each non-empty field updates it. A real terminal switch (all fields
         non-empty) still fully updates; only empties are ignored. First set on an
         absent session stores it as-is."""
+        if identity.tty:
+            # Exclusive-tty invariant: a tty device node has exactly ONE live
+            # claimant. A non-empty capture is positive evidence this session owns
+            # the node NOW, so every other claimant's terminal provably is not on
+            # it anymore (the OS never gives a node to two terminals): clear their
+            # claim — a stale tty must never match os_focus or raise a foreign
+            # window — and fail-close their liveness until they re-assert (W4).
+            for other, ident in self._identities.items():
+                if other != session and ident.tty == identity.tty:
+                    self._identities[other] = Identity(
+                        term_program=ident.term_program,
+                        tty="",
+                        iterm_session_id=ident.iterm_session_id,
+                    )
+                    self._tty_evicted.add(other)
+            self._tty_evicted.discard(session)
         existing = self._identities.get(session)
         if existing is None:
             self._identities[session] = identity
@@ -139,6 +163,10 @@ class SessionManager:
         """True if *session*'s terminal is still open (its captured tty device node
         exists). Fail-open: an unknown identity or empty tty -> live (never hide a
         live session). Pure read over _identities; writes nothing."""
+        if session in self._tty_evicted:
+            # Positive steal evidence beats fail-open: its recorded terminal is
+            # someone else's now, and it has not re-asserted one of its own.
+            return False
         ident = self._identities.get(session)
         return ttyutil.tty_alive(ident.tty if ident is not None else "")
 
