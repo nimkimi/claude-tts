@@ -108,9 +108,9 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     # prefers s_bg over any other competing backlog.
     # STOP_ALL (T5) stops s_bg too, under voice_state=stopped-all, which gates
     # keep-going off outright. s_bg is NOT permanently stopped, though: post-T4 the
-    # un-stop path runs through the WORKSPACE, not the speaker. CYCLE_SESSION
+    # un-stop path runs through the WORKSPACE, not the speaker. a chooser commit (CHOOSER_STEP→CHOOSER_COMMIT)
     # (focus.py) still calls sessions.focus(target), which has no .stopped check, so a
-    # hammer thread's CYCLE_SESSION can still park _foreground (the workspace) on a
+    # hammer thread's a chooser commit (CHOOSER_STEP→CHOOSER_COMMIT) can still park _foreground (the workspace) on a
     # stopped s_bg -- but T4 immediately releases the SPEAKER off a stopped landing
     # (sessions.set_speaker(None)), so the voice itself is no longer parked there.
     # STOP_SESSION (T4, Fork 4 asymmetric) is what then acts on s_bg: it now targets
@@ -118,7 +118,7 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     # NOT "whichever stream is CURRENTLY speaker()" as pre-T4. So if s_bg is still the
     # workspace when a STOP_SESSION fires, it un-stops s_bg, calls
     # sessions.set_speaker(s_bg) (moving the voice onto it directly), and lifts
-    # voice_state to flowing. CYCLE_SESSION (T4) ALSO unconditionally sets
+    # voice_state to flowing. a chooser commit (CHOOSER_STEP→CHOOSER_COMMIT) (T4) ALSO unconditionally sets
     # voice_state="flowing" on every fire (not only muted-landings) -- a second,
     # independent lift path with no pre-T4 equivalent. Because a REAL keep-going fire
     # additionally needs the scan to run with the CURRENT speaker idle/non-stopped
@@ -138,7 +138,7 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     def _counting_set_speaker(s):
         # NOTE (T4): set_speaker() is no longer keep-going's exclusive caller --
         # on_stop_session's resume branch (Fork 4 asymmetric start) and
-        # on_cycle_session's muted-landing branch (focus.py) both call it now too.
+        # the chooser commit (features/chooser.py)'s muted-landing branch (focus.py) both call it now too.
         # This counter is therefore a general "the voice moved via set_speaker()"
         # count, not a keep-going-only one; see the s_bg/hammer() comments below and
         # real_keep_going_fires below for the keep-going-exclusive proof.
@@ -208,11 +208,11 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
                     return
 
         def hammer(sess):
-            # CYCLE_SESSION calls sessions.focus() (resets BOTH pointers), then (T4) checks
+            # a chooser commit (CHOOSER_STEP→CHOOSER_COMMIT) calls sessions.focus() (resets BOTH pointers), then (T4) checks
             # the landed target: if its stream is stopped, sessions.set_speaker(None)
             # releases the SPEAKER again right away -- so focus() still parks _foreground
             # (the workspace) on a stopped stream (including s_bg), but no longer leaves
-            # the SPEAKER parked there. CYCLE_SESSION (T4) ALSO unconditionally sets
+            # the SPEAKER parked there. a chooser commit (CHOOSER_STEP→CHOOSER_COMMIT) (T4) ALSO unconditionally sets
             # voice_state="flowing" on every fire, regardless of the landed target's
             # stopped state -- a second, independent lift path alongside STOP_SESSION
             # below. will_attempt(None) is False (no identities registered), so
@@ -222,25 +222,26 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
             # stops EVERY stream -- including the passive s_bg -- under the one lock.
             # STOP_SESSION (T4, Fork 4 asymmetric) targets sessions.workspace() when that
             # stream is stopped, else sessions.speaker() -- NOT "whichever stream is
-            # CURRENTLY speaker()" as pre-T4. So when CYCLE_SESSION has just parked the
+            # CURRENTLY speaker()" as pre-T4. So when a chooser commit (CHOOSER_STEP→CHOOSER_COMMIT) has just parked the
             # workspace on a stopped stream (including s_bg), the next STOP_SESSION in the
             # rotation un-stops THAT stream (the workspace), calls sessions.set_speaker(fg)
             # to move the voice onto it, and lifts voice_state to flowing -- this, plus
-            # CYCLE_SESSION's own unconditional lift, are the two ops in this rotation
+            # a chooser commit (CHOOSER_STEP→CHOOSER_COMMIT)'s own unconditional lift, are the two ops in this rotation
             # that can lift stopped-all back to flowing. JUMP_WAITING still can't
             # (_waiting_target skips every stopped stream, so under stopped-all it always
             # finds no target and takes the no-lift "nothing waiting" branch -- it lifts
             # quiet-hold only, where the speaker's stream alone is held). So flowing
-            # windows recur via STOP_SESSION-start and/or CYCLE_SESSION, and keep-going
+            # windows recur via STOP_SESSION-start and/or a chooser commit (CHOOSER_STEP→CHOOSER_COMMIT), and keep-going
             # still fires -- proven by real_keep_going_fires below (NOT the
             # keep_going_fires[0] counter, which T4 also feeds from on_stop_session's
-            # resume-branch set_speaker(fg) and on_cycle_session's muted-landing
+            # resume-branch set_speaker(fg) and the chooser commit (features/chooser.py)'s muted-landing
             # set_speaker(None), so it no longer isolates keep-going alone -- see the
             # counter's own comment). on_stop_all iterates _streams.values() under the
             # one lock, so the born-muted read and the enum write are lock-consistent with
             # the speak loop's gate read (no torn read; F3/F5).
             ops = [MsgType.STOP_SESSION, MsgType.FLUSH, MsgType.SET_FOREGROUND,
-                   MsgType.JUMP_WAITING, MsgType.CYCLE_SESSION, MsgType.STOP_ALL]
+                   MsgType.JUMP_WAITING, MsgType.CHOOSER_STEP, MsgType.CHOOSER_DIGIT,
+                   MsgType.CHOOSER_COMMIT, MsgType.CHOOSER_CANCEL, MsgType.STOP_ALL]
             n = 0
             while not stop.is_set():
                 try:
@@ -274,7 +275,7 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
         # The speak loop actually did work — not merely "didn't deadlock at the end".
         assert runner.calls > 0, "speak loop never spoke anything; the stress window was empty"
         # This counter is no longer keep-going-exclusive post-T4 (set_speaker() gained two
-        # more legitimate callers -- on_stop_session's resume branch and on_cycle_session's
+        # more legitimate callers -- on_stop_session's resume branch and the chooser commit (features/chooser.py)'s
         # muted-landing release; see the _counting_set_speaker and hammer() comments
         # above), so a non-zero count alone no longer PROVES the in-lock keep-going scan
         # ran under contention -- it can be satisfied entirely by the two new T4 callers.

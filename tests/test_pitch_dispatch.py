@@ -6,24 +6,26 @@ def _two(daemon, sessions):
     sessions.register("B", cwd="/x/bravo")
 
 
-def test_cycle_next_does_not_chirp():
+def test_chooser_step_does_not_chirp():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="A")
     _two(daemon, sessions); sessions.set_foreground("A")
-    daemon.handle_message({"type": "cycle_session", "direction": "next"})
+    daemon.handle_message({"type": "chooser_step", "direction": "next"})
+    daemon.handle_message({"type": "chooser_step", "direction": "prev"})
     assert speaker.pitches == []
 
 
-def test_cycle_prev_does_not_chirp():
+def test_chooser_commit_does_not_chirp():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="A")
     _two(daemon, sessions); sessions.set_foreground("A")
-    daemon.handle_message({"type": "cycle_session", "direction": "prev"})
+    daemon.handle_message({"type": "chooser_step", "direction": "next"})
+    daemon.handle_message({"type": "chooser_commit"})
     assert speaker.pitches == []
 
 
-def test_cycle_under_two_sessions_does_not_chirp():
+def test_chooser_error_paths_do_not_chirp():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="A")
-    daemon.handle_message({"type": "cycle_session", "direction": "next"})
-    assert speaker.pitches == []          # error case: no directional cue
+    daemon.handle_message({"type": "chooser_digit", "digit": 9})   # unknown number
+    assert speaker.pitches == []          # error case: earcon, never a directional cue
 
 
 def _seed(daemon, s="fg"):

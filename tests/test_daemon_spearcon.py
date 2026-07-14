@@ -8,28 +8,30 @@ def _hit(daemon, folder, path="/cache/sp.aiff"):
     return path
 
 
-def test_cycle_uses_spearcon_audio_path_on_hit():
+def test_chooser_commit_uses_spearcon_audio_path_on_hit():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="A")
     sessions.register("A", cwd="/x/alpha"); sessions.register("B", cwd="/x/bravo")
     sessions.set_foreground("A")
     p = _hit(daemon, "bravo")
-    daemon.handle_message({"type": "cycle_session", "direction": "next"})
+    daemon.handle_message({"type": "chooser_step", "direction": "next"})
+    daemon.handle_message({"type": "chooser_commit"})
     item = daemon._stream("B").queue._items[0]
-    assert item.audio_path == p
+    assert item.audio_path == p                       # the LANDING cue is spearcon-capable
     assert item.names_session and item.mute_exempt
     daemon._speak_loop_once()
     assert speaker.audio_paths == [p]                 # afplayed, not spoken
 
 
-def test_cycle_falls_back_to_speech_on_miss():
+def test_chooser_commit_falls_back_to_speech_on_miss():
     daemon, q, speaker, sessions, _ = make_daemon(foreground="A")
     sessions.register("A", cwd="/x/alpha"); sessions.register("B", cwd="/x/bravo")
     sessions.set_foreground("A")
-    daemon.handle_message({"type": "cycle_session", "direction": "next"})
+    daemon.handle_message({"type": "chooser_step", "direction": "next"})
+    daemon.handle_message({"type": "chooser_commit"})
     item = daemon._stream("B").queue._items[0]
     assert item.audio_path is None
     daemon._speak_loop_once()
-    assert speaker.spoken == ["bravo."]               # unchanged spoken cue
+    assert speaker.spoken == ["bravo."]               # unchanged spoken landing cue
     assert "bravo" in daemon._spearcons.generated     # kicked background gen
 
 

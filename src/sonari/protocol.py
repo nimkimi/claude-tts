@@ -34,7 +34,6 @@ class MsgType:
     CYCLE_VERBOSITY = "cycle_verbosity"
     RELOAD_KEYMAP = "reload_keymap"   # re-read keymap.json + re-register hotkeys
     OS_FOCUS = "os_focus"   # focus-watcher: which terminal (tty / iterm id) has OS keyboard focus
-    CYCLE_SESSION = "cycle_session"   # ⌃⌘Tab/⌃⌘⇧Tab: cycle the voice through the roster (msg["direction"])
     WHERE_AM_I = "where_am_i"   # ⌃⌘W: terse SPOKEN status (barge-in + interjection-resume)
     PERMISSION_REQUEST = "permission_request"   # PermissionRequest hook: BLOCKING ask; daemon replies {"decision": ...}
     ANSWER_PERMISSION = "answer_permission"     # ⌃⌘⏎/⌃⌘⎋: answer the focused session's pending decision (msg["behavior"])

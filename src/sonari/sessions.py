@@ -136,8 +136,8 @@ class SessionManager:
         return self.focused_session() or self._foreground
 
     def session_ids(self) -> "list[str]":
-        """All registered session ids in insertion order — the cycle roster (⌃⌘Tab).
-        Encapsulates the private _sessions dict so handlers don't poke it directly."""
+        """All registered session ids in insertion order — the roster (chooser snapshot /
+        W roster). Encapsulates the private _sessions dict so handlers don't poke it directly."""
         return list(self._sessions.keys())
 
     def is_foreground(self, session: str) -> bool:

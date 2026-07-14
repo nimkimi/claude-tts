@@ -145,15 +145,16 @@ def test_os_focus_iterm_guid_cannot_repin_evicted_session(monkeypatch):
     assert m.focused_session() == "fresh"         # first-match must skip the evictee
 
 
-# --- 7. the ring: a recycled node no longer REVIVES the phantom in ⌃⌘Tab ---
-def test_cycle_skips_evicted_phantom_after_recycle(monkeypatch):
+# --- 7. the chooser: a recycled node no longer REVIVES the phantom in ⌃⌘Tab ---
+def test_chooser_skips_evicted_phantom_after_recycle(monkeypatch):
     _liveness(monkeypatch, dead=set())            # node exists again (recycled)
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     _ident(sessions, "A", "/dev/ttysA")
     sessions.register("stale", cwd="/x/stale"); _ident(sessions, "stale", "/dev/ttysT")
     sessions.register("fresh", cwd="/x/fresh"); _ident(sessions, "fresh", "/dev/ttysT")
-    daemon.handle_message(_msg(MsgType.CYCLE_SESSION, "", direction="next"))
-    # roster [A, fresh] (stale evicted); from A -> fresh. Pre-fix it landed on stale.
+    daemon.handle_message(_msg(MsgType.CHOOSER_STEP, "", direction="next"))
+    daemon.handle_message(_msg(MsgType.CHOOSER_COMMIT, ""))
+    # candidates [A, fresh] (stale evicted); step -> fresh. Pre-fix it landed on stale.
     assert sessions.speaker() == "fresh"
 
 

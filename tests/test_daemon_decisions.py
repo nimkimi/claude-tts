@@ -249,7 +249,7 @@ def test_answer_targets_workspace():
 
 def test_jump_decision_raises_target_window():
     # ⌃⌘D must raise the target terminal window (R5/R9 — C2 fix), mirroring
-    # the same raise machinery on_cycle_session and on_jump_waiting use.
+    # the same raise machinery on_jump_waiting and the chooser commit use.
     # B is the workspace (OS-focused) and owns the pending decision; we expect
     # the raise service to fire exactly once, targeting B's identity.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")

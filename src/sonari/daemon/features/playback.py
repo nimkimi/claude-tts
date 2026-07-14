@@ -32,8 +32,8 @@ def on_skip(ctx, msg):
 def on_stop_session(ctx, msg):
     # ⌃⌘S per-session stop/start. Fork 4 = ASYMMETRIC target: if the session you
     # NAVIGATED TO (workspace) is stopped, START it (R7 "start the session you navigated
-    # to"); otherwise STOP the speaker (R7 "Stop-the-speaker"). Without this, cycle-onto-
-    # muted leaves workspace=muted, speaker=active, and a speaker-target ⌃⌘S would STOP
+    # to"); otherwise STOP the speaker (R7 "Stop-the-speaker"). Without this, a chooser
+    # commit onto a mute leaves workspace=muted, speaker=active, and a speaker-target ⌃⌘S would STOP
     # the active speaker instead of starting the mute -> the mute is keyboard-unstartable.
     sessions = ctx.host.sessions
     ws = sessions.workspace()
@@ -121,8 +121,8 @@ def on_jump_decision(ctx, msg):
                           audio_path=ctx.host._spearcon_path(folder),
                           mute_exempt=True, at_front=True, names_session=True)
     # Raise the target window (R5/R9 — C2 fix): ⌃⌘D is a deliberate workspace
-    # action, so the terminal follows the jump, mirroring on_cycle_session and
-    # on_jump_waiting. bump_generation() runs on EVERY invocation (outside the
+    # action, so the terminal follows the jump, mirroring on_jump_waiting and the
+    # chooser commit. bump_generation() runs on EVERY invocation (outside the
     # guard) so a non-raising jump still supersedes any prior in-flight raise.
     identity = sessions.identity(target)
     will_raise = ctx.host._raise().will_attempt(identity)
