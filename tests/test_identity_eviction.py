@@ -128,6 +128,23 @@ def test_os_focus_cannot_match_evicted_session(monkeypatch):
     assert m.focused_session() == "fresh"         # only the new claimant can match
 
 
+# --- 6e. the iTerm GUID axis: an evicted session must not win the pin either ---
+#         (same-pane succession: a killed claude + a fresh one in one iTerm tab share
+#         GUID and tty; eviction clears the tty but PRESERVES the GUID, and the loser's
+#         empty tty means later re-captures skip the eviction loop — no self-heal)
+def test_os_focus_iterm_guid_cannot_repin_evicted_session(monkeypatch):
+    _liveness(monkeypatch, dead=set())
+    m = SessionManager()
+    m.register("stale")
+    m.set_identity("stale", Identity(term_program="iTerm.app", tty="/dev/ttysT",
+                                     iterm_session_id="w0t0p0:GUID-G"))
+    m.register("fresh")
+    m.set_identity("fresh", Identity(term_program="iTerm.app", tty="/dev/ttysT",
+                                     iterm_session_id="w0t0p0:GUID-G"))
+    m.set_os_focus(term_program="iTerm.app", iterm_session_id="w0t0p0:GUID-G")
+    assert m.focused_session() == "fresh"         # first-match must skip the evictee
+
+
 # --- 7. the ring: a recycled node no longer REVIVES the phantom in ⌃⌘Tab ---
 def test_cycle_skips_evicted_phantom_after_recycle(monkeypatch):
     _liveness(monkeypatch, dead=set())            # node exists again (recycled)

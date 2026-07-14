@@ -195,15 +195,23 @@ class SessionManager:
         if not focused:
             self._os_focused_session = None
             return
+        # An evicted session must not win the pin on ANY axis: eviction clears the
+        # tty (so the tty branch can't match it) but PRESERVES iterm_session_id, and
+        # same-pane succession leaves the ghost sharing the survivor's GUID with no
+        # self-heal (its empty tty means later captures skip the eviction loop).
         match = None
         if term_program == "Apple_Terminal" and tty:
             for sess, ident in self._identities.items():
+                if sess in self._tty_evicted:
+                    continue
                 if ident.tty and ident.tty == tty:
                     match = sess
                     break
         elif term_program == "iTerm.app" and iterm_session_id:
             want = _bare_iterm_guid(iterm_session_id)
             for sess, ident in self._identities.items():
+                if sess in self._tty_evicted:
+                    continue
                 if ident.iterm_session_id and _bare_iterm_guid(ident.iterm_session_id) == want:
                     match = sess
                     break
