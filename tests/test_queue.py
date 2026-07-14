@@ -190,3 +190,19 @@ def test_oldest_id_does_not_pop():
     q.oldest_id()
     assert len(q) == 1                 # non-destructive
 
+
+def test_remove_by_id_removes_and_returns_the_item():
+    q = SpeechQueue()
+    q.enqueue(_item(7))
+    q.enqueue(_item(9))
+    got = q.remove_by_id(7)
+    assert got is not None and got.id == 7
+    assert [it.id for it in q._items] == [9]
+
+
+def test_remove_by_id_unknown_returns_none_and_leaves_queue():
+    q = SpeechQueue()
+    q.enqueue(_item(7))
+    assert q.remove_by_id(42) is None
+    assert len(q) == 1
+

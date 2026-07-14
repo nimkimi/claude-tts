@@ -94,3 +94,13 @@ class SpeechQueue:
         the smallest surviving id across all queues is the oldest unheard output (the id
         counter is daemon-global and monotonic)."""
         return self._items[0].id if self._items else None
+
+    def remove_by_id(self, item_id: int) -> "SpeechItem | None":
+        """Remove and return the queued item with id *item_id*, else None. The
+        chooser swaps out its still-queued previous preview before enqueuing the
+        next one (each preview replaces + barge-ins the last)."""
+        for i, item in enumerate(self._items):
+            if item.id == item_id:
+                del self._items[i]
+                return item
+        return None

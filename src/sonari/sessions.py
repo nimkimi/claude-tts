@@ -52,6 +52,18 @@ class SessionManager:
         # heals on its next submit; a dead one stays out of the ring instead of
         # reviving as a phantom).
         self._tty_evicted: "set[str]" = set()
+        # Stable spoken session numbers (chooser spec §6): lowest free >= 1 at
+        # registration, stable for the session's lifetime, freed on unregister.
+        # Spoken in chooser previews, the W roster, the ⌃⌘W clauses, and the
+        # registration announce. NEVER injected into content attribution
+        # prefixes or jump cues (noise).
+        self._numbers: "dict[str, int]" = {}
+        # Recency (spec §8), most-recent first. Updated by DELIBERATE acts only:
+        # set_foreground()/focus() (submit, jump, chooser commit) and a MATCHED
+        # set_os_focus (a click counts as "you were there"). set_speaker() NEVER
+        # touches it — keep-going voice drift is not presence (R12 discipline).
+        # In-memory, like the roster.
+        self._mru: "list[str]" = []
 
     def _record(self, session: str, cwd) -> None:
         folder = _basename(cwd)
@@ -59,11 +71,43 @@ class SessionManager:
             self._sessions[session] = folder
         elif folder:                            # update only with a non-empty name
             self._sessions[session] = folder
+        self._assign_number(session)
+
+    def _assign_number(self, session: str) -> None:
+        """Assign the lowest free number >= 1 once; stable until unregister."""
+        if session in self._numbers:
+            return
+        used = set(self._numbers.values())
+        n = 1
+        while n in used:
+            n += 1
+        self._numbers[session] = n
+
+    def _touch_mru(self, session: str) -> None:
+        if session in self._mru:
+            self._mru.remove(session)
+        self._mru.insert(0, session)
+
+    def number(self, session: str) -> "int | None":
+        """The stable spoken number for *session*, or None if unregistered."""
+        return self._numbers.get(session)
+
+    def session_for_number(self, n) -> "str | None":
+        """The registered session holding number *n*, or None (digit teleport)."""
+        for s, num in self._numbers.items():
+            if num == n:
+                return s
+        return None
+
+    def mru(self) -> "list[str]":
+        """Deliberately-visited sessions, most-recent first (a copy)."""
+        return list(self._mru)
 
     def set_foreground(self, session: str, cwd=None) -> None:
         self._record(session, cwd)
         self._foreground = session
         self._speaker = session
+        self._touch_mru(session)
 
     def set_speaker(self, session: str) -> None:
         """Advance the VOICE owner WITHOUT moving the workspace. Keep-going calls this
@@ -107,6 +151,9 @@ class SessionManager:
         self._sessions.pop(session, None)
         self._identities.pop(session, None)
         self._tty_evicted.discard(session)
+        self._numbers.pop(session, None)
+        if session in self._mru:
+            self._mru.remove(session)
         if self._foreground == session:
             self._foreground = None
         if self._speaker == session:
@@ -185,6 +232,7 @@ class SessionManager:
         self._record(session, cwd)
         self._foreground = session
         self._speaker = session
+        self._touch_mru(session)
 
     def set_os_focus(self, term_program: str = "", tty: str = "",
                      iterm_session_id: str = "", focused: bool = True) -> None:
@@ -216,6 +264,9 @@ class SessionManager:
                     match = sess
                     break
         self._os_focused_session = match
+        if match is not None:
+            # A resolved click IS presence (spec §8): the user was demonstrably there.
+            self._touch_mru(match)
 
     def focused_session(self) -> "str | None":
         """The session whose terminal has OS keyboard focus, iff still registered.
