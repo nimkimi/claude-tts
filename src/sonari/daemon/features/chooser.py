@@ -124,12 +124,17 @@ def _restore_and_clear(host):
 
 def _preview_text(host, st):
     """'{number}, {folder}[, muted][, current].' — '{number}, another session'
-    when the folder is unknown. Plain speech in v1 (no spearcon — plan D3)."""
+    when the folder is unknown. Plain speech in v1 (no spearcon — plan D3).
+
+    A candidate that died mid-browse (unregistered after the OPEN snapshot,
+    branch-review MINOR A fix) has no number() anymore — speak the
+    folder-fallback WITHOUT a number prefix rather than the literal 'None'."""
     target = st.candidates[st.index]
     sessions = host.sessions
     folder = sessions.folder(target)
-    text = "{0}, {1}".format(sessions.number(target),
-                             folder if folder else "another session")
+    number = sessions.number(target)
+    label = folder if folder else "another session"
+    text = "{0}, {1}".format(number, label) if number is not None else label
     stream = host._streams.get(target)
     if stream is not None and stream.stopped:
         text += ", muted"
@@ -164,14 +169,27 @@ def _commit(host, st, target):
     """Land. target == origin: the silent no-op (no cut, no cue, capture resumes).
     Otherwise: EXACTLY the ratified cycle-landing semantics, copied from the old
     on_cycle_session (focus.py:137-159 at 3430cbf) — focus(), flowing, cut,
-    muted-landing keep-go release, names_session cue (spearcon-capable), raise."""
+    muted-landing keep-go release, names_session cue (spearcon-capable), raise.
+
+    Guard (branch-review fix): the snapshot is is_live-filtered ONLY at OPEN, so
+    a candidate can die WHILE it is being browsed, before this commit fires.
+    Landing there must never reach sessions.focus() — its _record() would
+    silently RE-REGISTER a dead session id (a phantom in the roster, the
+    workspace pinned to a closed terminal). Both death shapes are checked:
+    SESSION_END unregisters (out of session_ids(), but is_live() fail-opens on
+    the now-missing identity); a dead tty stays registered (is_live() catches
+    it via ttyutil.tty_alive) — neither check alone covers both."""
     if target == st.origin:
         _restore_and_clear(host)
         return
+    sessions = host.sessions
+    if target not in sessions.session_ids() or not sessions.is_live(target):
+        host.speaker.earcon("error")   # audible failed landing (eyes-free), never silent
+        _restore_and_clear(host)       # resume the captured item, move nothing
+        return None
     _remove_preview(host, st)
     st.captured = None                     # cycle-cut parity: no resume on a real landing
     host._chooser = None
-    sessions = host.sessions
     sessions.focus(target)                 # workspace + voice -> target (R12: the one writer)
     host.speaker.cancel()
     host.voice_state = "flowing"           # a commit is a deliberate re-engage
@@ -217,9 +235,13 @@ def on_chooser_digit(ctx, msg):
     host = ctx.host
     st = _state_or_none(host)
     if st is None:
-        st = _open(host)                   # absolute teleport needs no prior step
-        if st is None:
-            return None
+        # No open gesture: hotkeyd only ever registers ⌃⌘1-9 WHILE the chord is
+        # held (spec §5), so a digit with nothing open is a race/stray message
+        # (its own hotkeyd socket, arriving after CHOOSER_COMMIT already landed
+        # on the modifier-release socket) -- never a fresh gesture to honor.
+        # Opening here would teleport the workspace on a message the user never
+        # intended (branch-review fix). No-op: no earcon, no state, no speech.
+        return None
     try:
         digit = int(msg.get("digit"))
     except (TypeError, ValueError):

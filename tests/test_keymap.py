@@ -203,7 +203,7 @@ def test_write_resolved_emits_array_of_bindings(monkeypatch, tmp_path):
     keymap.write_resolved()
     data = json.loads((tmp_path / "hotkeyd.resolved.json").read_text(encoding="utf-8"))
     # len must match the platform's full default_keymap (not just _DEFAULT_KEYS) because
-    # extra_default_bindings() adds the macOS response-nav (⌃⌘↑/↓) and cycle (⌃⌘Tab/⌃⌘⇧Tab) bindings.
+    # extra_default_bindings() adds the macOS response-nav (⌃⌘↑/↓) and chooser (⌃⌘Tab/⌃⌘⇧Tab) bindings.
     assert isinstance(data, list) and len(data) == len(keymap.default_keymap())
     for entry in data:
         assert isinstance(entry["keyCode"], int)
@@ -259,7 +259,7 @@ def test_unbind_response_nav_on_macos_writes_unbound_override(mac, monkeypatch, 
     assert user["nav_prev_response"]["key"] is None
 
 
-# --- Sub-project B: cockpit grammar (cycle/where-am-i/jump/rate) -------------
+# --- Sub-project B: cockpit grammar (chooser/where-am-i/jump/rate) ----------
 
 def test_response_nav_default_is_ctrl_cmd_arrows_no_shift(mac):
     d = keymap.default_keymap()

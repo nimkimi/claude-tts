@@ -225,6 +225,69 @@ def test_commit_updates_mru():
     assert sessions.mru()[0] == "B"                # focus() touched recency
 
 
+# --- commit onto a candidate that died mid-browse (branch-review fix) ---
+# The snapshot is is_live-filtered only at OPEN; a candidate can die WHILE the
+# user is still browsing it (before release/digit-commit). Landing there must
+# never call sessions.focus() -- focus()'s _record() silently RE-REGISTERS a
+# dead session id (a phantom in the roster, the workspace pinned to a closed
+# terminal, the captured item dropped). Two death shapes, both guarded:
+# SESSION_END unregisters (out of session_ids(), but is_live() fail-opens on
+# the now-missing identity); a dead tty stays registered (still in
+# session_ids()) but is_live() catches it via ttyutil.tty_alive.
+def test_commit_onto_session_end_mid_browse_errors_and_does_not_reregister():
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.register("A", cwd="/x/alpha")
+    sessions.register("B", cwd="/x/bravo")
+    daemon._current_item = SpeechItem(id=910, session="A", kind="prose",
+                                      text="mid sentence", is_decision=False)
+    _step(daemon)                                  # A(0) -> B(1): captures + cuts "mid sentence"
+    daemon.handle_message(_msg(MsgType.SESSION_END, "B"))   # B's terminal closes mid-browse
+    daemon.handle_message(_msg(MsgType.CHOOSER_COMMIT, ""))
+    assert speaker.earcons == ["error"]            # audible failed landing, never silent
+    assert sessions.foreground() == "A"            # workspace/foreground unchanged
+    assert "B" not in sessions.session_ids()       # NOT phantom-re-registered by focus()
+    assert daemon._chooser is None                 # chooser cleared
+    head = daemon._stream("A").queue._items[0]
+    assert head.text == "mid sentence"             # captured item resumed (re-enqueued)
+
+
+def test_commit_onto_dead_tty_mid_browse_errors_and_does_not_reregister(monkeypatch):
+    dead = set()
+    _liveness(monkeypatch, dead=dead)
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    _ident(sessions, "A", "/dev/ttysA")
+    sessions.register("B", cwd="/x/bravo"); _ident(sessions, "B", "/dev/ttysB")
+    daemon._current_item = SpeechItem(id=911, session="A", kind="prose",
+                                      text="mid sentence two", is_decision=False)
+    _step(daemon)                                  # A(0) -> B(1): live at open, captures + cuts
+    dead.add("/dev/ttysB")                          # B's terminal dies mid-browse (crash, not SESSION_END)
+    daemon.handle_message(_msg(MsgType.CHOOSER_COMMIT, ""))
+    assert speaker.earcons == ["error"]            # audible failed landing, never silent
+    assert sessions.foreground() == "A"            # workspace/foreground unchanged
+    assert "B" in sessions.session_ids()           # still registered (dead-tty != unregistered)
+    assert not sessions.is_live("B")               # ...but is_live() catches it
+    assert daemon._chooser is None                 # chooser cleared
+    head = daemon._stream("A").queue._items[0]
+    assert head.text == "mid sentence two"         # captured item resumed (re-enqueued)
+
+
+def test_preview_no_none_for_candidate_that_died_mid_browse():
+    # MINOR A: sessions.number() returns None post-unregister, so the naive
+    # "{0}, {1}".format(number, folder) speaks the literal word "None". Once a
+    # candidate dies mid-browse, stepping back onto it must speak the
+    # folder-fallback WITHOUT a number prefix, never "None, ...".
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.register("A", cwd="/x/alpha")
+    sessions.register("B", cwd="/x/bravo")
+    _step(daemon)                                  # A(0) -> B(1): preview "2, bravo."
+    daemon.handle_message(_msg(MsgType.SESSION_END, "B"))   # B dies mid-browse (unregistered)
+    _step(daemon, "prev")                           # -> A(0), preview "1, alpha, current."
+    _step(daemon)                                    # -> B(1) again: re-delivers for the dead candidate
+    daemon._speak_loop_once()
+    assert speaker.spoken[-1] == "another session."
+    assert "None" not in speaker.spoken[-1]
+
+
 # --- the no-op landing + capture/resume ---
 def test_commit_to_current_is_silent_noop_and_resumes_captured():
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
@@ -290,12 +353,21 @@ def test_digit_instant_commits_to_that_number():
     assert daemon._chooser is None
 
 
-def test_digit_without_prior_step_teleports_via_fresh_open():
+def test_digit_with_no_open_state_is_a_noop():
+    # Branch-review fix: a digit can only ever legitimately arrive while the
+    # chord is held (hotkeyd registers ⌃⌘1-9 ONLY during an open chooser mode,
+    # spec §5) -- CHOOSER_DIGIT with no host._chooser is therefore a RACE/STRAY
+    # message (e.g. arriving over hotkeyd's separate digit socket AFTER a
+    # CHOOSER_COMMIT already landed on the modifier-release socket). Reopening
+    # here would teleport the workspace on a message the user never intended
+    # as a fresh gesture. FIX: no-op -- no open, no earcon, nothing spoken.
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
     sessions.register("B", cwd="/x/bravo")
     daemon.handle_message(_msg(MsgType.CHOOSER_DIGIT, "", digit=2))
-    assert sessions.foreground() == "B"
-    assert daemon._chooser is None
+    assert sessions.foreground() == "A"            # unchanged -- no teleport
+    assert daemon._chooser is None                 # no state opened
+    assert speaker.spoken == []                    # nothing spoken
+    assert speaker.earcons == []                   # no earcon either
 
 
 def test_unknown_digit_errors_and_stays_open():

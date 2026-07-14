@@ -109,7 +109,7 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     # STOP_ALL (T5) stops s_bg too, under voice_state=stopped-all, which gates
     # keep-going off outright. s_bg is NOT permanently stopped, though: post-T4 the
     # un-stop path runs through the WORKSPACE, not the speaker. a chooser commit (CHOOSER_STEP→CHOOSER_COMMIT)
-    # (focus.py) still calls sessions.focus(target), which has no .stopped check, so a
+    # (features/chooser.py) still calls sessions.focus(target), which has no .stopped check, so a
     # hammer thread's a chooser commit (CHOOSER_STEP→CHOOSER_COMMIT) can still park _foreground (the workspace) on a
     # stopped s_bg -- but T4 immediately releases the SPEAKER off a stopped landing
     # (sessions.set_speaker(None)), so the voice itself is no longer parked there.
@@ -138,7 +138,7 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     def _counting_set_speaker(s):
         # NOTE (T4): set_speaker() is no longer keep-going's exclusive caller --
         # on_stop_session's resume branch (Fork 4 asymmetric start) and
-        # the chooser commit (features/chooser.py)'s muted-landing branch (focus.py) both call it now too.
+        # the chooser commit (features/chooser.py)'s muted-landing branch both call it now too.
         # This counter is therefore a general "the voice moved via set_speaker()"
         # count, not a keep-going-only one; see the s_bg/hammer() comments below and
         # real_keep_going_fires below for the keep-going-exclusive proof.
