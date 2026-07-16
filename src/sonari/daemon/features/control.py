@@ -41,6 +41,16 @@ def _also_clause(host, exclude=()):
         k = len(st.queue) if st is not None else 0
         if k > 0:
             seg += ", {0} waiting".format(k)
+        # W10: the recorded-but-not-queued unheard FLOOR. Queued items' history
+        # entries are ALSO unheard until spoken (host.py:309-320 flips heard on
+        # completion), so a raw len(unheard) double-counts every queued item —
+        # subtract k (approximation in the caller's favor: never overstates).
+        # unheard() is current-turn-bounded: the spoken count is a floor across
+        # a multi-turn pile (documented; frontier counts are SP5, NOT built).
+        # The word "unheard" is an OWNER GATE (his ear tunes it at review).
+        u = max(0, len(host.history.unheard(s)) - k)
+        if u > 0:
+            seg += ", {0} unheard".format(u)
         parts.append(seg)
     return " Also: {0}.".format("; ".join(parts)) if parts else ""
 

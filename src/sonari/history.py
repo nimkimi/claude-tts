@@ -150,9 +150,11 @@ class SessionHistory:
         """Not-yet-heard entries of the CURRENT turn only, oldest first.
 
         §7 (Stage 4): the transcript persists across turns, but `unheard` stays
-        bounded to the live turn. With catch_up/REPEAT retired it has no replay
-        consumer; spanning the whole transcript would be unbounded and meaningless.
-        Heard-marking still flips entries from the speak loop regardless of turn."""
+        bounded to the live turn. Its first production consumer is the ⌃⌘W
+        Also-map's ", {u} unheard" clause (W10), which reads it as a CURRENT-
+        TURN FLOOR — the turn-bounding is now load-bearing: the spoken count
+        may understate a multi-turn pile, never overstate it. Heard-marking
+        still flips entries from the speak loop regardless of turn."""
         cur_turn = self._turn_id.get(session, 0)
         return [e for e in self._entries.get(session, ())
                 if e.turn_id == cur_turn and not e.heard]
