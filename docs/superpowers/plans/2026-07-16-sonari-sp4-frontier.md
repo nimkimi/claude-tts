@@ -228,6 +228,24 @@ def test_mid_item_barge_in_leaves_frontier_unchanged():
     d._state._pending_heard[it.id] = e; d._current_item = it
     d.note_spoken(it, completed=False)        # R-8: mid-item cut, not full completion
     assert e.heard is False and st.frontier is None
+
+
+def test_note_spoken_advances_frontier_on_decision_readout_completion():
+    # A decision-kind readout (choice/plan/permission enqueue site, T2 step 5's
+    # forward=True) must advance the frontier the same as a prose readout — this
+    # was the untested write path the T2 arithmetic gap (+6 claimed / 5 shown)
+    # exposed. Mirrors test_note_spoken_advances_frontier_only_on_forward_completion
+    # but with a decision kind + is_decision=True, matching decisions.py's real
+    # _enqueue(session, "choice", text, True, entry=entry, forward=True) shape.
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    st = d._stream("s0")
+    e = d.history.record("s0", "choice", "pick one")
+    it = SpeechItem(id=1, session="s0", kind="choice", text="pick one",
+                    is_decision=True, forward=True)
+    d._state._pending_heard[it.id] = e; d._current_item = it
+    d.note_spoken(it, completed=True)
+    assert e.heard is True and st.frontier == (e.msg_id, e.seq)
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -547,8 +565,11 @@ git commit -m "feat(sp4): capture tool-use input summary to the transcript at ev
 
 Today `⌃⌘S`-start un-stops the session, makes it the speaker, and the speak loop then drains its whole pre-start queue in FIFO — a flood (a **direct queue-drain**, not keep-going). D2: start re-engages the voice and auto-flows only **post-start** output; the pre-start pile stays behind the frozen frontier for the SP5 catch-up key. **SP4 seam:** in `on_stop_session`'s resume branch, drop the pre-start **queue** (dropping its `_pending_heard` markers) — the pile persists in the `history` transcript behind the frontier (nothing advanced it), and the voice flows only on post-start output. **Decision handling:** the clear drops queued decision items too, but they persist in history and a live blocking permission stays answerable via `_pending_decisions` / `⌃⌘D` — the binding contract is only "frontier stays behind the pile, pile reachable by catch-up from history." The mechanism ruled out (do NOT inherit): "advance the frontier **past** the pile on start" — that would put the pile *below* the frontier and *out of* catch-up, silently dropping the backlog (contra R7). The D7 global mode-switch flood (leaving quiet) is KEPT and untouched.
 
+**Honest gap (SP4→SP5, stated not silently accepted):** the same blanket `queue.clear()` also drops a *mid-utterance interrupted* item on a real `⌃⌘S`-start — SP3's "resume from spot" behavior. Until SP5's catch-up action ships, that interrupted item is unreachable except via browse; there is no auto-replay of it on resume.
+
 **Files:**
 - Modify: `src/sonari/daemon/features/playback.py:49-57` (`on_stop_session` resume branch)
+- Modify: `tests/test_daemon_stop.py:14-27,92-102` (update the two pre-D2 flood-behavior tests to the quiet-resume expectation)
 - Test: `tests/test_frontier.py` (append)
 
 **Interfaces:**
@@ -605,17 +626,58 @@ Expected: FAIL — the queue still holds `["Resumed.", "pile 1", "pile 2"]` (the
         ctx.host._enqueue(fg, "prose", "Resumed.", False, mute_exempt=True, at_front=True)
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [ ] **Step 4: Update the two `test_daemon_stop.py` tests that encode the pre-D2 flood** (`tests/test_daemon_stop.py`)
 
-Run: `.venv/bin/python -m pytest tests/test_frontier.py -k quiet_resume -q`
+Both tests currently assert the OLD behavior — that a `⌃⌘S`-start drains and plays the retained pre-start backlog. Under D2 that backlog is now dropped from the queue (quiet resume; it stays catch-up-reachable in history, not auto-played). Update both in place:
+
+`tests/test_daemon_stop.py:14-27` — rename and flip the tail assertion (the pile is dropped, not replayed):
+
+```python
+def test_stop_holds_loop_voices_cue_and_resume_drops_pile_quietly():
+    daemon, queue, speaker, *_ = make_daemon(foreground="fg")
+    daemon._enqueue("fg", "prose", "hello", False)
+    daemon.handle_message({"type": "stop_session", "session": "fg"})
+    daemon._speak_loop_once()                  # stopped: only the pause-exempt cue voices
+    assert speaker.spoken == ["Stopped."]
+    daemon._speak_loop_once()                  # nothing else exempt -> held
+    assert speaker.spoken == ["Stopped."]
+    assert "hello" not in speaker.spoken and len(queue) == 1   # backlog retained
+    daemon.handle_message({"type": "stop_session", "session": "fg"})   # resume (D2 quiet resume)
+    daemon._speak_loop_once()
+    assert speaker.spoken == ["Stopped.", "Resumed."]           # confirmation only
+    daemon._speak_loop_once()
+    assert speaker.spoken == ["Stopped.", "Resumed."]           # pre-start pile dropped, NOT replayed (D2)
+    assert len(queue) == 0                                      # "hello" cleared, not queued
+```
+
+`tests/test_daemon_stop.py:92-102` — flip the tail assertion (B's pre-start "b" is dropped, not eventually spoken); name is unchanged since "each session returns via its own stop key" still holds:
+
+```python
+def test_stop_all_is_one_way_each_session_returns_via_its_own_stop_key():
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    daemon._enqueue("B", "prose", "b", False)
+    daemon.handle_message({"type": "stop_all", "session": "A"})
+    sessions.set_foreground("B")
+    daemon._speak_loop_once()
+    assert "b" not in speaker.spoken          # landing on B does NOT auto-read it
+    daemon.handle_message({"type": "stop_session", "session": "B"})   # ⌃⌘S brings B back (D2 quiet resume)
+    daemon._speak_loop_once()                 # "Resumed."
+    daemon._speak_loop_once()                 # pre-start pile dropped, not replayed (D2)
+    assert "b" not in speaker.spoken          # D2: quiet resume does not flood the backlog
+    assert "Resumed." in speaker.spoken
+```
+
+- [ ] **Step 5: Run to verify pass**
+
+Run: `.venv/bin/python -m pytest tests/test_frontier.py -k quiet_resume tests/test_daemon_stop.py -q`
 Expected: PASS.
 
-- [ ] **Step 5: Full suite green, then commit**
+- [ ] **Step 6: Full suite green, then commit**
 
-Run: `.venv/bin/python -m pytest -q` → Expected: `1091 passed, 1 skipped` (+1). If a pre-existing test asserted that ⌃⌘S-start drains/plays the pre-start pile, it encoded the old flood — update it to the D2 quiet-resume behavior and note it in the commit body.
+Run: `.venv/bin/python -m pytest -q` → Expected: `1091 passed, 1 skipped` (+1).
 
 ```bash
-git add src/sonari/daemon/features/playback.py tests/test_frontier.py
+git add src/sonari/daemon/features/playback.py tests/test_frontier.py tests/test_daemon_stop.py
 git commit -m "feat(sp4): make ctrl-cmd-S start a quiet resume, dropping the pre-start pile behind the frontier (Fork D2)"
 ```
 
@@ -631,6 +693,7 @@ Frontier write-path (b): a distinct, confirmatory gesture — **not** the safe `
 - Modify: `src/sonari/protocol.py:44` (add `SKIP_PILE = "skip_pile"`)
 - Modify: `src/sonari/daemon/features/playback.py` (add `on_skip_pile` handler)
 - Modify: `src/sonari/keymap.py:26-48` (add `"skip_pile"` to `ACTION_MESSAGES`; ship UNBOUND — NOT in `_DEFAULT_KEYS`)
+- Modify: `tests/test_daemon_registry.py:122` (add `_MsgType.SKIP_PILE` to `ALL_TYPES`)
 - Test: `tests/test_frontier.py` (append)
 
 **Interfaces:**
@@ -767,18 +830,29 @@ Add to `ACTION_MESSAGES` (after `slower`, line 47):
 
 Leave `_DEFAULT_KEYS` unchanged (do NOT add `skip_pile`).
 
-- [ ] **Step 6: Run to verify pass**
+- [ ] **Step 6: Add `SKIP_PILE` to the registry completeness guard** (`tests/test_daemon_registry.py:122`)
 
-Run: `.venv/bin/python -m pytest tests/test_frontier.py -k skip_pile -q`
-Expected: PASS (4 tests).
+`ALL_TYPES` is the hand-maintained list `test_all_msgtypes_registered` checks against `reg.HANDLERS` — without this addition the guard silently stops covering the new type (a subset check, so it wouldn't fail either way, but it would no longer prove `on_skip_pile` is registered). Append after `_MsgType.REPEAT_LAST,`:
 
-- [ ] **Step 7: Full suite green, then commit**
+```python
+    _MsgType.CHOOSER_COMMIT, _MsgType.CHOOSER_CANCEL,
+    _MsgType.REPEAT_LAST,
+    _MsgType.SKIP_PILE,
+]
+```
+
+- [ ] **Step 7: Run to verify pass**
+
+Run: `.venv/bin/python -m pytest tests/test_frontier.py -k skip_pile tests/test_daemon_registry.py -q`
+Expected: PASS (4 new tests in `test_frontier.py`; `test_all_msgtypes_registered` still passes, now actually covering `SKIP_PILE`).
+
+- [ ] **Step 8: Full suite green, then commit**
 
 Run: `.venv/bin/python -m pytest -q` → Expected: `1095 passed, 1 skipped` (+4).
 
 ```bash
 git add src/sonari/protocol.py src/sonari/daemon/features/playback.py \
-  src/sonari/keymap.py tests/test_frontier.py
+  src/sonari/keymap.py tests/test_frontier.py tests/test_daemon_registry.py
 git commit -m "feat(sp4): add the deliberate pile-skip gesture (Fork B1/C1), shipped unbound for ear-gate"
 ```
 
@@ -786,29 +860,76 @@ git commit -m "feat(sp4): add the deliberate pile-skip gesture (Fork B1/C1), shi
 
 ### Task 7: SP4 concurrency hammers (join the permanent guard set)
 
-Campaign `:14` — "any speak-loop change adds itself to the hammer set." SP4's frontier write paths run under `self._lock`, so they join `tests/test_concurrency_guards.py`. Two deterministic B1/monotonicity hammers (PERMANENT, never weaken), plus feeding `SKIP_PILE` into the existing real-threaded storm so the skip path's `queue.clear()` + frontier advance are exercised under contention (the existing orphan-marker assertion then covers it — no assertion is weakened).
+Campaign `:14` — "any speak-loop change adds itself to the hammer set." SP4's frontier write paths run under `self._lock`, so they join `tests/test_concurrency_guards.py`. Two deterministic B1/monotonicity hammers (PERMANENT, never weaken), plus feeding `SKIP_PILE` into the existing real-threaded storm so the skip path's `queue.clear()` + frontier advance are exercised under contention (the existing orphan-marker assertion then covers it — no assertion is weakened), plus a real-threaded frontier-monotonicity assertion added to that same storm (synthesis §5 "monotonicity under contention").
 
 **Files:**
-- Modify: `tests/test_concurrency_guards.py` (append two tests; add `MsgType.SKIP_PILE` to the storm's `ops` list)
+- Modify: `tests/test_concurrency_guards.py` (append two tests; add `MsgType.SKIP_PILE` to the storm's `ops` list; instrument + assert frontier monotonicity in the storm)
 
 **Interfaces:**
 - Consumes: `note_spoken` + `SpeechItem.forward` (Tasks 1-2); `SessionStream.frontier`; `MsgType.SKIP_PILE` handler (Task 6).
 
 - [ ] **Step 1: Add `SKIP_PILE` to the storm rotation** (`tests/test_concurrency_guards.py`, the `ops` list at lines 257-262 inside `hammer`)
 
-Append `MsgType.SKIP_PILE` to the list (additive — do NOT remove or reorder existing ops, do NOT weaken any assertion):
+Append `MsgType.SKIP_PILE` to the list (additive — do NOT remove or reorder existing ops, do NOT weaken any assertion, and do NOT drop the existing `# REPEAT_LAST (W12) …` comment already sitting above `MsgType.REPEAT_LAST`). The block below shows the correct final state with that comment preserved:
 
 ```python
             ops = [MsgType.STOP_SESSION, MsgType.FLUSH, MsgType.SET_FOREGROUND,
                    MsgType.JUMP_WAITING, MsgType.CHOOSER_STEP, MsgType.CHOOSER_DIGIT,
                    MsgType.CHOOSER_COMMIT, MsgType.CHOOSER_CANCEL, MsgType.STOP_ALL,
+                   # REPEAT_LAST (W12) hammers the capture+park path against the
+                   # loop's tail-lock write.
                    MsgType.REPEAT_LAST,
                    # SP4: exercise the pile-skip's queue.clear() + frontier advance under
                    # contention; the orphaned-marker assertion below covers its enqueues.
                    MsgType.SKIP_PILE]
 ```
 
-- [ ] **Step 2: Write the two deterministic hammers** (append to `tests/test_concurrency_guards.py`)
+- [ ] **Step 2: Instrument + assert real-threaded frontier monotonicity in the storm** (`tests/test_concurrency_guards.py`, inside `test_stress_no_lost_duplicated_or_resurrected_item`)
+
+The deterministic hammers below prove non-retreat logically across every write path, but off the real speak-loop threads. Synthesis §5 also wants monotonicity proven **under actual thread contention** — the storm already drives frontier advances (feeder `PROSE` flushes `forward=True`; the `SKIP_PILE` hammer op added in Step 1 advances directly) but today asserts nothing about `frontier`. Add a lightweight per-session recorder around `advance_frontier` and a closing non-retreat assertion, so a lock-discipline regression under real contention would be caught, not just a logically-correct-but-single-threaded path.
+
+Right after the `sessions.register(s, cwd="/x/" + s)` loop for `"s0", "s1", "s2"` (immediately before the `# Passive keep-going target` comment), add the recorder:
+
+```python
+    for s in ("s0", "s1", "s2"):
+        sessions.register(s, cwd="/x/" + s)
+
+    # SP4: real-threaded frontier-monotonicity instrumentation (synthesis §5). The
+    # deterministic hammer (test_frontier_never_retreats_across_write_paths) proves
+    # non-retreat logically across every write path; this proves it holds under
+    # ACTUAL thread contention, catching a lock-discipline regression the
+    # deterministic test cannot (e.g. a future caller invoking advance_frontier
+    # outside self._lock). Instance-attr shadow, self-contained per fresh stream —
+    # no restore needed in `finally`.
+    frontier_log = {s: [] for s in ("s0", "s1", "s2")}
+    def _make_logging_advance(sess, st, orig):
+        def _logging_advance(key):
+            orig(key)
+            frontier_log[sess].append(st.frontier)
+        return _logging_advance
+    for _s in ("s0", "s1", "s2"):
+        _st = daemon._stream(_s)
+        _st.advance_frontier = _make_logging_advance(_s, _st, _st.advance_frontier)
+```
+
+Then, in the quiescent end-state, right after the existing `assert orphaned == [], ...` line and before the `finally:`, add the closing assertion:
+
+```python
+            orphaned = [k for k in daemon._pending_heard if k not in live_ids]
+            assert orphaned == [], "orphaned pending-heard markers: {0}".format(orphaned[:5])
+        # SP4: frontier monotonicity under REAL contention (synthesis §5) — every
+        # advance_frontier call recorded above must be non-decreasing per session;
+        # a race that ever let the frontier retreat would show up here as a drop.
+        for sess, log in frontier_log.items():
+            assert all(b >= a for a, b in zip(log, log[1:])), \
+                "frontier retreated under contention for {0}: {1}".format(sess, log)
+    finally:
+        host_mod._select_keep_going = _orig_select_keep_going
+```
+
+This does not add a new test (no test-count change) — it strengthens the existing storm test with the assertion the permanent guard set was missing.
+
+- [ ] **Step 3: Write the two deterministic hammers** (append to `tests/test_concurrency_guards.py`)
 
 ```python
 def test_frontier_provenance_gated_advance_is_permanent():
@@ -867,12 +988,12 @@ def test_frontier_never_retreats_across_write_paths():
     assert all(b >= a for a, b in zip(seen, seen[1:]))                    # never retreats
 ```
 
-- [ ] **Step 3: Run to verify pass**
+- [ ] **Step 4: Run to verify pass**
 
 Run: `.venv/bin/python -m pytest tests/test_concurrency_guards.py -q`
-Expected: PASS (all four permanent guards + the two new hammers). The storm test may run ~1s.
+Expected: PASS (all four permanent guards + the two new hammers + the storm's new monotonicity assertion). The storm test may run ~1s.
 
-- [ ] **Step 4: Full suite green, then commit**
+- [ ] **Step 5: Full suite green, then commit**
 
 Run: `.venv/bin/python -m pytest -q` → Expected: `1097 passed, 1 skipped` (+2).
 
@@ -959,7 +1080,7 @@ Baseline `1073 passed, 1 skipped`.
 | 7 — concurrency hammers | +2 | 1097 |
 | 8 — spec audit | +0 | 1097 |
 
-**Expected final: `1097 passed, 1 skipped`.** (Deltas assume no pre-existing test encoded a gap this plan closes; Tasks 4 and 5 flag the two places that could need a one-line reconciliation of an old-behavior assertion — adjust the total by that if hit.)
+**Expected final: `1097 passed, 1 skipped`.** (Deltas assume no pre-existing test encoded a gap this plan closes; Task 4 flags one place that could need a one-line reconciliation of an old-behavior assertion — adjust the total by that if hit. Task 5's two `test_daemon_stop.py` reconciliations are no longer conditional — they are explicit steps, already folded into the +1/1091 total above.)
 
 ## Self-review (run against the synthesis + spec)
 
@@ -968,6 +1089,14 @@ Baseline `1073 passed, 1 skipped`.
 **2. Placeholder scan.** No TBD/TODO/"handle edge cases"/"similar to Task N". Every code step shows complete code; every test shows real assertions. Ear-gate items (T6 chord + string) are explicitly flagged as owner calls, not plan gaps.
 
 **3. Type consistency.** `SpeechItem.forward: bool = False` (T1) — read in `note_spoken` (T2), set at readout sites (T2/T4), preserved at 4 re-queue sites (T1). `_enqueue(..., forward=False)` signature consistent everywhere. `SessionStream.frontier: (int,int)|None` + `advance_frontier(key)` (T2) — called with `history.newest_key()` (T6). `unheard_from_frontier(session, frontier) -> (entries, aged_out)` (T3) — unpacked `entries, _` at all callers (T5/T6). `newest_key(session)` (T3) → used in T6. `MsgType.SKIP_PILE` (T6) → used in T7. Shared test helpers `_cfg`/`_FakeSpeaker` + module imports defined in T1's `tests/test_frontier.py` and inherited by later appends. No signature/name drift found.
+
+## Review amendments applied (A7-1, A8-2, A5-1, A8-3, A5-2)
+
+- **A7-1** — added T2's missing 6th test, `test_note_spoken_advances_frontier_on_decision_readout_completion` (a decision-kind readout completing advances the frontier), closing the previously-untested decision→frontier write path; T2 now shows 6 tests matching its +6/1082 arithmetic.
+- **A8-2** — added `tests/test_daemon_stop.py` to T5's Files list and a new Step 4 with concrete rewritten code for both broken tests (`test_stop_holds_loop_voices_cue_and_resume_drops_pile_quietly`, renamed from `..._resume_replays_from_spot`; and `test_stop_all_is_one_way_each_session_returns_via_its_own_stop_key`, name unchanged) flipped to the D2 quiet-resume expectation; added the honest SP4→SP5 gap note (mid-utterance interrupted item unreachable on resume until catch-up ships) to T5's prose.
+- **A5-1** — added T7 Step 2: real-threaded `advance_frontier` recorder on `s0`/`s1`/`s2` plus a closing non-retreat assertion in the storm's quiescent end-state, proving frontier monotonicity under actual thread contention (not just the deterministic hammer). No test-count change.
+- **A8-3** — added `tests/test_daemon_registry.py` to T6's Files list and a new Step 6 appending `_MsgType.SKIP_PILE` to `ALL_TYPES` so the handler-coverage guard actually covers the new type.
+- **A5-2** — fixed T7 Step 1's `ops` snippet to preserve the existing `# REPEAT_LAST (W12) …` inline comment; `SKIP_PILE` is appended after it, not in place of it.
 
 ## Execution handoff
 
