@@ -15,6 +15,16 @@ focus") and asked for a holistic navigation pattern. Result: one browsing gestur
 that cannot pin by construction, plus absolute addressing, with the existing
 attention jump and status keys unchanged in role.
 
+## 1.5 Teaching dependency — number registration (2026-07-16 note)
+
+Session **numbers** are now a *primary teleport handle* (the chooser's in-hold digits, §3, and the
+`⌃⌘W` Also-map dial-pad, §7). But a number is taught **once** — a single pre-chooser registration
+announce ("{folder}, {number}.", §6, suppressed at verbosity quiet). If that one cue is missed there is
+no standing "what's my number" affordance, so the handle can go unlearned. **Teaching dependency:** the
+cheap wave's `⌃⌘W` count / number work (§7) is the current reinforcement; any future **re-announce** or
+**"what's my number" query** lands here as the chooser's teaching surface. (Downstream of the
+number-legibility friction; carry as watch-in-real-use, not a blocker.)
+
 ## 2. The verb model
 
 - **Browse + go (relative):** hold ⌃⌘, tap Tab — the CHOOSER (this spec).
