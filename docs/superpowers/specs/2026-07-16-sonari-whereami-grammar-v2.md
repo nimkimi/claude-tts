@@ -33,7 +33,7 @@ Also-map (` Also: …` landmark KEPT):
 - `stale` = oldest unheard entry older than `STALE_AFTER_S = 900` (15 min; module constant, owner-tunable; consumes `HistoryEntry.stamp` — the W2 scope fence is hereby lifted, this is its intended first consumer). Age is ALWAYS a word, never a number.
 - **Order = value tiers, number-ascending within each:** decision entries; then pile entries (waiting/unheard); then muted-only entries; then the quiet tail. (Amends the ratified "in NUMBER order" — delegated decision; each entry still self-labels its digit, and the chooser roster remains the complete ordered dial-pad.)
 - **Entries are sentences**, joined `". "` — not `"; "`.
-- **Quiet collapse:** sessions with nothing to report fold into a trailing `"Plus {word} quiet."` (count as a word, digit-free, terminal position). One quiet → "Plus one quiet." When ALL other sessions are quiet: `"All quiet."` replaces the Also-map entirely. Zero other sessions: no Also clause (unchanged trained absence).
+- **Quiet collapse:** sessions with nothing to report fold into a trailing `"Plus {word} quiet."` (count as a word, digit-free, terminal position; above the one-to-nine word map it degrades to "many" — never a numeral). One quiet → "Plus one quiet." When ALL other sessions are quiet: `"All quiet."` replaces the Also-map entirely. Zero other sessions: no Also clause (unchanged trained absence).
 
 ## Worked examples (test oracle, byte-exact)
 

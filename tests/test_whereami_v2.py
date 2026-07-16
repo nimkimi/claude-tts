@@ -173,3 +173,18 @@ def test_clause_order_decision_then_waiting_then_unheard_then_stale():
     now[0] = 2000.0
     out = _where(daemon, speaker, "fg")
     assert "Also: 2 b, decision, 1 waiting, 1 unheard, stale." in out
+
+
+def test_ten_plus_quiet_sessions_degrade_to_many_never_a_digit():
+    """Reviewer fix: above the word map the collapse count must stay digit-free
+    ("many"), never revive a spoken numeral."""
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.register("fg", cwd="/x/fg")
+    for i in range(10):                                   # 10 quiet others
+        sessions.register("q{0}".format(i), cwd="/x/q{0}".format(i))
+    daemon.history.record("q0", "prose", "line.")         # q0 reports; 9 stay quiet
+    for i in range(3):                                    # push quiet count past the map
+        sessions.register("r{0}".format(i), cwd="/x/r{0}".format(i))
+    out = _where(daemon, speaker, "fg")
+    assert out.endswith("Plus many quiet.")
+    assert "12 quiet" not in out

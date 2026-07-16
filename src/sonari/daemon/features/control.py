@@ -106,7 +106,10 @@ def _also_clause(host, exclude=()):
         return " All quiet." if quiet else ""
     out = " Also: {0}.".format(". ".join(parts))
     if quiet:
-        out += " Plus {0} quiet.".format(_COUNT_WORDS.get(quiet, str(quiet)))
+        # Digit-free ALWAYS: above the word map the count degrades to "many"
+        # rather than reviving a spoken digit (the blur this grammar kills).
+        # Precision is worthless up there — "many quiet" is the whole signal.
+        out += " Plus {0} quiet.".format(_COUNT_WORDS.get(quiet, "many"))
     return out
 
 

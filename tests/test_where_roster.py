@@ -40,8 +40,9 @@ def test_no_other_sessions_omits_the_also_clause():
     assert speaker.spoken == ["Voice and keyboard: web 1, playing."]
 
 
-# --- (c) speaker None after stop_all -> state cue + the FULL map (no exclusions) ---
-def test_speaker_none_after_stop_all_reads_state_cue_plus_full_map():
+# --- (c) speaker None after stop_all -> state cue + Keyboard clause + the map
+#         (grammar v2: the workspace rides the Keyboard clause, excluded from the map) ---
+def test_speaker_none_after_stop_all_reads_state_cue_keyboard_and_map():
     daemon, queue, speaker, sessions, _ = make_daemon(foreground=None)
     sessions.focus("A", cwd="/x/web")                   # number 1; workspace=A, NO stream yet
     sessions.register("B", cwd="/x/api")                # number 2
@@ -64,9 +65,10 @@ def test_keyboard_session_does_not_reappear_in_the_also_map():
     sessions.register("B", cwd="/x/api")                # voice, number 2
     sessions.set_speaker("B")
     sessions.register("C", cwd="/x/etl")                # number 3 -> the ONLY Also entry
-    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
+    daemon.history.record("C", "prose", "c line.")      # pile: a leaked keyboard session
+    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))  # would surface as "Plus one quiet."
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: api 2, playing. Keyboard: web 1. All quiet."]
+    assert speaker.spoken == ["Voice: api 2, playing. Keyboard: web 1. Also: 3 etl, 1 unheard."]
 
 
 # --- (e) unknown folder -> "{n} another session" ---
