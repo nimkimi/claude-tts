@@ -231,7 +231,8 @@ class SpeechDaemon:
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
                  entry=None, mute_exempt: bool = False,
                  pause_exempt: bool = False, at_front: bool = False,
-                 names_session: bool = False, audio_path=None) -> int:
+                 names_session: bool = False, audio_path=None,
+                 forward: bool = False) -> int:
         """Returns the new item's id (W7: on_permission_request tracks its queued
         ask); all other callers ignore it."""
         item = SpeechItem(
@@ -244,6 +245,7 @@ class SpeechDaemon:
             pause_exempt=pause_exempt,
             names_session=names_session,
             audio_path=audio_path,
+            forward=forward,
         )
         st = self._stream(session)
         if entry is not None:

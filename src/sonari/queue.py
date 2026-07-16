@@ -15,6 +15,9 @@ class SpeechItem:
     pause_exempt: bool = False  # voiced by the held branch even while the session is stopped (e.g. "Stopped.")
     names_session: bool = False  # text already speaks the session's folder (jump cue)
     audio_path: "str | None" = None  # when set, the speak loop afplays this file (spearcon) instead of say
+    forward: bool = False  # SP4 provenance: True only at forward-readout enqueue sites (prose/decision/
+                           # tool-announce readout). Browse-replay + control cues stay False so a review
+                           # gesture never advances the frontier (B1). Read only by note_spoken's advance.
 
 
 class SpeechQueue:
