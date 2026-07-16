@@ -272,3 +272,53 @@ def test_unheard_age_reports_oldest_unheard_entry_age():
 def test_unheard_age_is_none_when_nothing_unheard():
     h = SessionHistory(cap=10)
     assert h.unheard_age("s") is None
+
+
+def test_unheard_from_frontier_spans_turns_keyed_on_msgid_seq():
+    from sonari.history import SessionHistory
+    h = SessionHistory()
+    h.record("s", "prose", "t1a"); h.end_message("s")   # (0,0)
+    h.record("s", "prose", "t1b")                         # (1,0)
+    h.start_turn("s")                                     # new turn: msg_id bumps
+    h.record("s", "prose", "t2a")                         # (2,0)
+    entries, aged = h.unheard_from_frontier("s", (0, 0))
+    assert [e.text for e in entries] == ["t1b", "t2a"] and aged is False   # crosses turns
+    entries, aged = h.unheard_from_frontier("s", None)
+    assert [e.text for e in entries] == ["t1a", "t1b", "t2a"] and aged is False
+
+
+def test_unheard_from_frontier_ignores_heard_flag():
+    from sonari.history import SessionHistory
+    h = SessionHistory()
+    h.record("s", "prose", "a"); h.end_message("s")       # (0,0)
+    b = h.record("s", "prose", "b")                        # (1,0)
+    b.heard = True                                         # browse-replayed ABOVE the frontier
+    entries, _ = h.unheard_from_frontier("s", (0, 0))
+    assert [e.text for e in entries] == ["b"]              # heard=True yet still returned (B1 read side)
+
+
+def test_unheard_from_frontier_aged_out_fail_loud():
+    from sonari.history import SessionHistory
+    h = SessionHistory(cap=3)                              # tiny window forces eviction
+    for i in range(5):
+        h.record("s", "prose", "m{0}".format(i)); h.end_message("s")
+    entries, aged = h.unheard_from_frontier("s", (0, 0))   # frontier behind the evicted head
+    assert aged is True
+    assert entries[0].text == "m2"                         # resumes at oldest SURVIVING, never mid-pile
+
+
+def test_newest_key_is_live_edge():
+    from sonari.history import SessionHistory
+    h = SessionHistory()
+    assert h.newest_key("s") is None
+    h.record("s", "prose", "a"); h.end_message("s")
+    last = h.record("s", "prose", "b")
+    assert h.newest_key("s") == (last.msg_id, last.seq)
+
+
+def test_unheard_stays_turn_scoped_for_shipped_consumers():
+    from sonari.history import SessionHistory
+    h = SessionHistory()
+    h.record("s", "prose", "old"); h.start_turn("s")
+    h.record("s", "prose", "new")
+    assert [e.text for e in h.unheard("s")] == ["new"]     # unchanged: current-turn floor

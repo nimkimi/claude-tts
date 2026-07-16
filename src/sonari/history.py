@@ -170,6 +170,38 @@ class SessionHistory:
             return None
         return self._clock() - entries[0].stamp
 
+    def unheard_from_frontier(self, session, frontier):
+        """Entries strictly AHEAD of *frontier*=(msg_id, seq), oldest first, across the
+        OPEN SESSION LIFETIME (all turns). The cross-turn forward-read the SP5 catch-up
+        action consumes — a frontier-aware SIBLING to unheard() (which stays turn-scoped
+        for its ⌃⌘W consumers). frontier=None => every surviving entry.
+
+        Keys off the frontier scalar, NOT `heard`: a browse replay flips heard=True on
+        entries ABOVE the frontier, so a heard-based read would silently drop those
+        browsed-but-not-caught-up items from catch-up (B1 on the read side). Drops BOTH
+        the turn filter AND the `not heard` filter of unheard().
+
+        Returns (entries, aged_out). aged_out is True when *frontier* points BEHIND the
+        oldest surviving entry (its referent was evicted from the bounded deque): a gap
+        aged out of the window, so the consumer plays the fail-LOUD 'earlier output aged
+        out' cue and resumes at entries[0] — never a silent mid-pile start (R-1). O(n) —
+        runs only on the human-paced catch-up/skip pull, NEVER in the keep-going lock."""
+        d = self._entries.get(session)
+        if not d:
+            return [], False
+        if frontier is None:
+            return list(d), False
+        entries = [e for e in d if (e.msg_id, e.seq) > frontier]
+        aged_out = frontier < (d[0].msg_id, d[0].seq)
+        return entries, aged_out
+
+    def newest_key(self, session):
+        """The (msg_id, seq) of the newest surviving entry (the live edge), or None when
+        the session has no history. The deliberate pile-skip advances the frontier to
+        this (§10.1)."""
+        d = self._entries.get(session)
+        return (d[-1].msg_id, d[-1].seq) if d else None
+
     def reset(self, session: str) -> None:
         """Forget a session entirely (SESSION_END)."""
         self._entries.pop(session, None)
