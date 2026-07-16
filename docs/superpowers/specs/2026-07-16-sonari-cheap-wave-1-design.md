@@ -52,7 +52,8 @@ touch production pointers or the speak loop.
 
 **Lived problem.** Pressed mid-flood to ask "anything else waiting?", the answer lands at
 the *tail* of the very backlog you're escaping (ledger below-cut #8 / opportunity 6.2 —
-"the one control cue in the codebase not marked `at_front`").
+"the one control cue in the codebase not marked `at_front`" — a framing this spec narrows
+below: it is not literally the only one).
 
 **Exact new behavior.**
 - GIVEN the speaker's queue holds N backlog items, WHEN ⌃⌘J finds no waiting session,
@@ -60,9 +61,12 @@ the *tail* of the very backlog you're escaping (ledger below-cut #8 / opportunit
   unchanged; only queue position changes.
 
 **Code touchpoints.** `src/sonari/daemon/features/focus.py:54-57` — add `at_front=True`
-to the existing `_enqueue(tgt, "prose", "No session waiting.", ...)`. (Verified: today it
-is the only control cue without the flag; every sibling cue in `focus.py`/`control.py`/
-`playback.py` carries it or is pause-exempt-scanned.)
+to the existing `_enqueue(tgt, "prose", "No session waiting.", ...)`. (Correction
+(review-found): this is NOT the only control cue lacking `at_front` — `control.py:218`'s
+"Nothing playing." + Also-clause, `playback.py:66`'s "Stopped.", and `playback.py:86`'s
+"All stopped." also lack it, all `pause_exempt`-only. This wave item fixes only
+`focus.py:54`'s "No session waiting." cue; the other three are unchanged and out of
+scope.)
 
 **Risk class.** None of M1/R12/Fork-2. Guards untouched (no speak-loop change).
 
@@ -144,9 +148,32 @@ empty hunting a decision that lives elsewhere, and says nothing — silent data 
   cross/raise, spearcon cue) — unchanged.
 - GIVEN a live pending decision exists but its text is no longer queued (already
   narrated, still answerable inside the 120s window), THEN do NOT drain; re-speak the
-  stored options text (`st.options`, the same source `REREAD_OPTIONS` uses,
-  `decisions.py:200-211`) `at_front, mute_exempt` — so ⌃⌘D never claims "no decision"
-  over an answerable one.
+  stored prompt text `at_front, mute_exempt` — sourced from
+  `host._pending_decisions[target]["text"]` (see the scope addition immediately below;
+  NOT `st.options`, which `on_permission_request` never writes) — so ⌃⌘D never claims
+  "no decision" over an answerable one.
+
+**Scope addition — `_pending_decisions` gains a `text` field (review-found: the original
+remedy cited `st.options`, a field `on_permission_request` never sets).**
+`on_permission_request` writes `host._pending_decisions[session]` at `decisions.py:173`
+as `{"event": threading.Event(), "behavior": None}` — no text. Extend that literal with a
+`text` field, reusing the SAME string already computed at `decisions.py:163`
+(`text = _permission_request_text(msg)`) and passed to `history.record(session,
+"permission", text)` at `decisions.py:165` — i.e. `_pending_decisions[session]["text"] =
+text`, one extra key on an already-built dict, no new computation. The third branch above
+reads that field back.
+
+**Sub-item — `on_reread_options` (`decisions.py:200-211`) gains the same fallback (SCOPE
+ADDITION surfaced by this review, not in the original 13-item ratification).**
+GIVEN `st.options` is empty/None for the foreground session AND a blocking permission is
+pending in `_pending_decisions` for that session, WHEN `REREAD_OPTIONS` fires, THEN
+re-speak `host._pending_decisions[fg]["text"]` (the same field the sub-item above adds)
+instead of falling through to "No options right now." *Rationale (one line): the review
+proved `REREAD_OPTIONS` is silently broken for this exact class today — `on_permission_request`
+never sets `st.options`, so a live blocking permission can never be re-read via this verb
+— and it was already a below-cut honesty item the owner's wave direction covers, so this
+wave should close it alongside the ⌃⌘D fix rather than leave the same gap on a second
+gesture.*
 
 **Deviation from the atlas (verified).** The atlas fix was queue-scoped ("no decision
 here + don't drain"). Code-level: an answerable-but-already-read permission has an empty
@@ -156,7 +183,10 @@ would speak a lie exactly where honesty matters. Hence the two-part hit predicat
 **Code touchpoints.** `src/sonari/daemon/features/playback.py:92-134` (`on_jump_decision`
 — the miss guard goes BEFORE the `voice_state`/focus/cancel writes at `:100-114`),
 `src/sonari/queue.py:70-76` (`jump_to_decision`, unchanged — the caller guards),
-`:78-81` (`has_decision`).
+`:78-81` (`has_decision`), `src/sonari/daemon/features/decisions.py:156-174`
+(`on_permission_request` — add the `text` key to the `_pending_decisions` literal at
+`:173`, reusing the `:163` local), `:200-211` (`on_reread_options` — add the
+`_pending_decisions` fallback described in the sub-item above).
 
 **Risk class.** Fork-2: the miss branch must not touch `st.stopped` (it doesn't touch the
 stream at all). R12 untouched. Guards untouched (handler-side only).
@@ -231,7 +261,7 @@ defaults only when the whole `earcons` key is absent (`bootstrap.py:73-74`) — 
 every EXISTING install a new config-dict kind would be **silently disabled**, the worst
 eyes-free failure. Fix shape follows the codebase's own precedent: `Speaker.pitch`
 resolves its asset package-side precisely so "the cue can never be silently disabled by
-an existing user's earcons config" (`speaker.py:109-114`). New failure kinds resolve:
+an existing user's earcons config" (`speaker.py:109-123`). New failure kinds resolve:
 config dict first (user-overridable), then fall back to the built-in default path when
 the kind is absent. Sosumi's `error` key keeps today's semantics.
 
@@ -320,8 +350,13 @@ lazy-start clients poll).
 between `:92` and `:93`). String lives beside it as a constant for the test to import.
 
 **Risk class.** None of M1/R12/Fork-2 (pre-loop, pre-session). Guards untouched — the
-speak loop itself is not modified; `Speaker.speak` is thread-safe by construction
-(`_current_lock`).
+speak loop itself is not modified. **Awareness note (review-found, not a fix):**
+`Speaker.speak` is looser than "thread-safe by construction" suggests — `_current` is
+lock-guarded (`_current_lock`) but the method does not hold the lock across
+`proc.wait()`, so two concurrent callers can each be mid-wait at once. Benign here: at
+boot no session is yet registered, so the speak loop has nothing to say and the overlap
+window with the one-shot boot thread is empty — there is no second caller for the boot
+cue to race against.
 
 ---
 
@@ -386,10 +421,25 @@ SHAPE is untouched — the count CONTENT is the open half, per the reeval sheet)
   Example under quiet: `"Also: 2 billing, muted, 12 unheard; 3 auth."`
   Example quiet + queued decision: `"2 billing, 1 waiting, 11 unheard"`.
 - GIVEN `k == 0 and u == 0`, THEN the entry is unchanged (no clause).
-- Non-quiet strings are unchanged in practice: everything that is recorded is also
-  queued, so `u == 0` for every Also-map candidate. (Verified safe: the only stream with
-  an in-flight-but-unheard entry is the speaker's, and the Also-map excludes the speaker,
-  `control.py:242`; the None-speaker branch has no in-flight either.)
+- Non-quiet strings are unchanged for the ordinary case: everything that is recorded is
+  also queued, so `u == 0` for the common Also-map candidate. (The only stream with an
+  in-flight-but-unheard entry under normal play is the speaker's, and the Also-map
+  excludes the speaker, `control.py:242`; the None-speaker branch has no in-flight
+  either.)
+
+**Correction (review-found: "byte-identical / u==0 always" is falsified by a
+preemption-cut — the surfaced count is nonetheless correct behavior).** A ⌃⌘J
+(`focus.py:65`) or a crossed ⌃⌘D (`playback.py:102`) calls `sessions.focus()`, which moves
+`_speaker` off the former speaker (`sessions.py:234`) while cancelling its in-flight item.
+`host.py:535` re-queues an interrupted item only when its OWN stream is `stopped`, so a
+non-stopped former speaker's cut item is left `heard=False` and un-queued
+(`note_spoken(..., False)`, `host.py:319/541`). That former speaker is now a non-speaker
+Also-map candidate with `unheard > k`, so `u ≥ 1` and ", N unheard" CAN legitimately
+appear in a non-quiet string. This is not a leak: it is a genuine unheard pile created by
+preemption, and R-8's "preemption class = cut, no resume" keeps that pile browsable
+rather than lost — surfacing it is correct. The guarantee this wave actually provides is
+**no spurious unheard beyond genuinely-unheard preempted content**, not strict non-quiet
+byte-identity.
 
 **The `- k` subtraction (verified necessity).** Queued items' history entries are ALSO
 unheard until spoken (`host.py:309-320` flips heard on completion), so a raw
@@ -447,7 +497,23 @@ gesture target.
 remains as `workspace()`'s fallback and as plumbing (`STATUS`'s diagnostic field,
 `control.py:153`; the CLI-only `STOP` handler, `playback.py:12`; `REREAD_OPTIONS`,
 `decisions.py:202` — unbound, 0 senders). None of these is a hotkey gesture; they are out
-of scope and unchanged. After this wave, **no ⌃⌘ gesture reads `foreground()` directly.**
+of scope and unchanged.
+
+**Correction (review-found: the exhaustiveness claim below was not exhaustive as
+written).** One more site reads `foreground()` directly on a ⌃⌘ gesture's path:
+`chooser.py:48`'s `origin = sessions.workspace() or sessions.foreground()`, reached on
+⌃⌘Tab's first step (`CHOOSER_STEP` → `_open` → `_snapshot`). It is **provably dead code,
+not a live behavioral read**: `workspace() = focused_session() or self._foreground` and
+`foreground() = self._foreground` (`sessions.py:132-136,121-125`), so the `or
+sessions.foreground()` fallback can only be reached when `workspace()` is already
+falsy — at which point `foreground()` is `None` too. So no ⌃⌘Tab behavior changes; the
+correct claim is **after this wave, no ⌃⌘ gesture's OBSERVABLE behavior depends on
+`foreground()`** (not the stronger, falsified "no gesture reads `foreground()`
+directly").
+
+**Optional wave step (cleanup, not required for correctness — makes the claim literally
+true, zero behavior change):** drop the redundant `or sessions.foreground()` at
+`chooser.py:48`, leaving `origin = sessions.workspace()`.
 
 **Code touchpoints.** `src/sonari/daemon/features/focus.py:44-45,54`,
 `src/sonari/daemon/features/control.py:89-91` (+ W3's new confirm). Existing tests that
@@ -562,7 +628,7 @@ named above. It is last in the build order on purpose.
 
 Survey of the ACTUAL bound ⌃⌘ space (`keymap.py:54-60` + `platform/macos/hotkeys.py:
 111-122`): `S M J D W ← → ↑ ↓ = - Return Escape Tab ⇧Tab`. Keys already present in
-`keytables.py:4-21` but UNBOUND: `R L V O F P . ] [`. Digits are chooser-hold-internal
+`src/sonari/platform/macos/keytables.py:4-21` but UNBOUND: `R L V O F P . ] [`. Digits are chooser-hold-internal
 by ratified anchor (bare `⌃⌘digit` is deliberately inert — the flip-design is the owner's
 sketched reopen; no wave item may squat there).
 
@@ -634,13 +700,13 @@ The `", {u} unheard"` wording (W10) is his third gate.
 | W1 | extend `tests/test_daemon_focus_nav.py` | cue precedes a seeded backlog |
 | W2 | extend `tests/test_history.py` | stamp present, non-decreasing, injectable clock |
 | W3 | `tests/test_verbosity_confirm.py` | exact strings ×3, workspace routing, invalid silent |
-| W4 | `tests/test_jump_decision_miss.py` | queue preserved byte-for-byte on miss; the three GIVEN branches |
+| W4 | `tests/test_jump_decision_miss.py` | queue preserved byte-for-byte on miss; the three GIVEN branches, incl. the third re-speaking `_pending_decisions[...]["text"]` (not `st.options`); + REREAD_OPTIONS fallback to the same stored text (scope addition) |
 | W5 | `tests/test_voice_state_submit.py` | lift on take-voice; NO lift on deny / stopped-all / muted-self-submit; ⌃⌘W says "playing" |
 | W6 | `tests/test_failure_tones.py` | kind per call site; existing-config fallback never silent |
 | W7 | `tests/test_permission_expiry.py` | timeout → earcon + queue cleanup; answered/superseded → neither; in-flight edge |
 | W8 | `tests/test_boot_cue.py` | exact string, spoken once, non-blocking start |
 | W9 | `tests/test_decision_callsign.py` | sequenced chime→spearcon; sessionless fallback; miss fallback |
-| W10 | `tests/test_also_map_unheard.py` | quiet floor, `-k` no-double-count, non-quiet strings byte-identical |
+| W10 | `tests/test_also_map_unheard.py` | quiet floor, `-k` no-double-count, non-quiet strings unchanged in the ordinary (non-preemption) case; preemption-cut case asserts no spurious unheard beyond genuinely-unheard preempted content — not byte-identity |
 | W11 | `tests/test_pointer_collapse.py` + update the two foreground-pinned files | divergence cases; degenerate no-focus case byte-identical |
 | W12 | `tests/test_repeat_last.py` + **hammer-set addition** in `test_concurrency_guards.py` | verbatim incl. prefix; idempotent; capture-park-resume; "Nothing to repeat." |
 | W13 | `tests/test_keepgoing_preroll.py` + **hammer-set addition** | spearcon-claims-attribution; selection byte-identical; miss = today's splice; FLUSH mid-switch loses nothing |
