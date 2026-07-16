@@ -11,7 +11,7 @@ def test_stop_toggles_the_foreground_stopped_flag():
     assert daemon._stream("fg").stopped is False
 
 
-def test_stop_holds_loop_voices_cue_and_resume_replays_from_spot():
+def test_stop_holds_loop_voices_cue_and_resume_drops_pile_quietly():
     daemon, queue, speaker, *_ = make_daemon(foreground="fg")
     daemon._enqueue("fg", "prose", "hello", False)
     daemon.handle_message({"type": "stop_session", "session": "fg"})
@@ -20,11 +20,12 @@ def test_stop_holds_loop_voices_cue_and_resume_replays_from_spot():
     daemon._speak_loop_once()                  # nothing else exempt -> held
     assert speaker.spoken == ["Stopped."]
     assert "hello" not in speaker.spoken and len(queue) == 1   # backlog retained
-    daemon.handle_message({"type": "stop_session", "session": "fg"})   # resume
+    daemon.handle_message({"type": "stop_session", "session": "fg"})   # resume (D2 quiet resume)
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Stopped.", "Resumed."]          # confirmation first
+    assert speaker.spoken == ["Stopped.", "Resumed."]           # confirmation only
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Stopped.", "Resumed.", "hello"] # then continues from spot
+    assert speaker.spoken == ["Stopped.", "Resumed."]           # pre-start pile dropped, NOT replayed (D2)
+    assert len(queue) == 0                                      # "hello" cleared, not queued
 
 
 def test_stop_during_speech_requeues_interrupted_item():
@@ -96,7 +97,8 @@ def test_stop_all_is_one_way_each_session_returns_via_its_own_stop_key():
     sessions.set_foreground("B")
     daemon._speak_loop_once()
     assert "b" not in speaker.spoken          # landing on B does NOT auto-read it
-    daemon.handle_message({"type": "stop_session", "session": "B"})   # ⌃⌘S brings B back
+    daemon.handle_message({"type": "stop_session", "session": "B"})   # ⌃⌘S brings B back (D2 quiet resume)
     daemon._speak_loop_once()                 # "Resumed."
-    daemon._speak_loop_once()                 # then B's content
-    assert "b" in speaker.spoken
+    daemon._speak_loop_once()                 # pre-start pile dropped, not replayed (D2)
+    assert "b" not in speaker.spoken          # D2: quiet resume does not flood the backlog
+    assert "Resumed." in speaker.spoken

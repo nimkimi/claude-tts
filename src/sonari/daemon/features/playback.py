@@ -47,13 +47,18 @@ def on_stop_session(ctx, msg):
         return None
     st = ctx.host._stream(fg)
     if st.stopped:
-        # Resuming (⌃⌘S-start re-engage, SPEC:286): un-stop, lift to flowing, and MOVE
-        # THE VOICE to the started session so it is actually heard (set_speaker is a
-        # no-op when fg is already the speaker — the non-divergent case). "Resumed."
-        # leads (at_front, ahead of the interrupted item the speak loop re-queued).
+        # Resuming (⌃⌘S-start re-engage). D2 (2026-07-16): a QUIET RESUME. Un-stop,
+        # lift to flowing, and MOVE THE VOICE to the started session. DROP the pre-start
+        # QUEUE (its buffered pile) so start does NOT auto-drain it — the pile persists
+        # in the history transcript BEHIND the frozen frontier (nothing advanced it),
+        # reachable later by SP5's catch-up; only post-start output flows. Dropped
+        # decision items also persist in history, and a live blocking permission stays
+        # answerable via _pending_decisions / ⌃⌘D. The clear MUST precede the "Resumed."
+        # enqueue (which is at_front) so it is not itself dropped.
         st.stopped = False
         ctx.host.voice_state = "flowing"
         sessions.set_speaker(fg)
+        ctx.host._drop_pending(st.queue.clear())
         ctx.host._enqueue(fg, "prose", "Resumed.", False, mute_exempt=True, at_front=True)
     else:
         # Stopping -> quiet-hold (SPEC §6). Cancel only if THIS session is in flight.

@@ -262,7 +262,7 @@ def test_foreground_gating_only_fg_session_spoken():
 # Family: pause/resume re-queue
 # ---------------------------------------------------------------------------
 
-def test_stop_resume_requeues_interrupted_utterance():
+def test_stop_resume_drops_the_interrupted_utterance_quietly():
     daemon, speaker, log, sessions, config = make_net(foreground="fg")
     # poll_interval=0 so drain() doesn't block 0.1 s/iter when stopped with no
     # pause-exempt item left; wait(0) on threading.Event returns immediately.
@@ -270,12 +270,14 @@ def test_stop_resume_requeues_interrupted_utterance():
     prose(daemon, "fg", "interrupted. ", final=False)
     daemon.handle_message(msg(MsgType.STOP_SESSION, "fg"))
     drain(daemon)
-    daemon.handle_message(msg(MsgType.STOP_SESSION, "fg"))  # resume
+    daemon.handle_message(msg(MsgType.STOP_SESSION, "fg"))  # resume (D2 quiet resume)
     drain(daemon)
+    # D2 (2026-07-16): resume is a quiet resume — the pre-start queue.clear() drops
+    # the barge-in-requeued interrupted item too (the plan's stated honest gap: no
+    # auto-replay of a mid-utterance interruption until SP5's catch-up ships).
     assert log == [
         ("text", "Stopped."),
         ("text", "Resumed."),
-        ("text", "interrupted."),
     ]
 
 

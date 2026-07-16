@@ -195,3 +195,26 @@ def test_on_tool_falls_back_to_running_tool_when_no_summary():
         d.handle_message(_tool_msg("s0", "Bash", ""))
     entries = d.history.entries_for_message("s0", 0)
     assert entries[0].text == "Running Bash."
+
+
+def test_start_is_quiet_resume_drops_pre_start_pile_keeps_history():
+    from sonari.protocol import MsgType, PROTOCOL_VERSION
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    sessions.register("s0", cwd="/x/s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    st = d._stream("s0")
+    st.stopped = True                              # stopped, piling behind a frozen frontier
+    e1 = d.history.record("s0", "prose", "pile 1")
+    d._enqueue("s0", "prose", "pile 1", False, entry=e1, forward=True)
+    e2 = d.history.record("s0", "prose", "pile 2")
+    d._enqueue("s0", "prose", "pile 2", False, entry=e2, forward=True)
+    assert len(st.queue) == 2 and st.frontier is None
+    with d._state.transaction():                   # ⌃⌘S-start (Fork-4 asymmetric START)
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.STOP_SESSION,
+                          "session": "s0"})
+    assert st.stopped is False
+    assert [x.text for x in st.queue._items] == ["Resumed."]   # pre-start pile dropped from the queue
+    assert st.frontier is None                                 # frontier stayed BEHIND the pile
+    entries, _ = d.history.unheard_from_frontier("s0", st.frontier)
+    assert [e.text for e in entries] == ["pile 1", "pile 2"]   # pile persists, catch-up-reachable
+    assert d._pending_heard == {}                              # markers dropped, no orphans
