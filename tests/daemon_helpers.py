@@ -46,6 +46,7 @@ class FakeSpeaker:
         self.complete = True          # next speak() reports completed?
         self._epoch = 0
         self.pitches: list[str] = []  # pitch(direction) calls
+        self.earcon_seqs: list = []
 
     def speak(self, text=None, audio_path=None, cancel_epoch=None) -> bool:
         self.spoken.append(text)
@@ -57,6 +58,9 @@ class FakeSpeaker:
 
     def earcon(self, kind: str) -> None:
         self.earcons.append(kind)
+
+    def earcon_then(self, kind: str, audio_path) -> None:
+        self.earcon_seqs.append((kind, audio_path))
 
     def pitch(self, direction: str) -> None:
         self.pitches.append(direction)

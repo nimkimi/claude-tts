@@ -161,7 +161,11 @@ def on_permission_request(ctx, msg):
     host = ctx.host
     session = ctx.session
     text = _permission_request_text(msg)
-    host.speaker.earcon("permission")
+    sp = host._spearcon_path(host.sessions.folder(session))
+    if sp is not None:
+        host.speaker.earcon_then("permission", sp)     # W9: chime + call-sign
+    else:
+        host.speaker.earcon("permission")
     entry = host.history.record(session, "permission", text)
     host.history.end_message(session)
     host._flush_prose_buffer(session)        # prose before the permission ask

@@ -50,7 +50,7 @@ def handle_event(event: str, payload: dict) -> list[dict]:
         ti = payload.get("tool_input", {})
         if tool == "AskUserQuestion":
             return [
-                _msg(type=MsgType.EARCON, kind="choice"),
+                _msg(type=MsgType.EARCON, kind="choice", session=session),
                 _msg(
                     type=MsgType.CHOICE,
                     session=session,
@@ -59,7 +59,7 @@ def handle_event(event: str, payload: dict) -> list[dict]:
             ]
         if tool == "ExitPlanMode":
             return [
-                _msg(type=MsgType.EARCON, kind="plan"),
+                _msg(type=MsgType.EARCON, kind="plan", session=session),
                 _msg(type=MsgType.PLAN, session=session, text=ti.get("plan", "")),
             ]
         return [
@@ -75,7 +75,7 @@ def handle_event(event: str, payload: dict) -> list[dict]:
         nt = payload.get("notification_type") or payload.get("matcher")
         if nt == "permission_prompt":
             return [
-                _msg(type=MsgType.EARCON, kind="permission"),
+                _msg(type=MsgType.EARCON, kind="permission", session=session),
                 _msg(
                     type=MsgType.PERMISSION,
                     session=session,

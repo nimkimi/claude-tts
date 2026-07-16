@@ -55,7 +55,7 @@ def test_ask_user_question_earcon_then_choice():
         },
     }
     assert handle_event("PreToolUse", payload) == [
-        {"v": PROTOCOL_VERSION, "type": MsgType.EARCON, "kind": "choice"},
+        {"v": PROTOCOL_VERSION, "type": MsgType.EARCON, "kind": "choice", "session": "sess-1"},
         {
             "v": PROTOCOL_VERSION,
             "type": MsgType.CHOICE,
@@ -84,7 +84,7 @@ def test_exit_plan_mode_earcon_then_plan():
         "tool_input": {"plan": "Step one. Step two."},
     }
     assert handle_event("PreToolUse", payload) == [
-        {"v": PROTOCOL_VERSION, "type": MsgType.EARCON, "kind": "plan"},
+        {"v": PROTOCOL_VERSION, "type": MsgType.EARCON, "kind": "plan", "session": "sess-1"},
         {
             "v": PROTOCOL_VERSION,
             "type": MsgType.PLAN,
@@ -181,7 +181,7 @@ def test_notification_permission_prompt():
         "message": "Claude needs your permission to run a command",
     }
     assert handle_event("Notification", payload) == [
-        {"v": PROTOCOL_VERSION, "type": MsgType.EARCON, "kind": "permission"},
+        {"v": PROTOCOL_VERSION, "type": MsgType.EARCON, "kind": "permission", "session": "sess-1"},
         {
             "v": PROTOCOL_VERSION,
             "type": MsgType.PERMISSION,
@@ -372,3 +372,18 @@ def test_permission_decision_stdout_fallthrough_cases():
     # Non-dict reply (e.g. a string or int) must also fall through, not crash.
     assert permission_decision_stdout("allow") is None
     assert permission_decision_stdout(123) is None
+
+
+def test_decision_earcons_carry_the_session():
+    from sonari.hooks_entry import handle_event
+    msgs = handle_event("PreToolUse", {"session_id": "s1",
+                                       "tool_name": "AskUserQuestion",
+                                       "tool_input": {"questions": []}})
+    assert msgs[0] == {"v": 1, "type": "earcon", "kind": "choice", "session": "s1"}
+    msgs = handle_event("PreToolUse", {"session_id": "s1",
+                                       "tool_name": "ExitPlanMode",
+                                       "tool_input": {"plan": "p"}})
+    assert msgs[0] == {"v": 1, "type": "earcon", "kind": "plan", "session": "s1"}
+    msgs = handle_event("Notification", {"session_id": "s1",
+                                         "notification_type": "permission_prompt"})
+    assert msgs[0] == {"v": 1, "type": "earcon", "kind": "permission", "session": "s1"}
