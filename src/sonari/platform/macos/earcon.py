@@ -12,6 +12,10 @@ _DEFAULTS = {
     "plan":       "/System/Library/Sounds/Submarine.aiff",
     "error":      "/System/Library/Sounds/Sosumi.aiff",
     "turn_done":  "/System/Library/Sounds/Tink.aiff",
+    # W6 failure taxonomy (spec §7): distinct kinds, provisional assets —
+    # the OWNER's ear-pass may swap these paths (config-level, no code change).
+    "error_misdirected": "/System/Library/Sounds/Basso.aiff",  # "wrong door"
+    "error_system":      "/System/Library/Sounds/Blow.aiff",   # "broke inside"
 }
 
 

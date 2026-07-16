@@ -442,3 +442,42 @@ def test_keep_going_flush_race_leaves_no_orphan():
     assert daemon._current_item is None            # claim released
     assert len(daemon._stream("bg").queue) == 0    # item popped; FLUSH cleared nothing extra
     assert daemon._pending_heard == {}             # NO orphaned marker
+
+
+class _RaisingSpeaker:
+    """speak() always raises — the W6 failure-tone path: the real loop must
+    signal error_system audibly and survive (an eyes-free swallowed exception
+    is a SILENT no-op, the worst outcome)."""
+
+    def __init__(self):
+        self.earcons: list = []
+        self._epoch = 0
+
+    def speak(self, text=None, audio_path=None, cancel_epoch=None):
+        raise RuntimeError("synthesized failure")
+
+    def cancel_epoch(self):
+        return self._epoch
+
+    def cancel(self):
+        self._epoch += 1
+
+    def earcon(self, kind):
+        self.earcons.append(kind)
+
+
+def test_speak_failure_signals_error_system_and_the_loop_survives():
+    """W6 guard: a raising utterance inside the REAL _speak_loop_once fires the
+    error_system tone via _signal_speak_failure, releases the claim, and leaves
+    the loop able to keep going. PERMANENT, like everything in this file."""
+    sessions = SessionManager()
+    sessions.set_foreground("fg")
+    config = {k: (v.copy() if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
+    config["verbosity"] = "everything"
+    daemon = SpeechDaemon(None, sessions, config)
+    speaker = _RaisingSpeaker()
+    daemon.speaker = speaker
+    daemon._enqueue("fg", "prose", "doomed", False)
+    daemon._speak_loop_once()                      # must NOT propagate
+    assert "error_system" in speaker.earcons
+    assert daemon._current_item is None            # claim released, no wedge

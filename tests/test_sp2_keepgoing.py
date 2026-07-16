@@ -77,4 +77,4 @@ def test_keep_going_voiced_decision_unanswerable_until_jump():
     assert sessions.workspace() == "A"             # workspace still A (no deliberate move)
     daemon.handle_message(_msg(MsgType.ANSWER_PERMISSION, "", behavior="allow"))
     assert daemon._pending_decisions["B"]["behavior"] is None   # B NOT auto-answered
-    assert speaker.earcons[-1] == "error"          # fail-closed error tone (decisions.py:188)
+    assert speaker.earcons[-1] == "error_misdirected"   # W6 fail-closed tone (decisions.py:188)

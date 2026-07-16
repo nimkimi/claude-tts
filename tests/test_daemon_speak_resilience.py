@@ -80,7 +80,7 @@ def test_speak_failure_fires_error_earcon_and_notes_not_completed(monkeypatch):
 
     daemon._speak_loop_once()                    # exception contained, must not raise
 
-    assert speaker.earcons == ["error"]          # eyes-free user hears the failure
+    assert speaker.earcons == ["error_system"]   # W6: eyes-free user hears the failure
     assert noted == [False]                       # still marked not-completed (unchanged)
 
 
@@ -93,7 +93,7 @@ def test_speak_failure_on_pause_exempt_cue_fires_error_earcon(monkeypatch):
 
     daemon._speak_loop_once()                    # stopped-branch failure, contained
 
-    assert speaker.earcons == ["error"]
+    assert speaker.earcons == ["error_system"]   # W6
 
 
 def test_cancelled_utterance_does_not_fire_error_earcon(monkeypatch):
@@ -141,8 +141,8 @@ def test_signal_speak_failure_logs_traceback_to_stderr():
     assert "Traceback (most recent call last)" in stderr_output, (
         f"Expected traceback in stderr but got: {stderr_output!r}"
     )
-    assert speaker.earcons == ["error"], (
-        f"Expected error earcon but got: {speaker.earcons!r}"
+    assert speaker.earcons == ["error_system"], (  # W6
+        f"Expected error_system earcon but got: {speaker.earcons!r}"
     )
 
 

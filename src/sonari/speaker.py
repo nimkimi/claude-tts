@@ -5,6 +5,18 @@ import threading
 
 _DEFAULT_WAIT_TIMEOUT = 120  # seconds; generous upper bound for even long TTS
 
+# Failure/expiry earcon kinds added AFTER GA: bootstrap merges platform defaults
+# only when the whole `earcons` config key is absent (bootstrap.py:73-74), so on
+# an EXISTING install a new config-dict kind would be SILENTLY disabled — the
+# worst eyes-free failure. These kinds therefore resolve config-first, then fall
+# back to the built-in asset (the pitch() precedent, below). A config entry
+# always wins, so the owner swaps assets without a code change. Old kinds keep
+# today's silent-no-op semantics when unconfigured.
+_FALLBACK_EARCONS = {
+    "error_misdirected": "/System/Library/Sounds/Basso.aiff",
+    "error_system": "/System/Library/Sounds/Blow.aiff",
+}
+
 
 class Speaker:
     def __init__(
@@ -100,6 +112,8 @@ class Speaker:
         # Reap any finished earcon processes before launching a new one.
         self._reap_earcon_procs()
         path = self._earcons.get(kind)
+        if path is None:
+            path = _FALLBACK_EARCONS.get(kind)   # never-silent NEW kinds only
         if path is None:
             return
         proc = self._earcon_player(path)

@@ -186,7 +186,8 @@ def on_answer_permission(ctx, msg):
     target = host.sessions.workspace()
     pd = host._pending_decisions.get(target) if target is not None else None
     if pd is None:
-        host.speaker.earcon("error")         # nothing to answer on the focused session
+        # W6 misdirected: valid intent, wrong session — go to the asking one.
+        host.speaker.earcon("error_misdirected")
         return None
     pd["behavior"] = behavior
     pd["event"].set()

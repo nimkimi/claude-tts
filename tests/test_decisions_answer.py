@@ -66,7 +66,7 @@ def test_answer_on_session_without_pending_is_error_no_route():
     _dispatch(daemon, {"type": MsgType.ANSWER_PERMISSION, "behavior": "allow"})
     assert daemon._pending_decisions["B"]["behavior"] is None   # B was NOT answered
     assert not other.is_set()
-    assert "error" in speaker.earcons   # error earcon played
+    assert "error_misdirected" in speaker.earcons   # W6: misdirected-answer tone played
 
 
 def test_stale_prev_decision_released_on_new_request():

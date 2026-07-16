@@ -428,7 +428,7 @@ class SpeechDaemon:
         loop. Call only from within an active `except` block (print_exc reads the
         handled exception)."""
         try:
-            self.speaker.earcon("error")
+            self.speaker.earcon("error_system")   # W6: "Sonari itself failed; content preserved unheard"
         except Exception:  # noqa: BLE001 - signaling failure must not wedge the loop
             pass
         try:
