@@ -96,11 +96,17 @@ def on_stop_session(ctx, msg):
         # reachable later by SP5's catch-up; only post-start output flows. Dropped
         # decision items also persist in history, and a live blocking permission stays
         # answerable via _pending_decisions / ⌃⌘D. The clear MUST precede the "Resumed."
-        # enqueue (which is at_front) so it is not itself dropped.
+        # enqueue (which is at_front) so it is not itself dropped. Whole-branch review
+        # Minor 1: st.prose_buffer (sub-threshold prose held below minqueue) is a
+        # SECOND pre-start pile the queue clear doesn't touch — its entries are already
+        # in history (recorded at buffer time, prose.py on_prose), so dropping the
+        # buffer here just leaves them behind the frontier too, instead of letting the
+        # next turn boundary flush them forward=True and drag the frontier over them.
         st.stopped = False
         ctx.host.voice_state = "flowing"
         sessions.set_speaker(fg)
         ctx.host._drop_pending(st.queue.clear())
+        st.prose_buffer = []
         ctx.host._enqueue(fg, "prose", "Resumed.", False, mute_exempt=True, at_front=True)
     else:
         # Stopping -> quiet-hold (SPEC §6). Cancel only if THIS session is in flight.

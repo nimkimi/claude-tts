@@ -220,6 +220,40 @@ def test_start_is_quiet_resume_drops_pre_start_pile_keeps_history():
     assert d._pending_heard == {}                              # markers dropped, no orphans
 
 
+def test_quiet_resume_also_drops_the_buffered_prose_tail_below_frontier():
+    # Whole-branch review Minor 1: at minqueue>1, sub-threshold prose sits in
+    # st.prose_buffer (not the queue) while a session is stopped. D2's resume
+    # only cleared st.queue — the buffered tail survived, flushed with
+    # forward=True on the next turn boundary, and advanced the frontier OVER
+    # pre-start content, violating "the pile stays behind the frozen frontier."
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    sessions.register("s0", cwd="/x/s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    d.config["minqueue"] = 3
+    st = d._stream("s0")
+    st.stopped = True                              # stopped, piling behind a frozen frontier
+    with d._state.transaction():
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.PROSE, "session": "s0",
+                          "delta": "pre one. pre two. ", "index": 0, "final": False})
+    assert len(st.queue) == 0                       # below minqueue=3: buffered, not queued
+    with d._state.transaction():                   # ⌃⌘S-start (Fork-4 asymmetric START)
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.STOP_SESSION,
+                          "session": "s0"})
+    assert st.stopped is False
+    assert [x.text for x in st.queue._items] == ["Resumed."]   # pre-start queue dropped
+    with d._state.transaction():                    # end-of-turn boundary
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.EARCON,
+                          "kind": "turn_done", "session": "s0"})
+    # Speak everything now queued (mirrors the speak loop's note_spoken bookkeeping).
+    while len(st.queue):
+        item = st.queue.pop_next()
+        d._current_item = item
+        d.note_spoken(item, completed=True)
+    assert st.frontier is None                                   # frontier stayed BEHIND the pre-start pile
+    entries, _ = d.history.unheard_from_frontier("s0", st.frontier)
+    assert [e.text for e in entries] == ["pre one.", "pre two."]  # full pre-start pile, catch-up-reachable
+
+
 def test_skip_pile_is_a_resolvable_unbound_action():
     from sonari.keymap import ACTION_MESSAGES, resolve_keymap, default_keymap
     assert ACTION_MESSAGES["skip_pile"] == {"type": "skip_pile"}
