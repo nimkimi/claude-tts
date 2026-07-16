@@ -40,13 +40,22 @@ def on_prose(ctx, msg):
 def on_tool(ctx, msg):
     session = ctx.session                 # was: msg.get("session", "")
     verbosity = ctx.verbosity             # was: self.config.get("verbosity", "everything")
+    tool = msg.get("tool", "")
+    summary = (msg.get("summary") or "").strip()
+    text = summary if summary else "Running {0}.".format(tool)
+    # Fork A/A1: record the tool-use input summary to the transcript at EVERY
+    # verbosity (today on_tool records nothing in any verbosity — a total gap).
+    # `summary` is the already-computed generic string; agent-neutral, no new hook,
+    # no CC-specific shape crosses the socket. Own message group, like a decision.
+    entry = ctx.host.history.record(session, "tool", text)
+    ctx.host.history.end_message(session)
     if verbosity == "everything":
-        tool = msg.get("tool", "")
-        summary = (msg.get("summary") or "").strip()
-        text = summary if summary else "Running {0}.".format(tool)
-        # Keep textual order: read prose that preceded this tool call first.
+        # Everything also ANNOUNCES (medium's spoken summary + quiet are §15 Pass-2).
+        # Keep textual order: read prose that preceded this tool call first, then link
+        # the announce to its entry (forward=True) so hearing it advances the frontier.
         ctx.host._flush_prose_buffer(session)
-        ctx.host._enqueue(session, "tool_announce", text, False)
+        ctx.host._enqueue(session, "tool_announce", text, False,
+                          entry=entry, forward=True)
     return None
 
 

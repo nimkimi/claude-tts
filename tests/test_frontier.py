@@ -153,3 +153,45 @@ def test_note_spoken_advances_frontier_on_decision_readout_completion():
     d._state._pending_heard[it.id] = e; d._current_item = it
     d.note_spoken(it, completed=True)
     assert e.heard is True and st.frontier == (e.msg_id, e.seq)
+
+
+def _tool_msg(session, tool, summary):
+    from sonari.protocol import PROTOCOL_VERSION, MsgType
+    return {"v": PROTOCOL_VERSION, "type": MsgType.TOOL, "session": session,
+            "tool": tool, "summary": summary}
+
+
+def test_on_tool_records_history_at_every_verbosity():
+    for verb in ("everything", "medium", "quiet"):
+        sessions = SessionManager(); sessions.set_foreground("s0")
+        c = _cfg(); c["verbosity"] = verb
+        d = SpeechDaemon(_FakeSpeaker(), sessions, c)
+        with d._state.transaction():
+            d.handle_message(_tool_msg("s0", "Grep", "searching for TODO"))
+        entries = d.history.entries_for_message("s0", 0)
+        assert [(e.kind, e.text) for e in entries] == [("tool", "searching for TODO")], verb
+
+
+def test_on_tool_announces_forward_at_everything_only():
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())      # everything
+    with d._state.transaction():
+        d.handle_message(_tool_msg("s0", "Grep", "searching for TODO"))
+    announce = [x for x in d._stream("s0").queue._items if x.kind == "tool_announce"]
+    assert announce and announce[0].forward is True
+
+    sessions2 = SessionManager(); sessions2.set_foreground("s0")
+    c = _cfg(); c["verbosity"] = "medium"
+    d2 = SpeechDaemon(_FakeSpeaker(), sessions2, c)
+    with d2._state.transaction():
+        d2.handle_message(_tool_msg("s0", "Grep", "searching for TODO"))
+    assert not [x for x in d2._stream("s0").queue._items if x.kind == "tool_announce"]
+
+
+def test_on_tool_falls_back_to_running_tool_when_no_summary():
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    with d._state.transaction():
+        d.handle_message(_tool_msg("s0", "Bash", ""))
+    entries = d.history.entries_for_message("s0", 0)
+    assert entries[0].text == "Running Bash."

@@ -18,7 +18,7 @@ class HistoryEntry:
     def __init__(self, text: str, kind: str, msg_id: int, seq: int = 0,
                  turn_id: int = 0, stamp: float = 0.0) -> None:
         self.text = text
-        self.kind = kind          # prose|choice|plan|permission
+        self.kind = kind          # prose|choice|plan|permission|tool
         self.msg_id = msg_id      # message group; bumped by end_message()/start_turn()
         self.seq = seq            # 0-based index within the group; seq 0 == its head
         self.turn_id = turn_id    # turn group; bumped by start_turn() (a new prompt)
