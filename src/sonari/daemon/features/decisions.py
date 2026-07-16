@@ -165,13 +165,13 @@ def on_permission_request(ctx, msg):
     entry = host.history.record(session, "permission", text)
     host.history.end_message(session)
     host._flush_prose_buffer(session)        # prose before the permission ask
-    host._enqueue(session, "permission", text, True, entry=entry)
+    item_id = host._enqueue(session, "permission", text, True, entry=entry)
     # We are under the daemon lock here, so mutate the store directly.
     prev = host._pending_decisions.get(session)
     if prev is not None:
         prev["event"].set()                  # release any stale waiter for this session
-    host._pending_decisions[session] = {"event": threading.Event(),
-                                        "behavior": None, "text": text}
+    host._pending_decisions[session] = {"event": threading.Event(), "behavior": None,
+                                        "text": text, "item_id": item_id}
     return {"__await_decision__": True, "session": session}
 
 

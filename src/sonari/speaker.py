@@ -15,6 +15,7 @@ _DEFAULT_WAIT_TIMEOUT = 120  # seconds; generous upper bound for even long TTS
 _FALLBACK_EARCONS = {
     "error_misdirected": "/System/Library/Sounds/Basso.aiff",
     "error_system": "/System/Library/Sounds/Blow.aiff",
+    "permission_expired": "/System/Library/Sounds/Purr.aiff",
 }
 
 

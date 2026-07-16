@@ -16,6 +16,8 @@ _DEFAULTS = {
     # the OWNER's ear-pass may swap these paths (config-level, no code change).
     "error_misdirected": "/System/Library/Sounds/Basso.aiff",  # "wrong door"
     "error_system":      "/System/Library/Sounds/Blow.aiff",   # "broke inside"
+    # W7 permission expiry (spec §8): provisional asset, owner's ear-pass swaps it.
+    "permission_expired": "/System/Library/Sounds/Purr.aiff",  # "it slipped away"
 }
 
 

@@ -223,7 +223,9 @@ class SpeechDaemon:
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
                  entry=None, mute_exempt: bool = False,
                  pause_exempt: bool = False, at_front: bool = False,
-                 names_session: bool = False, audio_path=None) -> None:
+                 names_session: bool = False, audio_path=None) -> int:
+        """Returns the new item's id (W7: on_permission_request tracks its queued
+        ask); all other callers ignore it."""
         item = SpeechItem(
             id=self._alloc_id(),
             session=session,
@@ -245,6 +247,7 @@ class SpeechDaemon:
             if evicted is not None:
                 self._drop_pending([evicted])
         self._state._wake.set()
+        return item.id
 
     def _minqueue(self) -> int:
         try:
@@ -333,7 +336,33 @@ class SpeechDaemon:
             # Pop only if still ours (a newer request for the same session may have replaced it).
             if self._pending_decisions.get(session) is pd:
                 self._pending_decisions.pop(session, None)
+                if not got:
+                    # W7: the ask silently died at the wall. Mark it audibly and
+                    # remove the now-unanswerable queued text so a later read/⌃⌘D
+                    # never voices a dead ask as live. History is KEPT (transcript
+                    # replay is explicit archaeology; only the QUEUE must not lie).
+                    self._expire_permission(session, pd)
         return {"decision": behavior}
+
+    def _expire_permission(self, session: str, pd: dict) -> None:
+        """Timeout housekeeping for a dead blocking permission (W7). Caller holds
+        self._lock — the cleanup takes the lock exactly as the existing pop does,
+        no new lock ordering. The earcon is a fire-and-forget Popen. If the text
+        is IN FLIGHT (already popped) remove_by_id misses: it finishes playing and
+        the expiry earcon beside it is the honest context (accepted edge)."""
+        try:
+            self.speaker.earcon("permission_expired")
+        except Exception:  # noqa: BLE001 - expiry signaling must never break the reply
+            pass
+        item_id = pd.get("item_id")
+        if item_id is None:
+            return
+        st = self._state._streams.get(session)
+        if st is None:
+            return
+        removed = st.queue.remove_by_id(item_id)
+        if removed is not None:
+            self._state._pending_heard.pop(item_id, None)
 
     def handle_message(self, msg):
         self._ctx.bind(msg)
