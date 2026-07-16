@@ -175,6 +175,29 @@ def test_clause_order_decision_then_waiting_then_unheard_then_stale():
     assert "Also: 2 b, decision, 1 waiting, 1 unheard, stale." in out
 
 
+def test_focus_before_first_prompt_still_diverges(monkeypatch):
+    """Ear-pass repro (2026-07-16): fresh roster; the user focuses a NEW window
+    (os_focus fires first and resolves to nobody), THEN prompts it (identity
+    lands via SET_FOREGROUND while the voice is busy elsewhere -> register
+    only). No further focus change happens before ⌃⌘W — the readout must
+    still see the diverged keyboard."""
+    _liveness(monkeypatch)
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    sessions.register("fg", cwd="/x/fg")
+    sessions.set_identity("fg", Identity(term_program="Apple_Terminal", tty="/dev/ttysA"))
+    sessions.set_speaker("fg")
+    daemon._enqueue("fg", "prose", "narrating.", False)   # voice busy: Policy A registers only
+    # Window switch: the watcher reports the new window's tty before any session claims it.
+    daemon.handle_message({"type": "os_focus",
+                           "term_program": "Apple_Terminal", "tty": "/dev/ttysB"})
+    # First prompt in that window: registration + identity arrive together.
+    daemon.handle_message(_msg("set_foreground", "other", cwd="/x/other",
+                               term_program="Apple_Terminal", tty="/dev/ttysB"))
+    out = _where(daemon, speaker, "fg")
+    assert out.startswith("Voice: fg 1,")
+    assert "Keyboard: other 2" in out
+
+
 def test_ten_plus_quiet_sessions_degrade_to_many_never_a_digit():
     """Reviewer fix: above the word map the collapse count must stay digit-free
     ("many"), never revive a spoken numeral."""

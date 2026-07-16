@@ -222,6 +222,49 @@ def test_focused_session_none_after_unregister():
     assert sm.focused_session() is None
 
 
+def test_os_focus_retained_and_resolved_when_identity_arrives_late():
+    # Live repro (ear pass 2026-07-16): focus lands on a window BEFORE its
+    # session's first prompt registers an identity. The watcher dedupes
+    # unchanged focus so the signal never re-fires — the manager must retain
+    # the raw focus and repair the pin when the identity arrives.
+    sm = SessionManager()
+    sm.register("a"); sm.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
+    sm.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys002")   # nobody claims it yet
+    assert sm.focused_session() is None
+    sm.register("b"); sm.set_identity("b", Identity(term_program="Apple_Terminal", tty="/dev/ttys002"))
+    assert sm.focused_session() == "b"
+
+
+def test_os_focus_late_identity_resolves_iterm_guid_too():
+    sm = SessionManager()
+    sm.set_os_focus(term_program="iTerm.app", iterm_session_id="ABCD-1234")
+    assert sm.focused_session() is None
+    sm.register("a")
+    sm.set_identity("a", Identity(term_program="iTerm.app", iterm_session_id="w0t1p2:ABCD-1234"))
+    assert sm.focused_session() == "a"
+
+
+def test_os_focus_false_also_drops_the_retained_raw_focus():
+    # Leaving the terminal app must forget the raw focus too: an identity
+    # arriving later must never resurrect a pre-departure pin.
+    sm = SessionManager()
+    sm.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys002")
+    sm.set_os_focus(focused=False)
+    sm.register("b"); sm.set_identity("b", Identity(term_program="Apple_Terminal", tty="/dev/ttys002"))
+    assert sm.focused_session() is None
+
+
+def test_os_focus_late_resolution_never_steals_a_live_pin():
+    # Repair is None -> match only: an unrelated identity arriving while the
+    # pin is already resolved must not re-adjudicate it.
+    sm = SessionManager()
+    sm.register("a"); sm.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
+    sm.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys001")
+    assert sm.focused_session() == "a"
+    sm.register("b"); sm.set_identity("b", Identity(term_program="Apple_Terminal", tty="/dev/ttys002"))
+    assert sm.focused_session() == "a"
+
+
 # --- roster (cycle-session) ----------------------------------------------
 
 def test_session_ids_empty_initially():

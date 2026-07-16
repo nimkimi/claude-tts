@@ -44,6 +44,12 @@ class SessionManager:
         # SP1: kept == _foreground (deliberate setters move both). SP2's keep-going
         # will advance _speaker on its own, diverging from _foreground (= last-acted).
         self._os_focused_session: "str | None" = None    # session in the OS-focused terminal
+        # Last raw focus signal (term_program, tty, iterm_session_id), retained
+        # while a terminal stays focused. The watcher dedupes unchanged focus, so
+        # a signal that lands before its session's first prompt (no identity yet)
+        # resolves to None and never re-fires — set_identity repairs the pin from
+        # this instead (late-identity repair, ear-pass find 2026-07-16).
+        self._os_focus_raw: "tuple[str, str, str] | None" = None
         self._identities: "dict[str, Identity]" = {}
         # Sessions whose tty claim was taken over by another session (the node was
         # recycled by a NEW terminal — pty names reuse the lowest free number, so a
@@ -205,12 +211,21 @@ class SessionManager:
         existing = self._identities.get(session)
         if existing is None:
             self._identities[session] = identity
-            return
-        self._identities[session] = Identity(
-            term_program=identity.term_program or existing.term_program,
-            tty=identity.tty or existing.tty,
-            iterm_session_id=identity.iterm_session_id or existing.iterm_session_id,
-        )
+        else:
+            self._identities[session] = Identity(
+                term_program=identity.term_program or existing.term_program,
+                tty=identity.tty or existing.tty,
+                iterm_session_id=identity.iterm_session_id or existing.iterm_session_id,
+            )
+        # Late-identity repair (ear-pass find 2026-07-16): a focus signal that
+        # arrived before this identity existed resolved to None, and — the watcher
+        # dedupes unchanged focus — will never re-fire while that terminal stays
+        # front. This identity may be the missing claimant, so re-resolve the
+        # retained raw signal. Repair-only (None -> match): a live pin is never
+        # re-adjudicated here — pin transfer on a tty steal stays the eviction
+        # loop's job above.
+        if self._os_focused_session is None and self._os_focus_raw is not None:
+            self._resolve_os_focus()
 
     def identity(self, session: str) -> "Identity | None":
         return self._identities.get(session)
@@ -237,16 +252,26 @@ class SessionManager:
     def set_os_focus(self, term_program: str = "", tty: str = "",
                      iterm_session_id: str = "", focused: bool = True) -> None:
         """Record which terminal currently has OS keyboard focus, resolved to a live
-        session. `focused=False` (or an unresolvable identity) clears it. Match is by
-        NON-EMPTY identity only: tty for Apple_Terminal, bare GUID for iTerm.app. This
-        is the INBOUND focus signal — distinct from focus()/foreground() (the voice)."""
+        session. `focused=False` (or an unresolvable identity) clears it — including
+        the retained raw signal, so a later identity never resurrects a pre-departure
+        pin. Match is by NON-EMPTY identity only: tty for Apple_Terminal, bare GUID
+        for iTerm.app. This is the INBOUND focus signal — distinct from
+        focus()/foreground() (the voice)."""
         if not focused:
+            self._os_focus_raw = None
             self._os_focused_session = None
             return
-        # An evicted session must not win the pin on ANY axis: eviction clears the
-        # tty (so the tty branch can't match it) but PRESERVES iterm_session_id, and
-        # same-pane succession leaves the ghost sharing the survivor's GUID with no
-        # self-heal (its empty tty means later captures skip the eviction loop).
+        self._os_focus_raw = (term_program, tty, iterm_session_id)
+        self._resolve_os_focus()
+
+    def _resolve_os_focus(self) -> None:
+        """Resolve the retained raw focus signal against the current identities.
+        Called on every inbound signal AND from set_identity's late-identity repair.
+        An evicted session must not win the pin on ANY axis: eviction clears the
+        tty (so the tty branch can't match it) but PRESERVES iterm_session_id, and
+        same-pane succession leaves the ghost sharing the survivor's GUID with no
+        self-heal (its empty tty means later captures skip the eviction loop)."""
+        term_program, tty, iterm_session_id = self._os_focus_raw
         match = None
         if term_program == "Apple_Terminal" and tty:
             for sess, ident in self._identities.items():
