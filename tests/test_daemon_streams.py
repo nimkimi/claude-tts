@@ -111,7 +111,7 @@ def test_jump_waiting_excludes_current_foreground_backlog():
     _prose(daemon, "a", "my own backlog. ")             # only the foreground has backlog
     daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
     assert sessions.foreground() == "a"
-    assert queue._items[-1].text == "No session waiting."
+    assert queue._items[0].text == "No session waiting."
 
 def test_jump_waiting_skips_a_stopped_background_session():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="a")
@@ -119,7 +119,7 @@ def test_jump_waiting_skips_a_stopped_background_session():
     _prose(daemon, "b", "secret. ")
     daemon.handle_message(_msg(MsgType.JUMP_WAITING, "a"))
     assert sessions.foreground() == "a"
-    assert queue._items[-1].text == "No session waiting."
+    assert queue._items[0].text == "No session waiting."
 
 # --- turn-completion ding (Task 3, SP3: waiting retired) ----------------------
 

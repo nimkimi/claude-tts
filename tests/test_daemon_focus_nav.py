@@ -150,3 +150,16 @@ def test_jump_waiting_diagnostic_identity_tty_empty(capsys):
     captured = capsys.readouterr()
     # Should emit diagnostic with identity=tty-empty (since b's identity tty is empty).
     assert "sonari[focus]: jump_waiting target=b identity=tty-empty will_raise=" in captured.err
+
+
+def test_jump_waiting_empty_cue_is_voiced_ahead_of_the_backlog():
+    """W1: pressed mid-flood, 'No session waiting.' must be the NEXT thing voiced,
+    not the tail of the very backlog you're escaping (spec §2)."""
+    from tests.daemon_helpers import make_daemon
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon._enqueue("fg", "prose", "backlog one.", False)
+    daemon._enqueue("fg", "prose", "backlog two.", False)
+    daemon.handle_message({"v": 1, "type": "jump_waiting", "session": "fg"})
+    texts = [it.text for it in queue._items]
+    assert texts[0] == "No session waiting."
+    assert texts[1:] == ["backlog one.", "backlog two."]

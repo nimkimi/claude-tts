@@ -234,3 +234,25 @@ def test_turn_ids_excludes_evicted_and_truncated_turns():
     h.record("s", "prose", "b1")                            # evicts a1 (turn 0 head)
     assert h.message_ids_in_turn("s", 0) == []              # turn 0 truncated
     assert h.turn_ids("s") == [1]                           # turn 0 excluded
+
+
+def test_record_stamps_with_injected_monotonic_clock():
+    """W2/E1: stamps come from the injected clock, non-decreasing (spec §3)."""
+    ticks = iter([10.0, 11.5, 11.5, 12.0])
+    h = SessionHistory(cap=10, clock=lambda: next(ticks))
+    e1 = h.record("s", "prose", "a")
+    e2 = h.record("s", "prose", "b")
+    e3 = h.record("s", "prose", "c")
+    assert (e1.stamp, e2.stamp, e3.stamp) == (10.0, 11.5, 11.5)
+    assert e1.stamp <= e2.stamp <= e3.stamp
+
+
+def test_default_clock_is_monotonic_and_bounded():
+    """Default clock = time.monotonic (ratified: monotonic, NOT time.time)."""
+    import time as _t
+    h = SessionHistory(cap=4)
+    lo = _t.monotonic()
+    e1 = h.record("s", "prose", "a")
+    e2 = h.record("s", "prose", "b")
+    hi = _t.monotonic()
+    assert lo <= e1.stamp <= e2.stamp <= hi

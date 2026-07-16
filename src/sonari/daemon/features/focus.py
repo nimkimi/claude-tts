@@ -54,7 +54,7 @@ def on_jump_waiting(ctx, msg):
         tgt = ctx.host.sessions.speaker() or fg
         if tgt is not None:
             ctx.host._enqueue(tgt, "prose", "No session waiting.", False,
-                              mute_exempt=True, pause_exempt=True)
+                              mute_exempt=True, pause_exempt=True, at_front=True)
         else:
             ctx.host.speaker.earcon("error")
         return None

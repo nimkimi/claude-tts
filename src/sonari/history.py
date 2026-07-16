@@ -8,25 +8,29 @@ transcript (Stage 4); SESSION_END clears it, a new prompt only opens a new turn.
 """
 from __future__ import annotations
 
+import time
 from collections import deque
 
 
 class HistoryEntry:
-    __slots__ = ("text", "kind", "msg_id", "seq", "turn_id", "heard")
+    __slots__ = ("text", "kind", "msg_id", "seq", "turn_id", "heard", "stamp")
 
     def __init__(self, text: str, kind: str, msg_id: int, seq: int = 0,
-                 turn_id: int = 0) -> None:
+                 turn_id: int = 0, stamp: float = 0.0) -> None:
         self.text = text
         self.kind = kind          # prose|choice|plan|permission
         self.msg_id = msg_id      # message group; bumped by end_message()/start_turn()
         self.seq = seq            # 0-based index within the group; seq 0 == its head
         self.turn_id = turn_id    # turn group; bumped by start_turn() (a new prompt)
         self.heard = False
+        self.stamp = stamp        # monotonic clock at record time (W2/E1 substrate;
+                                  # NO spoken string/earcon/handler reads it this wave)
 
 
 class SessionHistory:
-    def __init__(self, cap: int = 200) -> None:
+    def __init__(self, cap: int = 200, clock=time.monotonic) -> None:
         self._cap = cap
+        self._clock = clock       # injectable for tests; monotonic by ratification
         self._entries: "dict[str, deque]" = {}
         self._msg_id: "dict[str, int]" = {}
         self._group_seq: "dict[str, int]" = {}   # next entry index within the open group
@@ -39,7 +43,7 @@ class SessionHistory:
             self._entries[session] = d
         seq = self._group_seq.get(session, 0)
         entry = HistoryEntry(text, kind, self._msg_id.get(session, 0), seq,
-                             self._turn_id.get(session, 0))
+                             self._turn_id.get(session, 0), stamp=self._clock())
         self._group_seq[session] = seq + 1
         d.append(entry)
         return entry
