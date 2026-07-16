@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 
 from sonari.config import load_config
 from sonari.paths import SINGLETON_PATH, ensure_sonari_dir, socket_connectable
@@ -48,6 +49,28 @@ def _arm_faulthandler() -> None:
         pass
 
 
+# W8 (spec §9): spoken once per daemon boot, at every verbosity — a trust cue,
+# not narration. Exported as a constant so the test imports the exact string.
+BOOT_CUE = "Sonari restarted. Sessions re-register on their next prompt."
+
+
+def _start_boot_cue(speaker) -> None:
+    """Speak the restart trust cue on a one-shot daemon thread (W8). The cue
+    CANNOT ride the queue: at boot no session is registered, the speak loop
+    plays only speaker()'s stream and keep-going scans only registered sessions
+    — an enqueued boot cue would never voice. A direct thread keeps the socket
+    bind (which lazy-start clients poll) unblocked; the overlap window with the
+    first real utterance is human-timescale-empty (sessions re-register on
+    their next prompt). Never raises."""
+    def _run() -> None:
+        try:
+            speaker.speak(BOOT_CUE)
+        except Exception:  # noqa: BLE001 - the cue must never break startup
+            pass
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def main() -> None:
     _arm_faulthandler()
     # Single-instance guard. The fast path avoids work when a daemon is clearly
@@ -90,6 +113,7 @@ def main() -> None:
     )
     spearcons.cleanup()                       # prune stale cache files at daemon start
     daemon = SpeechDaemon(speaker, sessions, cfg, spearcons=spearcons)
+    _start_boot_cue(speaker)          # W8: restart trust cue (pre-loop, pre-session)
     daemon.run()
 
 
