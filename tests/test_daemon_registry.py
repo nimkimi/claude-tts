@@ -120,6 +120,7 @@ ALL_TYPES = [
     _MsgType.CHOOSER_STEP, _MsgType.CHOOSER_DIGIT,
     _MsgType.CHOOSER_COMMIT, _MsgType.CHOOSER_CANCEL,
     _MsgType.REPEAT_LAST,
+    _MsgType.SKIP_PILE,
 ]
 
 

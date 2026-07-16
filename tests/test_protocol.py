@@ -134,6 +134,7 @@ def test_msgtype_defines_no_extra_string_constants():
         "CHOOSER_COMMIT": "chooser_commit",
         "CHOOSER_CANCEL": "chooser_cancel",
         "REPEAT_LAST": "repeat_last",
+        "SKIP_PILE": "skip_pile",
     }
     assert actual == expected
 

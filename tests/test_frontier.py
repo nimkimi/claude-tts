@@ -218,3 +218,59 @@ def test_start_is_quiet_resume_drops_pre_start_pile_keeps_history():
     entries, _ = d.history.unheard_from_frontier("s0", st.frontier)
     assert [e.text for e in entries] == ["pile 1", "pile 2"]   # pile persists, catch-up-reachable
     assert d._pending_heard == {}                              # markers dropped, no orphans
+
+
+def test_skip_pile_is_a_resolvable_unbound_action():
+    from sonari.keymap import ACTION_MESSAGES, resolve_keymap, default_keymap
+    assert ACTION_MESSAGES["skip_pile"] == {"type": "skip_pile"}
+    assert "skip_pile" not in default_keymap()          # ships UNBOUND — his ear-gate chord
+    binding = default_keymap()["where_am_i"]            # a known-good key+mods for this platform
+    resolved = resolve_keymap({"skip_pile": binding})
+    assert any(r["action"] == "skip_pile" for r in resolved)   # bindable via keymap.json
+
+
+def test_skip_pile_advances_frontier_and_announces_count():
+    from sonari.protocol import MsgType, PROTOCOL_VERSION
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    sessions.register("s0", cwd="/x/s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    st = d._stream("s0")
+    for i in range(3):
+        e = d.history.record("s0", "prose", "p{0}".format(i)); d.history.end_message("s0")
+        d._enqueue("s0", "prose", "p{0}".format(i), False, entry=e, forward=True)
+    assert st.frontier is None and len(st.queue) == 3
+    with d._state.transaction():
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "s0"})
+    assert st.frontier == d.history.newest_key("s0")     # advanced PAST the pile to live
+    assert all(not e.heard for e in d.history.entries_for_message("s0", 2))  # NOT marked heard
+    ahead, _ = d.history.unheard_from_frontier("s0", st.frontier)
+    assert ahead == []                                   # pile now below the frontier
+    assert [x.text for x in st.queue._items] == ["Skipping 3 items."]  # count cue; pile dropped
+    assert d._pending_heard == {}
+
+
+def test_skip_pile_nothing_to_skip_does_not_nag():
+    from sonari.protocol import MsgType, PROTOCOL_VERSION
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    sessions.register("s0", cwd="/x/s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    with d._state.transaction():
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "s0"})
+    assert [x.text for x in d._stream("s0").queue._items] == ["Nothing to skip."]
+
+
+def test_skip_pile_targets_speaker_under_divergence():
+    from sonari.protocol import MsgType, PROTOCOL_VERSION
+    sessions = SessionManager(); sessions.set_foreground("ws")
+    sessions.register("ws", cwd="/x/ws"); sessions.register("spk", cwd="/x/spk")
+    sessions.set_speaker("spk")                          # diverged: speaker != workspace
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    d.voice_state = "flowing"
+    spk_st = d._stream("spk")
+    e = d.history.record("spk", "prose", "flood")
+    d._enqueue("spk", "prose", "flood", False, entry=e, forward=True)
+    with d._state.transaction():
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "ws"})
+    assert spk_st.frontier == d.history.newest_key("spk")   # C1: the SPEAKER's frontier advanced
+    assert d._stream("ws").frontier is None                 # the workspace was NOT touched
+    assert sessions.workspace() == "ws"                     # window unmoved

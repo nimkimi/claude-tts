@@ -45,6 +45,10 @@ ACTION_MESSAGES = {
     "deny": {"type": "answer_permission", "behavior": "deny"},         # ⌃⌘Escape: deny permission prompt
     "faster": {"type": "set_rate", "delta": 25},
     "slower": {"type": "set_rate", "delta": -25},
+    # SP4 pile-skip: bindable + resolvable, but ships UNBOUND (NOT in _DEFAULT_KEYS) —
+    # the chord is Nima's ear-gate. Proposed: ⌃⌘⇧↓ (keymap.json: key "down",
+    # mods ["ctrl","cmd","shift"]).
+    "skip_pile": {"type": "skip_pile"},
 }
 
 # Shared action -> default key. The chord modifiers are platform-defaulted (macOS:

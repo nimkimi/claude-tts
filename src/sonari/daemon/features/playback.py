@@ -28,6 +28,48 @@ def on_skip(ctx, msg):
     return None
 
 
+@handler(MsgType.SKIP_PILE)
+def on_skip_pile(ctx, msg):
+    # Deliberate PILE-SKIP (Fork B1): a distinct confirmatory gesture (NOT the safe ⌃⌘↓
+    # browse return) that advances the frontier PAST the unheard pile to the live edge
+    # and SPEAKS a count — the skipped entries stay heard=False in the transcript
+    # (browsable) but BELOW the frontier (out of the auto-catch-up path). Fork C1: under
+    # divergence (voice flowing, speaker != workspace) it targets the flooding SPEAKER
+    # and does NOT move the window; otherwise the workspace. Frontier write-path (b).
+    host = ctx.host
+    sessions = host.sessions
+    ws = sessions.workspace()
+    spk = sessions.speaker()
+    if host.voice_state == "flowing" and spk is not None and spk != ws:
+        target = spk                     # C1: skip the flooder, keep the window put
+    else:
+        target = ws
+    if target is None:
+        host.speaker.earcon("error")
+        return None
+    st = host._stream(target)
+    entries, _ = host.history.unheard_from_frontier(target, st.frontier)
+    count = len(entries)
+    if count == 0:
+        # Nothing ahead of the frontier — do NOT nag "skipped 0" (B3 rejected).
+        host._enqueue(target, "prose", "Nothing to skip.", False,
+                      mute_exempt=True, pause_exempt=True, at_front=True)
+        return None
+    # Advance PAST the pile to the live edge WITHOUT marking the skipped entries heard.
+    st.advance_frontier(host.history.newest_key(target))
+    # Stop the flood: drop the target's queued pile and cut its in-flight utterance.
+    host._drop_pending(st.queue.clear())
+    cur = host._current_item
+    if cur is not None and cur.session == target:
+        host.speaker.cancel()
+    # Confirmatory count — OWNER EAR-GATE string (grammar v2: role word "item(s)"
+    # adjacent to the number). Barge-in-class cue: mute_exempt + pause_exempt + at_front.
+    noun = "item" if count == 1 else "items"
+    host._enqueue(target, "prose", "Skipping {0} {1}.".format(count, noun), False,
+                  mute_exempt=True, pause_exempt=True, at_front=True)
+    return None
+
+
 @handler(MsgType.STOP_SESSION)
 def on_stop_session(ctx, msg):
     # ⌃⌘S per-session stop/start. Fork 4 = ASYMMETRIC target: if the session you
