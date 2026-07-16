@@ -110,6 +110,17 @@ def on_set_verbosity(ctx, msg):
         return None
     ctx.host.config["verbosity"] = v
     save_config(ctx.host.config)
+    # W3: confirm on the LIVE path (the built confirmation was stranded on the
+    # dead CYCLE_VERBOSITY handler, 0 senders). Targets workspace() (W11's
+    # collapsed pointer — the terminal you're at hears its own confirmation);
+    # mute_exempt+pause_exempt so a settings readback can never be silently
+    # swallowed while the voice is held — "Verbosity quiet." IS the last thing
+    # you hear (direct _enqueue cues bypass the on_prose quiet gate).
+    # Idempotent by design: setting the same value re-confirms (readback).
+    ws = ctx.host.sessions.workspace()
+    if ws is not None:
+        ctx.host._enqueue(ws, "prose", "Verbosity {0}.".format(v), False,
+                          mute_exempt=True, pause_exempt=True)
     return None
 
 
