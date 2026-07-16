@@ -170,7 +170,8 @@ def on_permission_request(ctx, msg):
     prev = host._pending_decisions.get(session)
     if prev is not None:
         prev["event"].set()                  # release any stale waiter for this session
-    host._pending_decisions[session] = {"event": threading.Event(), "behavior": None}
+    host._pending_decisions[session] = {"event": threading.Event(),
+                                        "behavior": None, "text": text}
     return {"__await_decision__": True, "session": session}
 
 
@@ -204,6 +205,14 @@ def on_reread_options(ctx, msg):
         return None
     st = ctx.host._streams.get(fg)
     text = st.options if st is not None else None
+    if not text:
+        # W4 sub-item: a live blocking permission never sets st.options
+        # (on_permission_request writes _pending_decisions, not options), so
+        # without this fallback REREAD_OPTIONS is silently broken for exactly
+        # the asks that matter. Re-speak the stored prompt instead of lying.
+        pending = ctx.host._pending_decisions.get(fg)
+        if pending is not None:
+            text = pending.get("text")
     if text:
         ctx.host._enqueue(fg, "choice", text, False)
     else:

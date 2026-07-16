@@ -96,6 +96,29 @@ def on_jump_decision(ctx, msg):
     # decision (crossed→focus+folder cue); otherwise jump within the foreground.
     sessions = ctx.host.sessions
     target = sessions.workspace()
+    # W4 miss safety: a HIT = a queued decision item OR a live pending blocking
+    # decision. has_decision() scans QUEUED items only (queue.py:78-81), so an
+    # answerable-but-already-narrated permission has an empty queue — a queue-
+    # scoped cue would lie exactly where honesty matters (spec §5 deviation).
+    # On a miss: speak the cue and do NOTHING else — no drain, no cancel, no
+    # voice/workspace move, no heard-marking, no voice_state write, no raise
+    # (Fork-2: the stream is never touched). Routing mirrors ⌃⌘J's empty cue.
+    st_t = ctx.host._streams.get(target) if target is not None else None
+    pending = ctx.host._pending_decisions.get(target) if target is not None else None
+    has_queued = st_t is not None and st_t.queue.has_decision()
+    if not has_queued:
+        tgt = sessions.speaker() or target
+        if pending is not None:
+            # Answerable-but-already-narrated (inside the ~120s window):
+            # re-speak the STORED prompt; the queue holds nothing to drain to.
+            ctx.host._enqueue(tgt, "prose", pending["text"], False,
+                              mute_exempt=True, at_front=True)
+        elif tgt is not None:
+            ctx.host._enqueue(tgt, "prose", "No decision here.", False,
+                              mute_exempt=True, pause_exempt=True, at_front=True)
+        else:
+            ctx.host.speaker.earcon("error")
+        return None
     crossed = target != sessions.speaker()   # voice owner is speaker(); SP2 advances it independently of workspace()
     ctx.host.voice_state = "flowing"                 # ⌃⌘D re-engage (R5:149 groups jump/⌃⌘D)
     if crossed:

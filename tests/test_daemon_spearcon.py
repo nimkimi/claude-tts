@@ -56,6 +56,7 @@ def test_jump_decision_crossed_cue_uses_spearcon_on_hit():
     sessions.register("a", cwd="/work/frontend")
     sessions.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
     sessions.register("b", cwd="/work/api"); sessions.set_foreground("b")
+    daemon._enqueue("a", "prose", "needs you", True)   # W4: a queued decision — a real HIT
     sessions.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys001")
     p = _hit(daemon, "frontend")
     daemon.handle_message({"type": "jump_decision", "session": "a"})

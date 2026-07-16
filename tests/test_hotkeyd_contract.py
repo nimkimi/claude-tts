@@ -72,6 +72,9 @@ def test_reread_options_message_works():
 
 def test_jump_decision_message_cancels():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    # W4: jump_decision only cancels on a HIT (a queued decision); a miss is
+    # cancel-free by design, so give "fg" a real decision to land on.
+    daemon._enqueue("fg", "permission", "needs you", True)
     daemon.handle_message(_msg({"type": "jump_decision"}))
     assert speaker.cancels == 1
 
