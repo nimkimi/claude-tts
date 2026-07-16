@@ -116,6 +116,23 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
     for s in ("s0", "s1", "s2"):
         sessions.register(s, cwd="/x/" + s)
 
+    # SP4: real-threaded frontier-monotonicity instrumentation (synthesis §5). The
+    # deterministic hammer (test_frontier_never_retreats_across_write_paths) proves
+    # non-retreat logically across every write path; this proves it holds under
+    # ACTUAL thread contention, catching a lock-discipline regression the
+    # deterministic test cannot (e.g. a future caller invoking advance_frontier
+    # outside self._lock). Instance-attr shadow, self-contained per fresh stream —
+    # no restore needed in `finally`.
+    frontier_log = {s: [] for s in ("s0", "s1", "s2")}
+    def _make_logging_advance(sess, st, orig):
+        def _logging_advance(key):
+            orig(key)
+            frontier_log[sess].append(st.frontier)
+        return _logging_advance
+    for _s in ("s0", "s1", "s2"):
+        _st = daemon._stream(_s)
+        _st.advance_frontier = _make_logging_advance(_s, _st, _st.advance_frontier)
+
     # Passive keep-going target: preloaded backlog, NO feeder thread. Its items are the
     # OLDEST in the daemon (enqueued before the storm -> smallest SpeechItem.ids), so
     # whenever the CURRENT speaker goes idle (and is itself non-stopped -- see below),
@@ -259,7 +276,10 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
                    MsgType.CHOOSER_COMMIT, MsgType.CHOOSER_CANCEL, MsgType.STOP_ALL,
                    # REPEAT_LAST (W12) hammers the capture+park path against the
                    # loop's tail-lock write.
-                   MsgType.REPEAT_LAST]
+                   MsgType.REPEAT_LAST,
+                   # SP4: exercise the pile-skip's queue.clear() + frontier advance under
+                   # contention; the orphaned-marker assertion below covers its enqueues.
+                   MsgType.SKIP_PILE]
             n = 0
             while not stop.is_set():
                 try:
@@ -337,6 +357,12 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
                 live_ids.add(daemon._current_item.id)
             orphaned = [k for k in daemon._pending_heard if k not in live_ids]
             assert orphaned == [], "orphaned pending-heard markers: {0}".format(orphaned[:5])
+        # SP4: frontier monotonicity under REAL contention (synthesis §5) — every
+        # advance_frontier call recorded above must be non-decreasing per session;
+        # a race that ever let the frontier retreat would show up here as a drop.
+        for sess, log in frontier_log.items():
+            assert all(b >= a for a, b in zip(log, log[1:])), \
+                "frontier retreated under contention for {0}: {1}".format(sess, log)
     finally:
         host_mod._select_keep_going = _orig_select_keep_going
 
@@ -505,3 +531,59 @@ def test_speak_failure_signals_error_system_and_the_loop_survives():
     daemon._speak_loop_once()                      # must NOT propagate
     assert "error_system" in speaker.earcons
     assert daemon._current_item is None            # claim released, no wedge
+
+
+def test_frontier_provenance_gated_advance_is_permanent():
+    """B1 PERMANENT: the frontier is the max over FORWARD-provenance completions, NOT
+    over the heard flag. A browse replay completes and flips heard=True on an entry
+    ABOVE the frontier, yet the frontier does NOT move; a forward readout advances it.
+    NEVER weaken this — a heard-derived frontier is the B1 corruption."""
+    from sonari.queue import SpeechItem
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    config = {k: (v.copy() if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
+    config["verbosity"] = "everything"
+    daemon = SpeechDaemon(_RaisingSpeaker(), sessions, config)
+    st = daemon._stream("s0")
+    e0 = daemon.history.record("s0", "prose", "a"); daemon.history.end_message("s0")
+    e1 = daemon.history.record("s0", "prose", "b")          # (1,0), ABOVE e0
+    br = SpeechItem(id=1, session="s0", kind="prose", text="b",
+                    is_decision=False, forward=False)       # browse replay
+    daemon._pending_heard[br.id] = e1; daemon._current_item = br
+    daemon.note_spoken(br, completed=True)
+    assert e1.heard is True and st.frontier is None         # heard flipped, frontier did NOT move
+    fw = SpeechItem(id=2, session="s0", kind="prose", text="a",
+                    is_decision=False, forward=True)        # forward readout
+    daemon._pending_heard[fw.id] = e0; daemon._current_item = fw
+    daemon.note_spoken(fw, completed=True)
+    assert st.frontier == (e0.msg_id, e0.seq)               # forward readout advances it
+
+
+def test_frontier_never_retreats_across_write_paths():
+    """Monotonicity: forward-hear -> advance; browse-replay-above -> no move; pile-skip
+    -> advance to live edge; new arrival -> no move. The frontier never retreats."""
+    from sonari.queue import SpeechItem
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    sessions.register("s0", cwd="/x/s0")
+    config = {k: (v.copy() if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
+    config["verbosity"] = "everything"
+    daemon = SpeechDaemon(_RaisingSpeaker(), sessions, config)
+    st = daemon._stream("s0")
+    es = []
+    for i in range(4):
+        es.append(daemon.history.record("s0", "prose", "p{0}".format(i)))
+        daemon.history.end_message("s0")                    # es -> (0,0)..(3,0)
+    seen = []
+    it = SpeechItem(id=1, session="s0", kind="prose", text="p1",
+                    is_decision=False, forward=True)
+    daemon._pending_heard[it.id] = es[1]; daemon._current_item = it
+    daemon.note_spoken(it, completed=True); seen.append(st.frontier)      # (1,0)
+    br = SpeechItem(id=2, session="s0", kind="prose", text="p3",
+                    is_decision=False, forward=False)
+    daemon._pending_heard[br.id] = es[3]; daemon._current_item = br
+    daemon.note_spoken(br, completed=True); seen.append(st.frontier)      # (1,0) — no move
+    with daemon._state.transaction():
+        daemon.handle_message(_msg(MsgType.SKIP_PILE, "s0"))
+    seen.append(st.frontier)                                              # (3,0) — skip to live
+    daemon.history.record("s0", "prose", "p4"); seen.append(st.frontier)  # (3,0) — arrival no move
+    assert seen == [(1, 0), (1, 0), (3, 0), (3, 0)]
+    assert all(b >= a for a, b in zip(seen, seen[1:]))                    # never retreats
