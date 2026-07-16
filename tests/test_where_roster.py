@@ -90,7 +90,7 @@ def test_session_start_announces_folder_and_number(monkeypatch):
     q = stream_queue(daemon, "s1")
     assert len(q) == 1
     item = q.pop_next()
-    assert item.text == "proj, 1."
+    assert item.text == "1, proj."
     assert item.mute_exempt and item.names_session
 
 
@@ -113,4 +113,4 @@ def test_announce_unknown_folder_says_another_session(monkeypatch):
     monkeypatch.setattr(lifecycle, "_setup_health", lambda v: ("ok", None))
     daemon, queue, speaker, sessions, _ = make_daemon(foreground=None)
     daemon.handle_message(_msg(MsgType.SESSION_START, "s1"))
-    assert stream_queue(daemon, "s1").pop_next().text == "Another session, 1."
+    assert stream_queue(daemon, "s1").pop_next().text == "1, Another session."

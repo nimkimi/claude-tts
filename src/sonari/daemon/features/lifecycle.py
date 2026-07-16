@@ -117,10 +117,14 @@ def on_set_foreground(ctx, msg):
             # session's own stream (voiced now if it took the voice, else heard
             # when keep-going/jump reaches it). names_session: it names itself.
             folder = ctx.host.sessions.folder(session)
+            # Digit-first (grammar v2 consistency sweep): every dial digit in
+            # the app now obeys ONE rule — a number right before a name is a
+            # teleport key. The announce was the lone folder-first holdout,
+            # ending in a bare trailing digit with nothing to frame its role.
             ctx.host._enqueue(
                 session, "prose",
-                "{0}, {1}.".format(folder or "Another session",
-                                   ctx.host.sessions.number(session)),
+                "{0}, {1}.".format(ctx.host.sessions.number(session),
+                                   folder or "Another session"),
                 False, mute_exempt=True, names_session=True)
         _maybe_guide_setup(ctx, session, msg.get("plugin_version", ""))
         if ctx.host._spearcons is not None:

@@ -95,7 +95,7 @@ def test_session_start_enqueues_one_cue_when_not_installed(monkeypatch):
     q = stream_queue(daemon, "s1")
     assert len(q) == 2                       # the registration announce + the guidance cue
     first = q.pop_next()
-    assert first.text == "Another session, 1."   # announce leads (names the session)
+    assert first.text == "1, Another session."   # announce leads (names the session)
     item = q.pop_next()
     assert item.kind == "prose"
     assert "slash sonari install" in item.text.lower()
@@ -107,7 +107,7 @@ def test_session_start_announce_only_when_ok(monkeypatch):
     daemon.handle_message(_ss("s1"))
     q = stream_queue(daemon, "s1")
     assert len(q) == 1                       # ONLY the announce; no guidance cue
-    assert q.pop_next().text == "Another session, 1."
+    assert q.pop_next().text == "1, Another session."
 
 
 def test_session_start_cue_throttled_per_session(monkeypatch):

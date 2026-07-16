@@ -19,7 +19,7 @@ attention jump and status keys unchanged in role.
 
 Session **numbers** are now a *primary teleport handle* (the chooser's in-hold digits, §3, and the
 `⌃⌘W` Also-map dial-pad, §7). But a number is taught **once** — a single pre-chooser registration
-announce ("{folder}, {number}.", §6, suppressed at verbosity quiet). If that one cue is missed there is
+announce ("{number}, {folder}." — amended 2026-07-16, grammar-v2 digit-first sweep; §6, suppressed at verbosity quiet). If that one cue is missed there is
 no standing "what's my number" affordance, so the handle can go unlearned. **Teaching dependency:** the
 cheap wave's `⌃⌘W` count / number work (§7) is the current reinforcement; any future **re-announce** or
 **"what's my number" query** lands here as the chooser's teaching surface. (Downstream of the
@@ -108,7 +108,7 @@ untouched.
 registration; the number is stable for the session's lifetime and freed on
 unregister. Numbers are SPOKEN in: the chooser previews, the roster, the ⌃⌘W
 voice/keyboard clauses ("Voice: bravo two, Playing. Keyboard: alpha one. …"),
-and a registration announce ("{folder}, {number}.", suppressed at verbosity
+and a registration announce ("{number}, {folder}." — amended 2026-07-16, grammar-v2 digit-first sweep; suppressed at verbosity
 quiet). Numbers are NOT injected into content attribution prefixes or jump cues
 (noise). Numbers > 9 are spoken but unreachable by digit teleport (accepted
 edge; realistic fleet ≤ 5).
