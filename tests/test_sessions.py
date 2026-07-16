@@ -254,6 +254,20 @@ def test_os_focus_false_also_drops_the_retained_raw_focus():
     assert sm.focused_session() is None
 
 
+def test_late_identity_repair_never_retouches_mru_on_unrelated_prompts():
+    # The repair gate's real teeth (review finding): without the None->match
+    # gate, EVERY set_identity — piggybacked on every prompt from any session —
+    # would re-resolve the retained raw focus and re-touch MRU for the pinned
+    # session, bumping it front on unrelated prompt traffic. Presence comes
+    # from the user's own acts, never another session's prompts (spec §8).
+    sm = SessionManager()
+    sm.register("a"); sm.set_identity("a", Identity(term_program="Apple_Terminal", tty="/dev/ttys001"))
+    sm.set_os_focus(term_program="Apple_Terminal", tty="/dev/ttys001")   # pin resolves: MRU-touch "a"
+    sm.register("c"); sm.set_foreground("c")                             # deliberate act: "c" to front
+    sm.set_identity("c", Identity(term_program="Apple_Terminal", tty="/dev/ttys003"))
+    assert sm.mru() == ["c", "a"]
+
+
 def test_os_focus_late_resolution_never_steals_a_live_pin():
     # Repair is None -> match only: an unrelated identity arriving while the
     # pin is already resolved must not re-adjudicate it.
