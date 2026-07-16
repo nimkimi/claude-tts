@@ -96,9 +96,11 @@ def on_set_rate(ctx, msg):
     ctx.host.speaker.set_rate(rate)
     save_config(ctx.host.config)
     if is_delta:
-        fg = ctx.host.sessions.foreground()
-        if fg is not None:
-            ctx.host._enqueue(fg, "prose", "Rate {0}.".format(rate), False)
+        # W11: the terminal you're at hears its own confirmation ("Rate 250."
+        # used to land on foreground() — a session you may not be hearing).
+        ws = ctx.host.sessions.workspace()
+        if ws is not None:
+            ctx.host._enqueue(ws, "prose", "Rate {0}.".format(rate), False)
     return None
 
 

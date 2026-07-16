@@ -41,17 +41,19 @@ def on_os_focus(ctx, msg):
 
 @handler(MsgType.JUMP_WAITING)
 def on_jump_waiting(ctx, msg):
-    fg = ctx.host.sessions.foreground()
-    target = _waiting_target(ctx, exclude=fg)
+    # W11 collapse: the exclusion is the WORKSPACE (front terminal + keyboard),
+    # not the internal foreground pointer. ⌃⌘J never jumps to the session your
+    # keyboard is on (workspace()) nor the one you're hearing (speaker(), already
+    # excluded in _waiting_target); every other waiting session is eligible.
+    ws = ctx.host.sessions.workspace()
+    target = _waiting_target(ctx, exclude=ws)
     if target is None:
         # Nothing waiting: say so. Route to speaker() so the cue lands in the
-        # stream the speak loop is already reading (held or normal branch both
-        # read speaker()). When speaker() is None (loop idle), foreground() is
-        # the next session keep-going will adopt — enqueue there so it isn't
-        # lost. If both are None, fall back to an error earcon.
-        # NOTE: fg is kept for the _waiting_target exclude= arg above; don't
-        # use it as the enqueue target — that's the divergence bug this fixes.
-        tgt = ctx.host.sessions.speaker() or fg
+        # stream the speak loop is already reading. When speaker() is None (loop
+        # idle), workspace() is where you are — enqueue there so it isn't lost
+        # (W11: foreground() is no longer a gesture target). If both are None,
+        # fall back to an error earcon.
+        tgt = ctx.host.sessions.speaker() or ws
         if tgt is not None:
             ctx.host._enqueue(tgt, "prose", "No session waiting.", False,
                               mute_exempt=True, pause_exempt=True, at_front=True)

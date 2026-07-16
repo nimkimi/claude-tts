@@ -45,7 +45,7 @@ def _snapshot(sessions):
     never-visited sessions in registration order. Filter: is_live() ONLY —
     identical to the old ring's W1 + sp3.2 eviction semantics; muted sessions
     stay browsable (Fork 2)."""
-    origin = sessions.workspace() or sessions.foreground()
+    origin = sessions.workspace()
     out = []
     if origin is not None and sessions.is_live(origin):
         out.append(origin)
