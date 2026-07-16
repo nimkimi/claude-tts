@@ -81,6 +81,17 @@ def on_set_foreground(ctx, msg):
             # bootstrap needs _foreground set, or answer_permission has no target. The
             # idle-non-speaker move is pre-existing SP1 #65 residual, not SP2-new.)
             ctx.host.sessions.set_foreground(session, cwd=cwd)
+        # W5: a Policy-A submit that takes (or retains) a speakable voice lifts a
+        # stale quiet-hold — the enum must match what the ear hears (the held
+        # branch gates on the STREAM's .stopped, host.py:451-453, not this enum;
+        # the stale enum also kept the keep-going gate closed, host.py:485).
+        # stopped-all is NEVER lifted (the master quiet is deliberate; under it
+        # new streams are born stopped anyway — belt-and-braces). A stopped
+        # stream keeps the hold honest: a muted self-submitter stays "on hold".
+        if ctx.host.voice_state == "quiet-hold":
+            st = ctx.host._streams.get(session)
+            if st is None or not st.stopped:
+                ctx.host.voice_state = "flowing"
     else:
         ctx.host.sessions.register(session, cwd=cwd)     # denied: ding + accrue
     # Identity (re)capture — piggybacked on ANY message carrying identity fields:
