@@ -41,6 +41,7 @@ class MsgType:
     CHOOSER_DIGIT = "chooser_digit"     # ⌃⌘1-9 while held: instant commit to that session number (msg["digit"])
     CHOOSER_COMMIT = "chooser_commit"   # chord released: land on the current candidate
     CHOOSER_CANCEL = "chooser_cancel"   # 30 s cap / hotkeyd death: restore the capture, move nothing
+    REPEAT_LAST = "repeat_last"         # ⌃⌘R: re-speak the last completed content utterance
 
 
 def encode(msg: dict) -> bytes:

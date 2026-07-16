@@ -241,7 +241,10 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
             # the speak loop's gate read (no torn read; F3/F5).
             ops = [MsgType.STOP_SESSION, MsgType.FLUSH, MsgType.SET_FOREGROUND,
                    MsgType.JUMP_WAITING, MsgType.CHOOSER_STEP, MsgType.CHOOSER_DIGIT,
-                   MsgType.CHOOSER_COMMIT, MsgType.CHOOSER_CANCEL, MsgType.STOP_ALL]
+                   MsgType.CHOOSER_COMMIT, MsgType.CHOOSER_CANCEL, MsgType.STOP_ALL,
+                   # REPEAT_LAST (W12) hammers the capture+park path against the
+                   # loop's tail-lock write.
+                   MsgType.REPEAT_LAST]
             n = 0
             while not stop.is_set():
                 try:

@@ -55,7 +55,7 @@ def test_default_keymap_macos_uses_ctrl_cmd(mac):
         "jump_decision", "where_am_i", "faster", "slower",
         "nav_prev_response", "nav_next_response",
         "chooser_step_next", "chooser_step_prev",
-        "approve", "deny",
+        "approve", "deny", "repeat_last",
     }
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
     assert d["stop_session"]["key"] == "s" and d["stop_all"]["key"] == "m"
@@ -322,6 +322,12 @@ def test_approve_deny_resolve_to_correct_keycodes(mac):
     assert deny_entry["modifiers"] == 4352  # ctrl | cmd
     assert json.loads(approve_entry["message"]) == {"type": "answer_permission", "behavior": "allow"}
     assert json.loads(deny_entry["message"]) == {"type": "answer_permission", "behavior": "deny"}
+
+
+def test_repeat_last_action_message_and_default_key(mac):
+    assert keymap.ACTION_MESSAGES["repeat_last"] == {"type": "repeat_last"}
+    d = keymap.default_keymap()
+    assert d["repeat_last"]["key"] == "r"              # ⌃⌘R (owner-locked)
 
 
 def test_resolved_default_keymap_has_chooser_and_no_cycle(mac):

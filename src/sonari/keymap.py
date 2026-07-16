@@ -37,6 +37,7 @@ ACTION_MESSAGES = {
     "stop_all": {"type": "stop_all"},   # ⌃⌘M: stop every session
     "jump_waiting": {"type": "jump_waiting"},  # switch voice to a waiting background session
     "jump_decision": {"type": "jump_decision"},   # ⌃⌘D: jump to the question/decision
+    "repeat_last": {"type": "repeat_last"},   # ⌃⌘R: re-speak the last content utterance
     "chooser_step_next": {"type": "chooser_step", "direction": "next"},   # ⌃⌘Tab (chord held)
     "chooser_step_prev": {"type": "chooser_step", "direction": "prev"},   # ⌃⌘⇧Tab
     "where_am_i": {"type": "where_am_i"},          # ⌃⌘W: terse spoken status
@@ -54,7 +55,7 @@ ACTION_MESSAGES = {
 _DEFAULT_KEYS = {
     "nav_prev": "left", "nav_next": "right",
     "stop_session": "s", "stop_all": "m", "jump_waiting": "j",
-    "jump_decision": "d", "where_am_i": "w",
+    "jump_decision": "d", "where_am_i": "w", "repeat_last": "r",
     "approve": "return", "deny": "escape",
     "faster": "equal", "slower": "minus",
 }

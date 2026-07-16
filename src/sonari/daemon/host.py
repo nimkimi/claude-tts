@@ -140,6 +140,14 @@ class SpeechDaemon:
         self._state._last_spoken_session = value
 
     @property
+    def _last_utterance(self):
+        return self._state._last_utterance
+
+    @_last_utterance.setter
+    def _last_utterance(self, value):
+        self._state._last_utterance = value
+
+    @property
     def _next_id(self):
         return self._state._next_id
 
@@ -566,6 +574,13 @@ class SpeechDaemon:
                 self._stream(item.session).queue.enqueue_front(item)
                 self._state._last_spoken_session = prev
                 requeued = True
+            elif completed and not item.mute_exempt:
+                # W12 capture: the last COMPLETED content utterance, AS SPOKEN
+                # (attributed text, prefix included). mute_exempt chrome (⌃⌘W
+                # readouts, jump cues, the repeat playback itself) is excluded —
+                # which also makes repeat idempotent. One assignment under the
+                # EXISTING tail lock: no new locked region, no gap (M1).
+                self._state._last_utterance = (text, item.audio_path)
         if not requeued:
             self.note_spoken(item, completed)
 

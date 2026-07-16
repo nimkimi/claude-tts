@@ -85,6 +85,7 @@ def test_msgtype_has_every_constant_with_exact_values():
         "CHOOSER_DIGIT": "chooser_digit",
         "CHOOSER_COMMIT": "chooser_commit",
         "CHOOSER_CANCEL": "chooser_cancel",
+        "REPEAT_LAST": "repeat_last",
     }
     for name, value in expected.items():
         assert hasattr(MsgType, name), f"MsgType missing {name}"
@@ -132,6 +133,7 @@ def test_msgtype_defines_no_extra_string_constants():
         "CHOOSER_DIGIT": "chooser_digit",
         "CHOOSER_COMMIT": "chooser_commit",
         "CHOOSER_CANCEL": "chooser_cancel",
+        "REPEAT_LAST": "repeat_last",
     }
     assert actual == expected
 

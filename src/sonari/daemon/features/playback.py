@@ -155,3 +155,46 @@ def on_jump_decision(ctx, msg):
             identity, gen,
             on_failure=lambda s=target, f=folder: ctx.host._raise_failed(s, f))
     return None
+
+
+@handler(MsgType.REPEAT_LAST)
+def on_repeat_last(ctx, msg):
+    # ⌃⌘R (W12): re-speak the last completed content utterance, verbatim as
+    # spoken. Barge-in-class with the ⌃⌘W capture-park-resume discipline: the
+    # interrupted item is re-queued at_front FIRST (ends up deepest), then the
+    # repeat at_front — so the ear hears repeat, then the resumed utterance.
+    # Fork-2: enqueues to the speaker / a playable workspace, never un-stops.
+    host = ctx.host
+    sessions = host.sessions
+    tgt = sessions.speaker()
+    if tgt is None:
+        # Mirror ⌃⌘W's None-speaker branch: a playable workspace stream can be
+        # adopted by keep-going; a muted/None workspace has nothing voiceable.
+        ws = sessions.workspace()
+        ws_st = host._streams.get(ws) if ws is not None else None
+        playable = ws is not None and not (ws_st is not None and ws_st.stopped)
+        if not playable:
+            host.speaker.earcon("error")
+            return None
+        tgt = ws
+    last = host._last_utterance
+    if last is None:
+        # Spoken cue, not an error tone — an empty repeat is not a mis-press.
+        host._enqueue(tgt, "prose", "Nothing to repeat.", False,
+                      mute_exempt=True, pause_exempt=True, at_front=True)
+        return None
+    text, audio_path = last
+    cur = host._current_item
+    entry = host._pending_heard.get(cur.id) if cur is not None else None
+    host.speaker.cancel()                          # barge-in: cut the current utterance
+    if cur is not None:
+        host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
+                      entry=entry, mute_exempt=cur.mute_exempt,
+                      pause_exempt=cur.pause_exempt, names_session=cur.names_session,
+                      audio_path=cur.audio_path, at_front=True)
+    # The repeat is mute_exempt: never re-captured (idempotence), never prefixed
+    # (the captured text already carries any prefix). A spearcon-only last
+    # utterance replays its audio file (audio_path passthrough).
+    host._enqueue(tgt, "prose", text, False, mute_exempt=True,
+                  pause_exempt=True, at_front=True, audio_path=audio_path)
+    return None

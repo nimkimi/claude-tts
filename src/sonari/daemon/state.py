@@ -23,6 +23,12 @@ class SessionState:
         self._pending_heard: "dict" = {}
         self._current_item = None
         self._last_spoken_session = None
+        # W12 repeat-last: the last COMPLETED non-mute_exempt utterance as
+        # (spoken_text, audio_path) — text AS SPOKEN (_attributed_text output,
+        # folder prefix included: verbatim = what the ear got). Written by the
+        # speak loop under the tail lock; read by the REPEAT_LAST handler under
+        # the same lock (the handler transaction). None until first capture.
+        self._last_utterance = None
         # The voice-global mode (SPEC §6): exactly one of "flowing" / "quiet-hold"
         # / "stopped-all". Born flowing so the keep-going gate is a no-op until a
         # deliberate ⌃⌘S / ⌃⌘M transitions it (T1). Read on the hot path directly
