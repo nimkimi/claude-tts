@@ -18,6 +18,7 @@ from sonari.daemon import SpeechDaemon
 import sonari.daemon.host as host_mod
 from sonari.config import DEFAULTS
 from sonari.protocol import MsgType, PROTOCOL_VERSION
+from tests.daemon_helpers import FakeSpearconCache
 
 TIMEOUT = 5.0
 
@@ -73,14 +74,28 @@ class _FastRunner:
         return p
 
 
+def _fast_afplay(path):
+    """afplay runner for pre-roll spearcon items: completes immediately, like
+    _FastRunner's say procs, so the storm churns through audio items too."""
+    p = _SlowProc()
+    p.finish(0)
+    return p
+
+
 def _make_real_daemon(runner, foreground="s0"):
-    speaker = Speaker(say_runner=runner)
+    speaker = Speaker(say_runner=runner, afplay_runner=_fast_afplay)
     sessions = SessionManager()
     sessions.set_foreground(foreground)
     config = {k: (v.copy() if isinstance(v, dict) else v)
               for k, v in DEFAULTS.items()}
     config["verbosity"] = "everything"
-    daemon = SpeechDaemon(speaker, sessions, config)
+    # W13: arm the keep-going pre-roll under the storm — every folder resolves a
+    # (fake) cached spearcon, so each genuine keep-going fire synthesizes and
+    # claims an audio item INSIDE the locked block, hammering the new path.
+    spearcons = FakeSpearconCache()
+    for s in ("s0", "s1", "s2", "s_bg"):
+        spearcons.available[s] = "/x/fake-spearcon.aiff"
+    daemon = SpeechDaemon(speaker, sessions, config, spearcons=spearcons)
     return daemon, speaker
 
 
@@ -298,6 +313,12 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
         # widen the idle window -- never drop the assertion.)
         assert real_keep_going_fires[0] > 0, \
             "keep-going scan never actually selected a background session; the idle window was empty"
+        # W13 (additive): with every folder's spearcon armed above, each genuine
+        # keep-going fire ran the pre-roll resolution inside the locked block
+        # (set_speaker -> folder -> _spearcon_path -> cache.get). Non-zero here
+        # proves the NEW path was exercised by this storm, not merely compiled.
+        assert len(daemon._spearcons.requested) > 0, \
+            "keep-going fired but the pre-roll spearcon path never resolved a label"
         # This guard does NOT bound queue LENGTH. Cap-exempt cues (PAUSE "Paused./
         # Resumed.", JUMP_WAITING "Jumping to...") use enqueue_front, which is
         # deliberately NOT subject to _backlog_cap (queue.py:42-45), so under this
