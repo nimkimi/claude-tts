@@ -256,3 +256,19 @@ def test_default_clock_is_monotonic_and_bounded():
     e2 = h.record("s", "prose", "b")
     hi = _t.monotonic()
     assert lo <= e1.stamp <= e2.stamp <= hi
+
+
+def test_unheard_age_reports_oldest_unheard_entry_age():
+    """v2 grammar: the 'stale' word reads the OLDEST unheard entry's age."""
+    ticks = [100.0]
+    h = SessionHistory(cap=10, clock=lambda: ticks[0])
+    h.record("s", "prose", "old.")
+    ticks[0] = 150.0
+    h.record("s", "prose", "newer.")
+    ticks[0] = 1100.0
+    assert h.unheard_age("s") == 1000.0            # anchored to the oldest
+
+
+def test_unheard_age_is_none_when_nothing_unheard():
+    h = SessionHistory(cap=10)
+    assert h.unheard_age("s") is None

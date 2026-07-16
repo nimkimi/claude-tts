@@ -90,7 +90,7 @@ def test_where_am_i_reports_on_hold_under_quiet_hold():
     daemon.handle_message(_msg(MsgType.STOP_SESSION, "fg"))
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
     daemon._speak_loop_once()                                    # pause_exempt cue voices under hold
-    assert speaker.spoken[-1] == "Voice: work 1, on hold."
+    assert speaker.spoken[-1] == "Voice and keyboard: work 1, on hold."
 
 
 def test_where_am_i_reports_all_stopped_under_stopped_all():
@@ -99,4 +99,4 @@ def test_where_am_i_reports_all_stopped_under_stopped_all():
     daemon.handle_message(_msg(MsgType.STOP_ALL, ""))
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
     daemon._speak_loop_once()
-    assert speaker.spoken[-1] == "Voice: work 1, all stopped."
+    assert speaker.spoken[-1] == "Voice and keyboard: work 1, all stopped."

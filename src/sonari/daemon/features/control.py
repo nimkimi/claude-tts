@@ -20,39 +20,94 @@ def _numbered(host, session):
     return "{0} {1}".format(folder, n) if n is not None else folder
 
 
+# Grammar v2 (spec 2026-07-16-sonari-whereami-grammar-v2): age is spoken as
+# the WORD "stale", never a number — one bit, zero digits. Owner-tunable.
+_STALE_AFTER_S = 900.0
+
+_COUNT_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
+                6: "six", 7: "seven", 8: "eight", 9: "nine"}
+
+
+def _has_decision(host, session):
+    """The ⌃⌘D hit predicate verbatim (W4): a queued decision item OR a live
+    pending blocking decision — an answerable-but-already-narrated ask has an
+    empty queue, and the readout must not hide exactly the asks that matter."""
+    st = host._streams.get(session)
+    if st is not None and st.queue.has_decision():
+        return True
+    return session in host._pending_decisions
+
+
+def _entry_clauses(host, session):
+    """The comma clauses for one session, fixed order (grammar v2): decision,
+    muted, waiting, unheard, stale. Fixed clause order is itself a role cue —
+    position tells the ear what a number means before the noun lands. Returns
+    '' when the session has nothing to report."""
+    st = host._streams.get(session)
+    seg = ""
+    if _has_decision(host, session):
+        # Inline role WORD, never a standalone "Decision:" landmark — a
+        # sentence-initial frame that clips at rate silently demotes the
+        # highest-stakes fact to a routine pile entry (design attack finding).
+        seg += ", decision"
+    if st is not None and st.stopped:
+        seg += ", muted"
+    k = len(st.queue) if st is not None else 0
+    if k > 0:
+        seg += ", {0} waiting".format(k)
+    # W10: the recorded-but-not-queued unheard FLOOR. Queued items' history
+    # entries are ALSO unheard until spoken (host.py:309-320 flips heard on
+    # completion), so a raw len(unheard) double-counts every queued item —
+    # subtract k (approximation in the caller's favor: never overstates).
+    # unheard() is current-turn-bounded: the spoken count is a floor across
+    # a multi-turn pile (documented; frontier counts are SP5, NOT built).
+    # The word "unheard" is an OWNER GATE (his ear tunes it at review).
+    u = max(0, len(host.history.unheard(session)) - k)
+    if u > 0:
+        seg += ", {0} unheard".format(u)
+        age = host.history.unheard_age(session)
+        if age is not None and age > _STALE_AFTER_S:
+            seg += ", stale"
+    return seg
+
+
 def _also_clause(host, exclude=()):
-    """The holistic ⌃⌘W 'Also:' map (§7): every registered session NOT in
-    *exclude*, in NUMBER order, entries '{n} {folder}[, muted][, {k} waiting]'
-    joined by '; ' — number-first, because the Also-list is the teleport
-    dial-pad. Returns ' Also: {entries}.' (leading space, appendable to the
-    lead sentence) or '' when no entries remain: the ABSENT landmark is the
-    "no other sessions" signal, the same trained pattern as the Keyboard
-    clause. Unfiltered by liveness, like the old counts (plan D4)."""
+    """The holistic ⌃⌘W 'Also:' map, grammar v2: every registered session NOT
+    in *exclude*; each entry keeps the digit-first shape '{n} {folder}{clauses}'
+    (digit·name·count·noun — two numbers never abut, the anti-blur invariant)
+    but entries are now SENTENCES joined '. ' (periods are the only pause that
+    survives 225-400 wpm), ordered by VALUE tier — decision entries, then
+    piles, then muted-only — number-ascending within each tier, so barge-in
+    always cuts on the most actionable prefix. Sessions with nothing to report
+    collapse into a digit-free terminal 'Plus {word} quiet.'; when everything
+    else is quiet the map is the positive 'All quiet.'; zero other sessions
+    keeps the trained absent landmark."""
     sessions = host.sessions
     ids = sorted((s for s in sessions.session_ids() if s not in exclude),
                  key=lambda s: sessions.number(s) or 0)
-    parts = []
+    decisions, piles, muted_only = [], [], []
+    quiet = 0
     for s in ids:
-        seg = "{0} {1}".format(sessions.number(s),
-                               sessions.folder(s) or "another session")
-        st = host._streams.get(s)
-        if st is not None and st.stopped:
-            seg += ", muted"
-        k = len(st.queue) if st is not None else 0
-        if k > 0:
-            seg += ", {0} waiting".format(k)
-        # W10: the recorded-but-not-queued unheard FLOOR. Queued items' history
-        # entries are ALSO unheard until spoken (host.py:309-320 flips heard on
-        # completion), so a raw len(unheard) double-counts every queued item —
-        # subtract k (approximation in the caller's favor: never overstates).
-        # unheard() is current-turn-bounded: the spoken count is a floor across
-        # a multi-turn pile (documented; frontier counts are SP5, NOT built).
-        # The word "unheard" is an OWNER GATE (his ear tunes it at review).
-        u = max(0, len(host.history.unheard(s)) - k)
-        if u > 0:
-            seg += ", {0} unheard".format(u)
-        parts.append(seg)
-    return " Also: {0}.".format("; ".join(parts)) if parts else ""
+        clauses = _entry_clauses(host, s)
+        if not clauses:
+            quiet += 1
+            continue
+        entry = "{0} {1}{2}".format(sessions.number(s),
+                                    sessions.folder(s) or "another session",
+                                    clauses)
+        if clauses.startswith(", decision"):
+            decisions.append(entry)
+        elif "waiting" in clauses or "unheard" in clauses:
+            piles.append(entry)
+        else:
+            muted_only.append(entry)
+    parts = decisions + piles + muted_only
+    if not parts:
+        return " All quiet." if quiet else ""
+    out = " Also: {0}.".format(". ".join(parts))
+    if quiet:
+        out += " Plus {0} quiet.".format(_COUNT_WORDS.get(quiet, str(quiet)))
+    return out
 
 
 def _clamp_int(raw, lo, hi):
@@ -202,12 +257,14 @@ def on_status(ctx, msg):
 
 @handler(MsgType.WHERE_AM_I)
 def on_where_am_i(ctx, msg):
-    # ⌃⌘W "where am I": ONE holistic SPOKEN readout (§7, amended 2026-07-14 —
-    # the double-press roster is deleted), barge-in + interjection-resume
-    # unchanged. Plain speech end-to-end (SP3.1 W3):
-    # "Voice: {folder} {n}, {state}.[ Keyboard: {folder} {n}.][ Also: {entries}.]"
-    # — the Keyboard clause only when the workspace resolves to a different
-    # session; the Also-map names every OTHER registered session.
+    # ⌃⌘W "where am I": ONE holistic SPOKEN readout (§7, amended 2026-07-14;
+    # grammar v2 2026-07-16 — spec 2026-07-16-sonari-whereami-grammar-v2),
+    # barge-in + interjection-resume unchanged. Plain speech end-to-end:
+    # unified "Voice and keyboard: {folder} {n}, {state}[, decision]." —
+    # unity stated POSITIVELY, never by an absent clause; diverged
+    # "Voice: … . Keyboard: {folder} {m}{clauses}." (the Keyboard clause
+    # carries the workspace's own pile); then the Also-map's sentence
+    # entries in value-tier order (see _also_clause).
     host = ctx.host
     # Report the SPEAKER's state (voice-state), not the workspace. §8 reconciliation:
     # ⌃⌘W answers "what am I hearing?" — in the keep-going era the speaker may differ
@@ -233,11 +290,17 @@ def on_where_am_i(ctx, msg):
         playable = ws is not None and not (ws_st is not None and ws_st.stopped)
         if playable:
             vs = host.voice_state
-            # State-cue lead + the FULL map (§7): with no voice session to
-            # anchor on, "Also:" covers ALL registered sessions, no exclusions.
+            # State-cue lead + a POSITIVE keyboard location (grammar v2 — the
+            # owner rejected absence-as-signal): the idle Keyboard clause
+            # behaves exactly like the diverged one — it carries the
+            # workspace's own clauses and the workspace leaves the map (a
+            # session is never named twice). Everything else stays in the map.
             cue = ("All stopped." if vs == "stopped-all"
                    else "On hold." if vs == "quiet-hold"
-                   else "Nothing playing.") + _also_clause(host)
+                   else "Nothing playing.")
+            cue += " Keyboard: {0}{1}.".format(
+                _numbered(host, ws), _entry_clauses(host, ws))
+            cue += _also_clause(host, exclude=(ws,))
             host._enqueue(ws, "prose", cue, False, mute_exempt=True, pause_exempt=True)
         else:
             host.speaker.earcon("error")
@@ -254,17 +317,27 @@ def on_where_am_i(ctx, msg):
         state = "on hold"
     else:
         state = "stopped" if (st is not None and st.stopped) else "playing"
-    # Keyboard clause ONLY when the workspace (keyboard) resolves to a session other
-    # than the voice — otherwise there is nothing to disambiguate.
+    # Grammar v2: unity is stated POSITIVELY — the owner rejected the old
+    # absence-as-signal Keyboard clause ("if they are at the same session say
+    # so"). Unified merges both trained landmarks into one clause; diverged
+    # keeps the split, and the Keyboard clause carries its OWN pile clauses —
+    # a silent backlog sitting exactly where he types is the one pile worth
+    # pointer-line space. A blocking decision on a pointer session rides its
+    # clause inline (the session is never repeated in the Also-map).
     ws = host.sessions.workspace()
     diverged = ws is not None and ws != fg
-    kbd = (" Keyboard: {0}.".format(_numbered(host, ws))
-           if diverged else "")
+    voice_dec = ", decision" if _has_decision(host, fg) else ""
+    if diverged:
+        lead = "Voice: {0}, {1}{2}. Keyboard: {3}{4}.".format(
+            voice_folder, state, voice_dec,
+            _numbered(host, ws), _entry_clauses(host, ws))
+    else:
+        lead = "Voice and keyboard: {0}, {1}{2}.".format(
+            voice_folder, state, voice_dec)
     # The Also-map excludes the voice session and, when diverged, the keyboard
     # session — both are already named by their own clauses (§7).
     exclude = (fg, ws) if diverged else (fg,)
-    text = "Voice: {0}, {1}.{2}{3}".format(
-        voice_folder, state, kbd, _also_clause(host, exclude))
+    text = lead + _also_clause(host, exclude)
     host.speaker.cancel()                          # barge-in: cut the current utterance
     # Resume-after-interjection: re-queue the interrupted item FIRST so it ends up
     # DEEPEST (the status cue is appendleft'd in front of it below).

@@ -20,7 +20,7 @@ def test_where_am_i_names_both_folders_and_the_also_map_under_divergence():
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
     daemon._speak_loop_once()
     assert speaker.spoken == [
-        "Voice: api 2, playing. Keyboard: web 1. Also: 3 etl, 1 waiting; 4 logs, muted."
+        "Voice: api 2, playing. Keyboard: web 1. Also: 3 etl, 1 waiting. 4 logs, muted."
     ]
 
 
@@ -30,7 +30,7 @@ def test_where_am_i_omits_keyboard_clause_when_not_diverged():
     sessions.set_foreground("fg", cwd="/x/work")        # voice == keyboard == fg
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: work 1, playing."]
+    assert speaker.spoken == ["Voice and keyboard: work 1, playing."]
     assert not any(s and "Keyboard:" in s for s in speaker.spoken)
 
 
@@ -45,4 +45,4 @@ def test_where_am_i_muted_backgrounds_are_named_in_the_also_map():
     daemon._stream("b2").stopped = True                 # two individually-muted backgrounds
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: work 1, playing. Also: 2 api, muted; 3 db, muted."]
+    assert speaker.spoken == ["Voice and keyboard: work 1, playing. Also: 2 api, muted. 3 db, muted."]

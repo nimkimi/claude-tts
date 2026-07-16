@@ -1,5 +1,6 @@
 """Spec §6/§7 (amended 2026-07-14): the single-press holistic ⌃⌘W readout —
-"Voice: {folder} {n}, {state}.[ Keyboard: {folder} {n}.][ Also: {entries}.]" —
+grammar v2: unified "Voice and keyboard: …"; diverged Keyboard carries its own
+pile; Also = sentence entries in value-tier order + quiet collapse —
 and the verbosity-gated registration announce. The double-press roster is
 DELETED (owner amendment: one press announces everything)."""
 from sonari.protocol import MsgType
@@ -26,7 +27,7 @@ def test_holistic_w_speaks_the_full_merged_string_under_divergence():
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
     daemon._speak_loop_once()
     assert speaker.spoken == [
-        "Voice: api 2, playing. Keyboard: web 1. Also: 3 etl, muted; 4 logs, 2 waiting."
+        "Voice: api 2, playing. Keyboard: web 1. Also: 4 logs, 2 waiting. 3 etl, muted."
     ]
 
 
@@ -36,7 +37,7 @@ def test_no_other_sessions_omits_the_also_clause():
     sessions.set_foreground("A", cwd="/x/web")
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: web 1, playing."]
+    assert speaker.spoken == ["Voice and keyboard: web 1, playing."]
 
 
 # --- (c) speaker None after stop_all -> state cue + the FULL map (no exclusions) ---
@@ -51,7 +52,7 @@ def test_speaker_none_after_stop_all_reads_state_cue_plus_full_map():
     assert speaker.earcons == []                        # playable workspace: no error tone
     items = list(stream_queue(daemon, "A")._items)
     assert [it.text for it in items] == [
-        "All stopped. Also: 1 web; 2 api, muted, 1 waiting."
+        "All stopped. Keyboard: web 1. Also: 2 api, muted, 1 waiting."
     ]
     assert items[0].mute_exempt and items[0].pause_exempt   # delivery flags unchanged
 
@@ -65,7 +66,7 @@ def test_keyboard_session_does_not_reappear_in_the_also_map():
     sessions.register("C", cwd="/x/etl")                # number 3 -> the ONLY Also entry
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: api 2, playing. Keyboard: web 1. Also: 3 etl."]
+    assert speaker.spoken == ["Voice: api 2, playing. Keyboard: web 1. All quiet."]
 
 
 # --- (e) unknown folder -> "{n} another session" ---
@@ -73,9 +74,12 @@ def test_unknown_folder_in_the_also_map_says_another_session():
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
     sessions.set_foreground("A", cwd="/x/web")
     sessions.register("C")                              # no cwd -> unknown folder, number 2
+    daemon.history.record("C", "prose", "c line.")      # a pile, or quiet-collapse hides it
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: web 1, playing. Also: 2 another session."]
+    assert speaker.spoken == [
+        "Voice and keyboard: web 1, playing. Also: 2 another session, 1 unheard."
+    ]
 
 
 # --- the registration announce ---

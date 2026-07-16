@@ -22,7 +22,7 @@ Pointer lead:
 
 - Unified (workspace == speaker): `"Voice and keyboard: {folder} {n}, {state}."`
 - Diverged: `"Voice: {folder} {n}, {state}. Keyboard: {folder} {m}[, pile clauses]."` — the Keyboard clause carries its OWN `muted/waiting/unheard/stale` clauses (a silent pile at the typing position is the one pile worth pointer-line space).
-- Idle voice: `"Nothing playing." | "On hold." | "All stopped."` + `" Keyboard: {folder} {n}."` (positive location even when idle) + full Also-map (no exclusions).
+- Idle voice: `"Nothing playing." | "On hold." | "All stopped."` + `" Keyboard: {folder} {n}[, clauses]."` (positive location even when idle; the clause carries the workspace's own pile exactly like the diverged Keyboard clause) + Also-map excluding the workspace (a session is never named twice).
 - A blocking decision on a pointer session appends `, decision` to that pointer clause (the session is never repeated in the Also-map).
 - `{state}` vocabulary unchanged: playing / stopped / on hold / all stopped.
 
@@ -42,7 +42,7 @@ Roster: 1 board (2 unheard) · 2 jam (voice+keyboard, playing) · 3 hackimi (5 u
 - Unified: `"Voice and keyboard: jam 2, playing. Also: 6 syncward, decision, 3 unheard. 1 board, 2 unheard. 3 hackimi, 5 unheard, stale. 5 edrum, muted. Plus one quiet."`
 - Diverged (keyboard on hackimi): `"Voice: jam 2, playing. Keyboard: hackimi 3, 5 unheard, stale. Also: 6 syncward, decision, 3 unheard. 1 board, 2 unheard. 5 edrum, muted. Plus one quiet."`
 - All-clear: `"Voice and keyboard: board 1, playing. All quiet."`
-- Idle: `"Nothing playing. Keyboard: docs 4. Also: …"`
+- Idle: `"Nothing playing. Keyboard: docs 4. Also: …"` (workspace excluded from the map)
 
 ## Accepted edges (documented, no code)
 

@@ -48,4 +48,4 @@ def test_where_am_i_says_playing_after_the_lift():
     daemon.handle_message(_msg("set_foreground", "fg", cwd="/x/fg"))
     daemon.handle_message(_msg("where_am_i", "fg"))
     daemon._speak_loop_once()
-    assert speaker.spoken[-1] == "Voice: fg 1, playing."   # derivation unchanged; input no longer stale
+    assert speaker.spoken[-1] == "Voice and keyboard: fg 1, playing."   # derivation unchanged; input no longer stale

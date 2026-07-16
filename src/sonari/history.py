@@ -159,6 +159,17 @@ class SessionHistory:
         return [e for e in self._entries.get(session, ())
                 if e.turn_id == cur_turn and not e.heard]
 
+    def unheard_age(self, session: str):
+        """Age (clock units) of the OLDEST unheard entry, or None when nothing
+        is unheard. The ⌃⌘W ", stale" word (grammar v2) reads this — age stays
+        encapsulated here so the stamp's clock never leaks to callers. Same
+        current-turn floor semantics as unheard(): a multi-turn pile may read
+        younger than it truly is, never older."""
+        entries = self.unheard(session)
+        if not entries:
+            return None
+        return self._clock() - entries[0].stamp
+
     def reset(self, session: str) -> None:
         """Forget a session entirely (SESSION_END)."""
         self._entries.pop(session, None)

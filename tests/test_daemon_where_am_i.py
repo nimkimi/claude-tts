@@ -7,7 +7,7 @@ def test_where_am_i_speaks_terse_status():
     sessions.set_foreground("fg", cwd="/Users/me/work")
     daemon.handle_message({"type": "where_am_i", "session": "fg"})
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: work 1, playing."]
+    assert speaker.spoken == ["Voice and keyboard: work 1, playing."]
     assert speaker.cancels == 1                   # barge-in fires (always-confirm)
 
 
@@ -15,7 +15,7 @@ def test_where_am_i_unknown_folder_says_another_session():
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="fg")
     daemon.handle_message({"type": "where_am_i", "session": "fg"})   # no cwd -> folder None
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: another session 1, playing."]
+    assert speaker.spoken == ["Voice and keyboard: another session 1, playing."]
 
 
 def test_where_am_i_reports_stopped_state():
@@ -24,7 +24,7 @@ def test_where_am_i_reports_stopped_state():
     daemon._stream("fg").stopped = True
     daemon.handle_message({"type": "where_am_i", "session": "fg"})
     daemon._speak_loop_once()                     # pause_exempt cue voices even when stopped
-    assert speaker.spoken == ["Voice: work 1, stopped."]
+    assert speaker.spoken == ["Voice and keyboard: work 1, stopped."]
 
 
 def test_where_am_i_names_waiting_and_muted_backgrounds_in_the_also_map():
@@ -40,7 +40,7 @@ def test_where_am_i_names_waiting_and_muted_backgrounds_in_the_also_map():
     daemon.handle_message({"type": "where_am_i", "session": "fg"})
     daemon._speak_loop_once()
     assert speaker.spoken == [
-        "Voice: work 1, playing. Also: 2 api, 1 waiting; 3 db, 1 waiting; 4 logs, muted, 1 waiting."
+        "Voice and keyboard: work 1, playing. Also: 2 api, 1 waiting. 3 db, 1 waiting. 4 logs, muted, 1 waiting."
     ]
 
 
@@ -57,7 +57,7 @@ def test_where_am_i_with_nothing_in_flight_still_barges_in():
     daemon.handle_message({"type": "where_am_i", "session": "fg"})
     assert speaker.cancels == 1                   # §7 barge-in even with nothing playing
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice: work 1, playing."]
+    assert speaker.spoken == ["Voice and keyboard: work 1, playing."]
 
 
 def test_where_am_i_resumes_interrupted_item_after_the_status_cue():
@@ -79,7 +79,7 @@ def test_where_am_i_resumes_interrupted_item_after_the_status_cue():
     assert speaker.spoken == ["interrupted sentence"]
     assert daemon._current_item is None
     daemon._speak_loop_once()                     # the status cue plays FIRST
-    assert speaker.spoken[-1] == "Voice: work 1, playing."
+    assert speaker.spoken[-1] == "Voice and keyboard: work 1, playing."
     daemon._speak_loop_once()                     # then reading resumes from the item's start
     assert speaker.spoken[-1] == "interrupted sentence"
 
