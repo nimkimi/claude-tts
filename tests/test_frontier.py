@@ -81,3 +81,75 @@ def test_chooser_cancel_restore_preserves_forward():
                           "session": "s0"})
     requeued = [x for x in d._stream("s0").queue._items if x.text == "captured"]
     assert requeued and requeued[0].forward is True
+
+
+def test_advance_frontier_monotonic():
+    from sonari.session_stream import SessionStream
+    st = SessionStream()
+    assert st.frontier is None
+    st.advance_frontier((1, 0)); assert st.frontier == (1, 0)
+    st.advance_frontier((2, 3)); assert st.frontier == (2, 3)
+    st.advance_frontier((1, 5)); assert st.frontier == (2, 3)   # never retreats
+    st.advance_frontier(None);   assert st.frontier == (2, 3)   # None-safe no-op
+
+
+def test_frontier_survives_new_prompt_reset():
+    from sonari.session_stream import SessionStream
+    st = SessionStream(); st.advance_frontier((4, 1))
+    st.reset_for_new_prompt()
+    assert st.frontier == (4, 1)                # monotonic across turns; only SESSION_END drops it
+
+
+def test_note_spoken_advances_frontier_only_on_forward_completion():
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    st = d._stream("s0")
+    e = d.history.record("s0", "prose", "hello")     # (msg_id 0, seq 0)
+    it = SpeechItem(id=1, session="s0", kind="prose", text="hello",
+                    is_decision=False, forward=True)
+    d._state._pending_heard[it.id] = e; d._current_item = it
+    d.note_spoken(it, completed=True)
+    assert e.heard is True and st.frontier == (e.msg_id, e.seq)
+
+
+def test_browse_replay_flips_heard_but_frontier_stays():
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    st = d._stream("s0")
+    e = d.history.record("s0", "prose", "old")
+    it = SpeechItem(id=1, session="s0", kind="prose", text="old",
+                    is_decision=False, forward=False)   # browse replay: NOT forward
+    d._state._pending_heard[it.id] = e; d._current_item = it
+    d.note_spoken(it, completed=True)
+    assert e.heard is True                    # heard still flips (nav's other uses)
+    assert st.frontier is None                # but the frontier did NOT move (B1)
+
+
+def test_mid_item_barge_in_leaves_frontier_unchanged():
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    st = d._stream("s0")
+    e = d.history.record("s0", "prose", "cut")
+    it = SpeechItem(id=1, session="s0", kind="prose", text="cut",
+                    is_decision=False, forward=True)
+    d._state._pending_heard[it.id] = e; d._current_item = it
+    d.note_spoken(it, completed=False)        # R-8: mid-item cut, not full completion
+    assert e.heard is False and st.frontier is None
+
+
+def test_note_spoken_advances_frontier_on_decision_readout_completion():
+    # A decision-kind readout (choice/plan/permission enqueue site, T2 step 5's
+    # forward=True) must advance the frontier the same as a prose readout — this
+    # was the untested write path the T2 arithmetic gap (+6 claimed / 5 shown)
+    # exposed. Mirrors test_note_spoken_advances_frontier_only_on_forward_completion
+    # but with a decision kind + is_decision=True, matching decisions.py's real
+    # _enqueue(session, "choice", text, True, entry=entry, forward=True) shape.
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    st = d._stream("s0")
+    e = d.history.record("s0", "choice", "pick one")
+    it = SpeechItem(id=1, session="s0", kind="choice", text="pick one",
+                    is_decision=True, forward=True)
+    d._state._pending_heard[it.id] = e; d._current_item = it
+    d.note_spoken(it, completed=True)
+    assert e.heard is True and st.frontier == (e.msg_id, e.seq)

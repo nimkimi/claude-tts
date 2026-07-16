@@ -101,7 +101,7 @@ def on_choice(ctx, msg):
     # The flip: gating moved to playback. Every session enqueues its own
     # decision into its own stream; the foreground-driven loop voices it.
     ctx.host._flush_prose_buffer(session)   # prose before the question
-    ctx.host._enqueue(session, "choice", text, True, entry=entry)
+    ctx.host._enqueue(session, "choice", text, True, entry=entry, forward=True)
     return None
 
 
@@ -118,7 +118,7 @@ def on_plan(ctx, msg):
     ctx.host.history.end_message(session)
     # The flip: enqueue unconditionally into this session's own stream.
     ctx.host._flush_prose_buffer(session)   # prose before the plan
-    ctx.host._enqueue(session, "plan", text, True, entry=entry)
+    ctx.host._enqueue(session, "plan", text, True, entry=entry, forward=True)
     return None
 
 
@@ -135,7 +135,7 @@ def on_permission(ctx, msg):
     ctx.host.history.end_message(session)
     # The flip: enqueue unconditionally into this session's own stream.
     ctx.host._flush_prose_buffer(session)   # prose before the permission ask
-    ctx.host._enqueue(session, "permission", text, True, entry=entry)
+    ctx.host._enqueue(session, "permission", text, True, entry=entry, forward=True)
     return None
 
 
@@ -169,7 +169,7 @@ def on_permission_request(ctx, msg):
     entry = host.history.record(session, "permission", text)
     host.history.end_message(session)
     host._flush_prose_buffer(session)        # prose before the permission ask
-    item_id = host._enqueue(session, "permission", text, True, entry=entry)
+    item_id = host._enqueue(session, "permission", text, True, entry=entry, forward=True)
     # We are under the daemon lock here, so mutate the store directly.
     prev = host._pending_decisions.get(session)
     if prev is not None:

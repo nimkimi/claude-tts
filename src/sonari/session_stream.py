@@ -22,6 +22,13 @@ class SessionStream:
         self.stopped = False                # per-session stop (⌃⌘S / ⌃⌘M); sticky across prompts
         self.warned_immediate = False       # warned once about immediate selection
         self.guided = False                 # received the setup-guidance cue once
+        # SP4 frontier: the monotonic "furthest I've dealt with" high-water mark,
+        # (msg_id, seq) of a HistoryEntry, None == nothing dealt-with yet. DISTINCT
+        # from nav_cursor (browse). Advanced ONLY by note_spoken (forward completion)
+        # and the pile-skip gesture; never derived from heard (B1); never retreats;
+        # NOT reset on a new prompt (cross-turn) — dropped only when SESSION_END pops
+        # the stream. Plain JSON-shaped tuple so SP6 serializes it unchanged.
+        self.frontier = None
 
     def reset_for_new_prompt(self) -> None:
         """A new user prompt (FLUSH): reset playback state with a fresh assembler,
@@ -33,3 +40,10 @@ class SessionStream:
         self.options = None
         self.nav_cursor = None
         self.nav_turn = None
+
+    def advance_frontier(self, key) -> None:
+        """Monotonically advance the frontier to key=(msg_id, seq). No-op unless key
+        is strictly ahead (None frontier == nothing dealt-with yet). The frontier
+        NEVER retreats and is NOT derived from the heard flags."""
+        if key is not None and (self.frontier is None or key > self.frontier):
+            self.frontier = key

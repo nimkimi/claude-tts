@@ -283,7 +283,7 @@ class SpeechDaemon:
             return
         st.prose_buffer = []
         for text, entry in buf:
-            self._enqueue(session, "prose", text, False, entry=entry)
+            self._enqueue(session, "prose", text, False, entry=entry, forward=True)
 
     def _drop_pending(self, items) -> None:
         for it in items:
@@ -331,6 +331,15 @@ class SpeechDaemon:
             entry = self._state._pending_heard.pop(item.id, None)
             if entry is not None and completed:
                 entry.heard = True
+                if item.forward:
+                    # Frontier write-path (a): a forward-readout item completing.
+                    # O(1) — the key is already on the entry, no history scan (R-3).
+                    # Gated on item.forward so a browse replay (forward=False) that
+                    # flips heard above cannot drag the frontier (B1); gated on
+                    # completed so a mid-item barge-in never advances it (R-8).
+                    st = self._state._streams.get(item.session)
+                    if st is not None:
+                        st.advance_frontier((entry.msg_id, entry.seq))
 
     def _await_permission_decision(self, session: str, timeout: float) -> dict:
         """Block (OUTSIDE the daemon lock) until the focused-session answer arrives
