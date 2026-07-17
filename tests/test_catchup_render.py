@@ -165,3 +165,23 @@ def test_failure_reason_is_logged(capsys):
     rid = _inflight(daemon, folder="r")
     daemon.handle_message(_result(rid, ok=False, reason="unavailable"))
     assert "sonari[catchup]: summary failed reason=unavailable" in capsys.readouterr().err
+
+
+def test_auto_summary_voice_never_picks_junk_voices():
+    # Live finding: say -v ? starts with "Voice 1" (Siri placeholder) and
+    # "Albert" (breathy compact voice) — auto picked Albert and whispered the
+    # summary. Auto draws only from the curated known-good set.
+    from sonari.catchup import resolve_summary_voice
+    picked = resolve_summary_voice(
+        "auto", "Voice 1", ["Voice 1", "Albert", "Whisper", "Samantha", "Daniel"])
+    assert picked == "Samantha"
+
+
+def test_auto_summary_voice_prefers_curated_order_and_skips_main():
+    from sonari.catchup import resolve_summary_voice
+    assert (resolve_summary_voice("auto", "Samantha",
+                                  ["Albert", "Daniel", "Samantha"]) == "Daniel")
+    # No curated voice installed besides junk -> fall back to the main voice
+    # (the "Summary:" frame still marks the synthetic channel).
+    assert (resolve_summary_voice("auto", "Voice 1",
+                                  ["Voice 1", "Albert", "Whisper"]) == "Voice 1")

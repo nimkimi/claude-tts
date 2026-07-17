@@ -93,14 +93,24 @@ def build_digest(entries) -> str:
     return "Summary unavailable. Last: {0}".format(last)
 
 
+# Auto candidates for the summary body, quality-floored: the raw `say -v ?`
+# listing leads with placeholder/novelty voices ("Voice 1", "Albert", "Whisper")
+# — live-heard 2026-07-17 as a whispered summary. Say-speakable natives only:
+# the per-utterance override rides the say path, so neural (Kokoro) names would
+# fail to speak (a Kokoro summary voice needs the synth path — future work).
+_PREFERRED_SUMMARY_VOICES = ("Samantha", "Daniel", "Karen", "Moira", "Tessa", "Alex")
+
+
 def resolve_summary_voice(cfg_value, main_voice, voices):
     """The body voice. A concrete configured name wins. 'auto' picks the first
-    installed voice distinct from the main voice, falling back to the main voice
-    (the frame word still marks the synthetic channel). 'off'/None -> main voice."""
+    CURATED voice that is installed and distinct from the main voice, falling
+    back to the main voice (the frame word still marks the synthetic channel).
+    'off'/None -> main voice."""
     if isinstance(cfg_value, str) and cfg_value not in ("auto", "off", ""):
         return cfg_value
     if cfg_value == "auto":
-        for v in (voices or []):
-            if v != main_voice:
+        installed = set(voices or [])
+        for v in _PREFERRED_SUMMARY_VOICES:
+            if v in installed and v != main_voice:
                 return v
     return main_voice

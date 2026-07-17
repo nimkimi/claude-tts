@@ -88,9 +88,12 @@ Rules:
   now), so they are additive, not contradictory; a decision that arose in the slice but has
   since resolved is voiced by the summary (past-window) with no tail (nothing pending) — which
   is correct, not a conflict.
-- **Voice separation**: the body speaks in `summary_voice` (config; `auto` picks an installed
-  voice distinct from the main voice, falling back to the main voice when none exists — the
-  frame word still marks the channel). Voice choice = owner ear-pass.
+- **Voice separation**: the body speaks in `summary_voice` (config; `auto` picks the first
+  CURATED say voice installed and distinct from the main voice — the raw `say -v ?` listing
+  leads with placeholder/novelty voices, live-heard 2026-07-17 as a whispered summary — falling
+  back to the main voice when none qualifies; the frame word still marks the channel. Neural
+  Kokoro names are excluded from `auto`: the per-utterance override rides the say path).
+  Voice choice = owner ear-pass.
 - **Sanitizer** (deterministic, before speaking): strip markdown (fences, backticks, `*`,
   `_`, `#`, bullet/list markers), collapse whitespace/newlines to spaces, split into
   sentences, **clamp to the length ceiling (8 sentences, matching §5)**; empty-after-sanitize
