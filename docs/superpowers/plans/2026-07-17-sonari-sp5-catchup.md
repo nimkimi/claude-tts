@@ -783,7 +783,7 @@ git commit -m "feat(sp5): per-utterance voice override through the speak loop"
 
 **Interfaces:**
 - Consumes: `select_summarizer`/`SummarizeResult` (Task 4), `render_slice`/`build_digest` (Task 3), `MsgType.CATCH_UP`/`CATCHUP_RESULT` (Task 1), `_enqueue(..., voice=)` (Task 5).
-- Produces (daemon state, mutated ONLY on the loop): `host._catchup` — the in-flight bundle `{"id", "target", "folder", "slice_end", "digest", "cancel": threading.Event, "phase": "preparing"|"rendering", "render_id": int|None, "ended": bool}` or `None`; `host._catchup_seq: int`; `host._catchup_inbox: queue.Queue`; `host._summarizer() -> HostSummarizer | None`; `host._drain_catchup_inbox()`. The bundle survives SESSION_END (daemon state, not sessions/history) — so the Task 7 result handler can render `"{folder} ended."` from it.
+- Produces (daemon state, mutated ONLY on the loop): `host._catchup` — the in-flight bundle `{"id", "target", "folder", "slice_end", "digest", "cancel": threading.Event, "phase": "preparing"|"rendering", "render_id": int|None, "ended": bool, "ack_id": int|None}` or `None`; `host._catchup_seq: int`; `host._catchup_inbox: queue.Queue`; `host._summarizer() -> HostSummarizer | None`; `host._drain_catchup_inbox()`. `ack_id` is the id `_enqueue` returned for the ack item (the ordering anchor — Task 7's render inserts after it). The bundle survives SESSION_END (daemon state, not sessions/history) — so the Task 7 result handler can render `"{folder} ended."` from it.
 - The worker thread closure captures `summarizer`, `slice_text`, `cancel`, `request_id`, `host` as LOCALS and only `host._catchup_inbox.put(...)` + `host._wake.set()` — it reads/writes NO daemon state.
 
 - [ ] **Step 1: Write the failing tests** — `tests/test_catchup_press.py`:
@@ -905,7 +905,10 @@ Add the feature side-effect import beside the others (host.py:22-30): `from sona
     def _drain_catchup_inbox(self) -> None:
         """Deliver any worker-posted catchup_result on the daemon loop, under the
         transaction lock (mirrors the socket/hotkey dispatch). Called at the top of
-        _speak_loop_once BEFORE the held-branch return so results land in all states."""
+        _speak_loop_once BEFORE the held-branch return so results land in all states.
+        This position guards STATE-DELIVERY (results reach the loop while held), NOT
+        ordering: ack-before-render is guaranteed by on_catchup_result inserting the
+        render after the ack's queued id (Task 7), independent of when this drains."""
         while True:
             try:
                 msg = self._catchup_inbox.get_nowait()
@@ -964,17 +967,20 @@ def on_catch_up(ctx, msg):
     ack = "Catching up {0} {1} {2}.".format(n, "item" if n == 1 else "items", where)
     if aged_out:
         ack = "Earlier output aged out. " + ack
-    host._enqueue(dest, "prose", ack, False,
-                  mute_exempt=True, pause_exempt=True, at_front=True)
+    ack_id = host._enqueue(dest, "prose", ack, False,
+                           mute_exempt=True, pause_exempt=True, at_front=True)
     last = entries[-1]
     slice_text = render_slice(entries, folder)      # pinned + rendered AT PRESS
     host._catchup_seq += 1
     request_id = host._catchup_seq
     cancel = threading.Event()
+    # `ack_id` lets on_catchup_result land the render RIGHT AFTER the still-queued
+    # ack (never ahead of it), so the ground-truth magnitude always speaks first.
     host._catchup = {"id": request_id, "target": target, "folder": folder,
                      "slice_end": (last.msg_id, last.seq),
                      "digest": build_digest(entries), "cancel": cancel,
-                     "phase": "preparing", "render_id": None, "ended": False}
+                     "phase": "preparing", "render_id": None, "ended": False,
+                     "ack_id": ack_id}
     summarizer = host._summarizer()
     if summarizer is None:                          # no adapter -> straight to the floor
         from sonari.summarizer import SummarizeResult
@@ -1046,9 +1052,10 @@ git commit -m "feat(sp5): catch-up press handler, worker thread, and result mail
 ### Task 7: `catchup_result` render + landing
 
 **Files:**
-- Modify: `src/sonari/queue.py` (SpeechItem: `render_id` + `catchup_burn` fields)
-- Modify: `src/sonari/daemon/host.py` (`_enqueue` threads `render_id`/`catchup_burn`; `_voices_provider` attr + `_installed_voices()`)
+- Modify: `src/sonari/queue.py` (SpeechItem: `render_id` + `catchup_burn` fields; `SpeechQueue.insert_after(item_id, items)` — lands the render after the ack)
+- Modify: `src/sonari/daemon/host.py` (`_enqueue` threads `render_id`/`catchup_burn` + gains an `after_id` param; `_voices_provider` attr + `_installed_voices()`)
 - Modify: `src/sonari/catchup.py` (append `resolve_summary_voice`)
+- Modify: `tests/test_queue.py` (unit test for `insert_after`)
 - Modify: `src/sonari/daemon/features/catchup.py` (add the `on_catchup_result` handler)
 - Modify: `src/sonari/daemon/__init__.py` (add `MsgType.CATCHUP_RESULT` to `assert_complete`)
 - Modify: `tests/test_daemon_registry.py` (add `_MsgType.CATCHUP_RESULT` to `ALL_TYPES` — the second real completeness guard, alongside its handler landing)
@@ -1056,15 +1063,15 @@ git commit -m "feat(sp5): catch-up press handler, worker thread, and result mail
 - Test: `tests/test_catchup_render.py` (new)
 
 **Interfaces:**
-- Consumes: `sanitize_summary` (Task 2), `build_digest` (Task 3), `_has_decision` from `features/control.py`, `resolve_summary_voice` (this task), `_enqueue(..., voice=, render_id=, catchup_burn=)`.
-- Produces: `SpeechItem.render_id: int|None`, `SpeechItem.catchup_burn: bool=False`; `resolve_summary_voice(cfg_value, main_voice, voices) -> str|None` (concrete name wins; `auto` picks the first voice `!= main_voice`, else main voice; `off`/`None` → main voice); `host._installed_voices() -> list[str]`. The result handler id-matches `msg["request_id"]` against `host._catchup["id"]` (stale → drop), assembles `[ "{folder} ended." (if ended) ] + [ frame+body | digest ] + [ tail if decision & not ended ]`, routes to `_cue_dest`, enqueues reversed-at_front (so play order is preserved), and marks the LAST item `catchup_burn=True` ALWAYS (it is the render-done marker that clears `self._catchup` on completion; Task 8 gates the actual frontier burn on `not cu["ended"]`, so an ended render still clears the bundle). Task 8 consumes `render_id`/`catchup_burn` in `note_spoken`.
+- Consumes: `sanitize_summary` (Task 2), `build_digest` (Task 3), `_has_decision` from `features/control.py`, `resolve_summary_voice` (this task), `_enqueue(..., voice=, render_id=, catchup_burn=, after_id=)`, `cu["ack_id"]` (Task 6).
+- Produces: `SpeechItem.render_id: int|None`, `SpeechItem.catchup_burn: bool=False`; `SpeechQueue.insert_after(item_id, items) -> bool` (inserts `items` right after the queued item with id `item_id`; returns False when that item is no longer queued — the caller falls back to `at_front`; caller holds the daemon lock); `_enqueue(..., after_id=None)` (when `after_id` is set and still queued, insert after it; otherwise honor `at_front`); `resolve_summary_voice(cfg_value, main_voice, voices) -> str|None` (concrete name wins; `auto` picks the first voice `!= main_voice`, else main voice; `off`/`None` → main voice); `host._installed_voices() -> list[str]`. The result handler id-matches `msg["request_id"]` against `host._catchup["id"]` (stale → drop), assembles `[ "{folder} ended." (if ended) ] + [ frame+body | digest ] + [ tail if decision & not ended ]`, routes to `_cue_dest`, and enqueues the segments REVERSED with `after_id=cu.get("ack_id")` so — when the ack is still queued — the whole render lands immediately AFTER the ack in play order (never ahead of it); when the ack has already been spoken, `insert_after` returns False and the reversed enqueue falls to `at_front` as before. It marks the LAST item `catchup_burn=True` ALWAYS (it is the render-done marker that clears `self._catchup` on completion; Task 8 gates the actual frontier burn on `not cu["ended"]`, so an ended render still clears the bundle). Task 8 consumes `render_id`/`catchup_burn` in `note_spoken`.
 
 - [ ] **Step 1: Write the failing tests** — `tests/test_catchup_render.py`:
 ```python
 import threading
 
 from sonari.catchup import resolve_summary_voice
-from tests.daemon_helpers import make_daemon
+from tests.daemon_helpers import make_daemon, stream_queue
 
 
 def _result(rid, ok, text="", reason=""):
@@ -1077,8 +1084,12 @@ def _inflight(daemon, target="fg", folder="myrepo",
     daemon._catchup = {"id": 1, "target": target, "folder": folder,
                        "slice_end": (0, 0), "digest": digest,
                        "cancel": threading.Event(), "phase": "preparing",
-                       "render_id": None, "ended": False}
+                       "render_id": None, "ended": False, "ack_id": None}
     return 1
+
+
+def _catch_up(session="fg"):
+    return {"v": 1, "type": "catch_up", "session": session}
 
 
 def _drain(daemon, n=4):
@@ -1194,7 +1205,32 @@ In `src/sonari/queue.py`, add to `SpeechItem` after `voice`:
     render_id: "int | None" = None  # SP5: groups a catch-up render's frame/body/tail items
     catchup_burn: bool = False  # SP5: True on the render's LAST item; note_spoken burns on its completion
 ```
-In `src/sonari/daemon/host.py`, extend `_enqueue`'s signature with `render_id=None, catchup_burn=False` and pass both to `SpeechItem(...)`. Add `self._voices_provider = None` and `self._voices_cache = None` in `__init__` (beside the catch-up fields) and a method:
+Add to `SpeechQueue` (the render must land right after its ack, never ahead of it):
+```python
+    def insert_after(self, item_id, items) -> bool:
+        """Insert *items* (in order) immediately after the queued item with id
+        *item_id*. Returns False when that item is no longer queued (already
+        spoken/dropped) so the caller can fall back to at_front. The catch-up
+        render lands after its still-queued ack this way. Caller holds the lock."""
+        for i, it in enumerate(self._items):
+            if it.id == item_id:
+                for offset, new in enumerate(items, start=1):
+                    self._items.insert(i + offset, new)
+                return True
+        return False
+```
+In `src/sonari/daemon/host.py`, extend `_enqueue`'s signature with `render_id=None, catchup_burn=False` and pass both to `SpeechItem(...)`. Also add an `after_id=None` param: when it is set and the target item is still queued, insert the new item right after it; otherwise fall through to the existing `at_front`/append placement. Concretely, replace the placement block with:
+```python
+        if after_id is not None and st.queue.insert_after(after_id, [item]):
+            pass                                     # landed right after the anchor (the ack)
+        elif at_front:
+            st.queue.enqueue_front(item)
+        else:
+            evicted = st.queue.enqueue(item)
+            if evicted is not None:
+                self._drop_pending([evicted])
+```
+(Within one handler dispatch the anchor's presence is invariant — the loop can't pop between the reversed inserts under the same lock — so a per-item `after_id` stays consistent across the whole render: all insert-after, or all fall to `at_front`.) Add `self._voices_provider = None` and `self._voices_cache = None` in `__init__` (beside the catch-up fields) and a method:
 ```python
     def _installed_voices(self) -> list:
         """The say voices, best-effort. Overridable via _voices_provider so tests
@@ -1265,14 +1301,15 @@ def on_catchup_result(ctx, msg):
         return None
     cu["dest"] = dest                                # the stream the render items live on (for cancel/cut)
     last = len(segments) - 1
-    for i in range(last, -1, -1):                    # reverse enqueue -> preserved play order
+    ack_id = cu.get("ack_id")                        # land the render AFTER the still-queued ack
+    for i in range(last, -1, -1):                    # reverse -> preserved play order (after the ack, else at_front)
         text, voice = segments[i]
         # The last item is the render-DONE marker (always) — it clears self._catchup
         # on completion; whether it also BURNS is gated on `not ended` in Task 8, so
         # an ended render still clears the bundle (no spurious "Cancelled." next press).
         host._enqueue(dest, "prose", text, False, mute_exempt=True, pause_exempt=True,
                       at_front=True, voice=voice, render_id=render_id,
-                      catchup_burn=(i == last))
+                      catchup_burn=(i == last), after_id=ack_id)
     return None
 ```
 In `src/sonari/daemon/__init__.py`, add `MsgType.CATCHUP_RESULT,` to `assert_complete([...])` (its handler now exists).
