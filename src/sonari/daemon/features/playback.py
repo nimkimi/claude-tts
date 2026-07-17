@@ -90,7 +90,18 @@ def on_skip_pile(ctx, msg):
     noun = "item" if count == 1 else "items"
     folder = sessions.folder(target)
     where = "in {0}".format(folder) if folder else "in another session"
-    host._enqueue(target, "prose", "Skipping {0} {1} {2}.".format(count, noun, where), False,
+    # T6 re-review finding 8: when TARGET diverges from the current speaker (owner
+    # standing on a piled workspace while the voice flows elsewhere), the target's
+    # stream isn't heard until keep-going eventually rotates there — enqueueing the
+    # confirmation THERE leaves it functionally silent. Voice it on the SPEAKER's
+    # stream instead (still at_front, so it lands at the next sentence boundary);
+    # the speaker is innocent, so this never cancels/cuts its in-flight utterance.
+    # Converged (target == spk) and the flood fall-through (target already IS the
+    # speaker) keep the original routing unchanged; a None speaker (idle voice)
+    # also keeps it — keep-going adopts a playable workspace cue immediately (see
+    # on_where_am_i's idle branch, control.py).
+    cue_dest = spk if (spk is not None and spk != target) else target
+    host._enqueue(cue_dest, "prose", "Skipping {0} {1} {2}.".format(count, noun, where), False,
                   mute_exempt=True, pause_exempt=True, at_front=True)
     return None
 

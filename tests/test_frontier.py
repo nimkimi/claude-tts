@@ -13,10 +13,13 @@ def _cfg():
 
 
 class _FakeSpeaker:
-    def __init__(self): self._epoch = 0
+    def __init__(self): self._epoch = 0; self.spoken = []
     def cancel(self): self._epoch += 1
     def cancel_epoch(self): return self._epoch
     def earcon(self, kind): pass
+    def speak(self, text=None, audio_path=None, cancel_epoch=None):
+        self.spoken.append(text)
+        return True
 
 
 def test_speech_item_forward_defaults_false():
@@ -320,6 +323,10 @@ def test_skip_pile_workspace_wins_over_diverged_flowing_speaker():
     # C1 targeted the clean flowing SPEAKER and never looked at the workspace's
     # own pile. C1' is pile-seeking, workspace-first: the workspace wins whenever
     # IT has a pile, regardless of voice_state or where the voice is flowing.
+    # T6 re-review finding 8: the confirmation cue itself must NOT land on the
+    # (diverged, silent) target "b" — the voice is on "a", so it belongs there
+    # (test_skip_pile_diverged_confirmation_lands_on_speaker_stream below covers
+    # that routing in detail; this test just carries it forward untouched).
     from sonari.protocol import MsgType, PROTOCOL_VERSION
     sessions = SessionManager(); sessions.set_foreground("b")
     sessions.register("b", cwd="/x/b"); sessions.register("a", cwd="/x/a")
@@ -334,13 +341,50 @@ def test_skip_pile_workspace_wins_over_diverged_flowing_speaker():
         d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "b"})
     assert b_st.frontier == d.history.newest_key("b")        # workspace's OWN pile skipped
     assert d._stream("a").frontier is None                   # the flowing speaker was NOT touched
-    assert [x.text for x in b_st.queue._items] == ["Skipping 5 items in b."]
+    assert len(b_st.queue) == 0                                # target cleared; cue diverts to the speaker
+    assert [x.text for x in d._stream("a").queue._items] == ["Skipping 5 items in b."]
+
+
+def test_skip_pile_diverged_confirmation_lands_on_speaker_stream():
+    # T6 re-review finding 8: when the C1' target diverges from the current
+    # SPEAKER (owner stands on a piled workspace while the voice flows
+    # elsewhere), enqueueing the confirmation on the TARGET's stream leaves it
+    # functionally silent — it isn't heard until keep-going eventually rotates
+    # there. Route it to the SPEAKER's stream instead: at the front (heard at
+    # the next sentence boundary), a control cue (mute_exempt + pause_exempt),
+    # and NEVER forward (a control cue must not advance any frontier — B1).
+    # The speaker is innocent here (no cancel/cut — contrast on_stop_session's
+    # barge-in class); it just rides the sentence boundary.
+    from sonari.protocol import MsgType, PROTOCOL_VERSION
+    sessions = SessionManager(); sessions.set_foreground("b")
+    sessions.register("b", cwd="/x/b"); sessions.register("a", cwd="/x/a")
+    sessions.set_speaker("a")                             # diverged: voice flows on a, workspace is b
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    d.voice_state = "flowing"
+    b_st = d._stream("b"); a_st = d._stream("a")
+    for i in range(5):
+        e = d.history.record("b", "prose", "p{0}".format(i)); d.history.end_message("b")
+        d._enqueue("b", "prose", "p{0}".format(i), False, entry=e, forward=True)
+    with d._state.transaction():
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "b"})
+    assert len(b_st.queue) == 0                                # target left cleared -- no cue there
+    assert [x.text for x in a_st.queue._items] == ["Skipping 5 items in b."]
+    cue = a_st.queue._items[0]
+    assert cue.forward is False                                # never advances a frontier
+    assert cue.mute_exempt is True and cue.pause_exempt is True
+    d._speak_loop_once()
+    assert d.speaker.spoken == ["Skipping 5 items in b."]      # heard NOW, not after keep-going rotates
 
 
 def test_skip_pile_both_piled_workspace_first_then_speaker_on_second_press():
     # Both diverged sessions have a pile: the workspace wins the first press;
     # a second press then drains the (still-piled) flowing speaker — two
-    # presses drain both, in that order.
+    # presses drain both, in that order. T6 re-review finding 8: the FIRST
+    # press's cue is diverged (target=ws != speaker=spk), so it lands at the
+    # FRONT of spk's stream, ahead of spk's own still-queued pile. The SECOND
+    # press is converged (target becomes spk itself, the flood fall-through),
+    # so its cue keeps the original routing — and clears spk's entire queue,
+    # including the first cue, byte-identical to before this fix.
     from sonari.protocol import MsgType, PROTOCOL_VERSION
     sessions = SessionManager(); sessions.set_foreground("ws")
     sessions.register("ws", cwd="/x/ws"); sessions.register("spk", cwd="/x/spk")
@@ -358,7 +402,9 @@ def test_skip_pile_both_piled_workspace_first_then_speaker_on_second_press():
         d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "ws"})
     assert ws_st.frontier == d.history.newest_key("ws")      # first press: workspace pile cleared
     assert spk_st.frontier is None                           # speaker pile untouched so far
-    assert [x.text for x in ws_st.queue._items] == ["Skipping 2 items in ws."]
+    assert len(ws_st.queue) == 0                               # target cleared; cue diverts to the speaker
+    assert [x.text for x in spk_st.queue._items] == [
+        "Skipping 2 items in ws.", "s0", "s1", "s2"]          # cue heard now, ahead of spk's own pile
     with d._state.transaction():
         d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "ws"})
     assert spk_st.frontier == d.history.newest_key("spk")    # second press: speaker pile cleared
