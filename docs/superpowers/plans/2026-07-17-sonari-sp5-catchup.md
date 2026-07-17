@@ -1020,7 +1020,464 @@ git commit -m "feat(sp5): catch-up press handler, worker thread, and result mail
 
 ### Task 7: `catchup_result` render + landing
 
+**Files:**
+- Modify: `src/sonari/queue.py` (SpeechItem: `render_id` + `catchup_burn` fields)
+- Modify: `src/sonari/daemon/host.py` (`_enqueue` threads `render_id`/`catchup_burn`; `_voices_provider` attr + `_installed_voices()`)
+- Modify: `src/sonari/catchup.py` (append `resolve_summary_voice`)
+- Modify: `src/sonari/daemon/features/catchup.py` (add the `on_catchup_result` handler)
+- Modify: `src/sonari/daemon/__init__.py` (add `MsgType.CATCHUP_RESULT` to `assert_complete`)
+- Modify: `tests/daemon_helpers.py` (`make_daemon` sets `daemon._voices_provider = lambda: []` for hermetic renders)
+- Test: `tests/test_catchup_render.py` (new)
+
+**Interfaces:**
+- Consumes: `sanitize_summary` (Task 2), `build_digest` (Task 3), `_has_decision` from `features/control.py`, `resolve_summary_voice` (this task), `_enqueue(..., voice=, render_id=, catchup_burn=)`.
+- Produces: `SpeechItem.render_id: int|None`, `SpeechItem.catchup_burn: bool=False`; `resolve_summary_voice(cfg_value, main_voice, voices) -> str|None` (concrete name wins; `auto` picks the first voice `!= main_voice`, else main voice; `off`/`None` → main voice); `host._installed_voices() -> list[str]`. The result handler id-matches `msg["request_id"]` against `host._catchup["id"]` (stale → drop), assembles `[ "{folder} ended." (if ended) ] + [ frame+body | digest ] + [ tail if decision & not ended ]`, routes to `_cue_dest`, enqueues reversed-at_front (so play order is preserved), and marks the LAST item `catchup_burn=True` unless ended. Task 8 consumes `render_id`/`catchup_burn` in `note_spoken`.
+
+- [ ] **Step 1: Write the failing tests** — `tests/test_catchup_render.py`:
+```python
+import threading
+
+from sonari.catchup import resolve_summary_voice
+from tests.daemon_helpers import make_daemon
+
+
+def _result(rid, ok, text="", reason=""):
+    return {"v": 1, "type": "catchup_result", "request_id": rid,
+            "ok": ok, "text": text, "reason": reason}
+
+
+def _inflight(daemon, target="fg", folder="myrepo",
+              digest="Summary unavailable. Last: x."):
+    daemon._catchup = {"id": 1, "target": target, "folder": folder,
+                       "slice_end": (0, 0), "digest": digest,
+                       "cancel": threading.Event(), "phase": "preparing",
+                       "render_id": None, "ended": False}
+    return 1
+
+
+def _drain(daemon, n=4):
+    for _ in range(n):
+        daemon._speak_loop_once()
+
+
+def test_resolve_summary_voice_rules():
+    assert resolve_summary_voice("Daniel", "Alex", ["Alex", "Daniel"]) == "Daniel"
+    assert resolve_summary_voice("auto", "Alex", ["Alex", "Samantha"]) == "Samantha"
+    assert resolve_summary_voice("auto", "Alex", ["Alex"]) == "Alex"
+    assert resolve_summary_voice("auto", None, []) is None
+    assert resolve_summary_voice("off", "Alex", ["Bob"]) == "Alex"
+
+
+def test_success_renders_frame_then_body_in_summary_voice():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    config["summary_voice"] = "Daniel"
+    rid = _inflight(daemon, target="fg", folder="myrepo")
+    daemon.handle_message(_result(rid, ok=True, text="The build is green."))
+    _drain(daemon)
+    assert speaker.spoken[:2] == ["Summary:", "The build is green."]
+    assert speaker.spoken_voices[0] is None          # frame -> main voice
+    assert speaker.spoken_voices[1] == "Daniel"      # body -> summary voice
+
+
+def test_pending_decision_appends_tail_last():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon._pending_decisions["fg"] = {"event": None, "behavior": None,
+                                       "text": "?", "item_id": None}
+    rid = _inflight(daemon, target="fg", folder="r")
+    daemon.handle_message(_result(rid, ok=True, text="Ran tests."))
+    _drain(daemon)
+    assert speaker.spoken[speaker.spoken.index("Ran tests.") + 1] == "Decision waiting."
+
+
+def test_no_decision_no_tail():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    rid = _inflight(daemon, target="fg", folder="r")
+    daemon.handle_message(_result(rid, ok=True, text="Ran tests."))
+    _drain(daemon)
+    assert "Decision waiting." not in speaker.spoken
+
+
+def test_failure_renders_digest_main_voice_no_frame():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    config["summary_voice"] = "Daniel"
+    rid = _inflight(daemon, folder="r", digest="Summary unavailable. Last: All done.")
+    daemon.handle_message(_result(rid, ok=False, reason="timeout"))
+    _drain(daemon)
+    assert "Summary:" not in speaker.spoken
+    assert speaker.spoken[0] == "Summary unavailable. Last: All done."
+    assert speaker.spoken_voices[0] is None
+
+
+def test_empty_summary_falls_to_digest():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    rid = _inflight(daemon, folder="r", digest="Summary unavailable. Last: x.")
+    daemon.handle_message(_result(rid, ok=True, text="```\n\n```"))
+    _drain(daemon)
+    assert "Summary:" not in speaker.spoken
+    assert "Summary unavailable. Last: x." in speaker.spoken
+
+
+def test_session_ended_midprep_prepends_folder_ended_no_tail():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("live", cwd="/x/live")   # a live speaker to voice on
+    daemon._pending_decisions["gone"] = {"event": None, "behavior": None,
+                                         "text": "?", "item_id": None}
+    rid = _inflight(daemon, target="gone", folder="oldrepo")   # 'gone' unregistered
+    daemon.handle_message(_result(rid, ok=True, text="It finished the refactor."))
+    _drain(daemon)
+    assert speaker.spoken[0] == "oldrepo ended."
+    assert "Summary:" in speaker.spoken
+    assert "Decision waiting." not in speaker.spoken
+
+
+def test_stale_result_after_cancel_is_dropped():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    rid = _inflight(daemon)
+    daemon._catchup = None                           # a cancel landed first
+    daemon.handle_message(_result(rid, ok=True, text="Late summary."))
+    _drain(daemon)
+    assert "Late summary." not in speaker.spoken and "Summary:" not in speaker.spoken
+
+
+def test_wrong_request_id_is_dropped():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    _inflight(daemon)                                # id == 1
+    daemon.handle_message(_result(999, ok=True, text="Wrong."))
+    _drain(daemon)
+    assert "Wrong." not in speaker.spoken
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+```
+.venv/bin/python -m pytest -q tests/test_catchup_render.py
+```
+Expect: `ImportError: cannot import name 'resolve_summary_voice'` (and, once that exists, the render assertions fail — no `catchup_result` handler yet).
+
+- [ ] **Step 3: Write the minimal implementation**
+
+In `src/sonari/queue.py`, add to `SpeechItem` after `voice`:
+```python
+    voice: "str | None" = None  # SP5: per-utterance say voice override (the summary body); None == main voice
+    render_id: "int | None" = None  # SP5: groups a catch-up render's frame/body/tail items
+    catchup_burn: bool = False  # SP5: True on the render's LAST item; note_spoken burns on its completion
+```
+In `src/sonari/daemon/host.py`, extend `_enqueue`'s signature with `render_id=None, catchup_burn=False` and pass both to `SpeechItem(...)`. Add `self._voices_provider = None` in `__init__` (beside the catch-up fields) and a method:
+```python
+    def _installed_voices(self) -> list:
+        """The say voices, best-effort (human-paced render path only). Overridable
+        via _voices_provider so tests stay hermetic (no `say -v ?`)."""
+        if self._voices_provider is not None:
+            return self._voices_provider()
+        try:
+            from sonari.platform import get_platform
+            return list(get_platform().tts.list_voices())
+        except Exception:  # noqa: BLE001 - a voice-list failure just falls to the main voice
+            return []
+```
+Append to `src/sonari/catchup.py`:
+```python
+def resolve_summary_voice(cfg_value, main_voice, voices):
+    """The body voice. A concrete configured name wins. 'auto' picks the first
+    installed voice distinct from the main voice, falling back to the main voice
+    (the frame word still marks the synthetic channel). 'off'/None -> main voice."""
+    if isinstance(cfg_value, str) and cfg_value not in ("auto", "off", ""):
+        return cfg_value
+    if cfg_value == "auto":
+        for v in (voices or []):
+            if v != main_voice:
+                return v
+    return main_voice
+```
+In `src/sonari/daemon/features/catchup.py`, extend the imports and add the handler:
+```python
+from sonari.catchup import render_slice, build_digest, sanitize_summary, resolve_summary_voice
+from sonari.daemon.features.control import _has_decision
+```
+```python
+@handler(MsgType.CATCHUP_RESULT)
+def on_catchup_result(ctx, msg):
+    host = ctx.host
+    cu = host._catchup
+    if cu is None or cu.get("id") != msg.get("request_id"):
+        return None                                  # stale (cancelled/superseded) -> drop
+    sessions = host.sessions
+    target = cu["target"]
+    ended = target not in sessions.session_ids()     # SESSION_END destroyed its live state
+    body_voice = resolve_summary_voice(
+        host.config.get("summary_voice"), host.config.get("voice"),
+        host._installed_voices())
+    segments = []                                    # ordered (text, voice)
+    if ended:
+        folder = cu["folder"]
+        segments.append(("{0} ended.".format(folder) if folder else "The session ended.", None))
+    body = sanitize_summary(msg.get("text", "")) if msg.get("ok") else ""
+    if body:
+        segments.append(("Summary:", None))          # frame -> main voice
+        segments.append((body, body_voice))          # body -> distinct voice
+    else:
+        segments.append((cu["digest"], None))        # digest replaces frame+body, main voice
+    if not ended and _has_decision(host, target):
+        segments.append(("Decision waiting.", None))
+    render_id = cu["id"]
+    cu["render_id"] = render_id
+    cu["phase"] = "rendering"
+    cu["ended"] = ended
+    dest = _cue_dest(sessions, target)
+    if dest is None:
+        host._catchup = None                         # nowhere audible (last session gone)
+        return None
+    cu["dest"] = dest                                # the stream the render items live on (for cancel/cut)
+    last = len(segments) - 1
+    for i in range(last, -1, -1):                    # reverse enqueue -> preserved play order
+        text, voice = segments[i]
+        host._enqueue(dest, "prose", text, False, mute_exempt=True, pause_exempt=True,
+                      at_front=True, voice=voice, render_id=render_id,
+                      catchup_burn=(i == last and not ended))
+    return None
+```
+In `src/sonari/daemon/__init__.py`, add `MsgType.CATCHUP_RESULT,` to `assert_complete([...])` (its handler now exists).
+In `tests/daemon_helpers.py`, in `make_daemon`, after constructing `daemon`, add `daemon._voices_provider = lambda: []` (hermetic renders: `auto` → main voice).
+
+- [ ] **Step 4: Run the tests to verify they pass**
+```
+.venv/bin/python -m pytest -q tests/test_catchup_render.py tests/test_catchup_press.py
+```
+Expect: all render + press tests pass; `assert_complete` still green (both types now have handlers).
+
+- [ ] **Step 5: Commit**
+```
+git add src/sonari/queue.py src/sonari/daemon/host.py src/sonari/catchup.py src/sonari/daemon/features/catchup.py src/sonari/daemon/__init__.py tests/daemon_helpers.py tests/test_catchup_render.py
+git commit -m "feat(sp5): render catch-up summary with frame, distinct-voice body, and tail"
+```
+
 ### Task 8: Burn-on-completion + cut semantics in `note_spoken`
+
+**Files:**
+- Modify: `src/sonari/queue.py` (add `SpeechQueue.remove_where(pred)`)
+- Modify: `src/sonari/daemon/host.py` (`note_spoken` render block; `_drop_render_items`/`_burn_catchup` helpers)
+- Modify: `src/sonari/daemon/features/catchup.py` (rewrite `_cancel_catchup` to handle the rendering phase)
+- Test: `tests/test_catchup_burn.py` (new)
+
+**Interfaces:**
+- Consumes: `SpeechItem.render_id`/`catchup_burn` (Task 7), `host._catchup` bundle with `slice_end`/`target`/`dest`/`render_id` (Tasks 6–7).
+- Produces: `SpeechQueue.remove_where(pred) -> list` (lock-free; caller holds `self._lock`); `host._drop_render_items(session, render_id)` and `host._burn_catchup(cu)` (both lock-free); the `note_spoken` render lifecycle — on a render item's **completion of the LAST (`catchup_burn`) item** advance the target frontier to the pinned `slice_end` and drop the target's queued items whose history key ≤ `slice_end`; on **any** render item's non-completion suppress the burn AND drop the remaining siblings; both clear `host._catchup`. `_cancel_catchup` now also cuts + drops a speaking render (no burn).
+- Invariant: `advance_frontier` is monotonic — a `slice_end` behind the live frontier is a no-op (never retreats).
+
+- [ ] **Step 1: Write the failing tests** — `tests/test_catchup_burn.py`:
+```python
+import threading
+
+from tests.daemon_helpers import make_daemon
+
+
+def _result(rid, ok, text="", reason=""):
+    return {"v": 1, "type": "catchup_result", "request_id": rid,
+            "ok": ok, "text": text, "reason": reason}
+
+
+def _catch_up(session="fg"):
+    return {"v": 1, "type": "catch_up", "session": session}
+
+
+def _inflight(daemon, target="fg", folder="r", slice_end=(0, 0)):
+    daemon._catchup = {"id": 1, "target": target, "folder": folder,
+                       "slice_end": slice_end, "digest": "Summary unavailable. Last: x.",
+                       "cancel": threading.Event(), "phase": "preparing",
+                       "render_id": None, "ended": False}
+
+
+def _drain(daemon, n=4):
+    for _ in range(n):
+        daemon._speak_loop_once()
+
+
+def test_full_completion_burns_to_pinned_slice_end():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon.history.record("fg", "prose", "a.")
+    e1 = daemon.history.record("fg", "prose", "b.")
+    _inflight(daemon, slice_end=(e1.msg_id, e1.seq))
+    daemon.handle_message(_result(1, ok=True, text="All done."))
+    _drain(daemon)
+    assert daemon._stream("fg").frontier == (e1.msg_id, e1.seq)
+    assert daemon._catchup is None
+
+
+def test_cut_render_suppresses_burn_and_keeps_pile():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    for i in range(3):
+        daemon.history.record("fg", "prose", "line {0}.".format(i))
+    pile, _ = daemon.history.unheard_from_frontier("fg", None)
+    _inflight(daemon, slice_end=(pile[-1].msg_id, pile[-1].seq))
+    daemon.handle_message(_result(1, ok=True, text="One. Two. Three."))
+    daemon._speak_loop_once()          # frame completes
+    speaker.complete = False
+    daemon._speak_loop_once()          # body cut
+    assert daemon._stream("fg").frontier is None        # NO burn
+    assert daemon._catchup is None                      # render invalidated
+    still, _ = daemon.history.unheard_from_frontier("fg", daemon._stream("fg").frontier)
+    assert len(still) == 3                              # pile intact
+
+
+def test_cut_middle_drops_the_tail_no_lone_continuation():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon._pending_decisions["fg"] = {"event": None, "behavior": None,
+                                       "text": "?", "item_id": None}
+    e1 = daemon.history.record("fg", "prose", "b.")
+    _inflight(daemon, slice_end=(e1.msg_id, e1.seq))
+    daemon.handle_message(_result(1, ok=True, text="Body."))
+    daemon._speak_loop_once()          # frame completes
+    speaker.complete = False
+    daemon._speak_loop_once()          # body cut
+    speaker.complete = True
+    daemon._speak_loop_once()          # the tail was dropped, nothing to speak
+    assert "Decision waiting." not in speaker.spoken
+    assert daemon._stream("fg").frontier is None
+
+
+def test_burn_drops_queued_pile_items_at_or_below_slice_end():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    e0 = daemon.history.record("fg", "prose", "a.")
+    e1 = daemon.history.record("fg", "prose", "b.")
+    daemon._enqueue("fg", "prose", "a.", False, entry=e0, forward=True)
+    daemon._enqueue("fg", "prose", "b.", False, entry=e1, forward=True)
+    _inflight(daemon, slice_end=(e1.msg_id, e1.seq))
+    daemon.handle_message(_result(1, ok=True, text="Summary body."))
+    _drain(daemon, 3)
+    st = daemon._stream("fg")
+    assert st.frontier == (e1.msg_id, e1.seq)
+    assert len(st.queue) == 0                          # a./b. dropped on burn
+    assert daemon._catchup is None
+
+
+def test_burn_never_retreats_frontier():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon.history.record("fg", "prose", "x.")
+    daemon._stream("fg").frontier = (5, 0)
+    _inflight(daemon, slice_end=(2, 0))
+    daemon.handle_message(_result(1, ok=True, text="x."))
+    _drain(daemon)
+    assert daemon._stream("fg").frontier == (5, 0)     # monotonic; behind key is a no-op
+
+
+def test_cancel_during_render_drops_items_and_no_burn():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    e1 = daemon.history.record("fg", "prose", "b.")
+    _inflight(daemon, slice_end=(e1.msg_id, e1.seq))
+    daemon.handle_message(_result(1, ok=True, text="Body one. Body two."))
+    daemon._speak_loop_once()          # frame plays; body queued
+    daemon.handle_message(_catch_up())  # cancel while rendering
+    assert daemon._catchup is None
+    _drain(daemon, 3)
+    assert "Body one. Body two." not in speaker.spoken # render items dropped
+    assert "Cancelled." in speaker.spoken
+    assert daemon._stream("fg").frontier is None       # no burn
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+```
+.venv/bin/python -m pytest -q tests/test_catchup_burn.py
+```
+Expect: `test_full_completion_burns_to_pinned_slice_end` fails (frontier stays `None` — no burn wired yet); several others fail on the missing burn/cut behavior.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+In `src/sonari/queue.py`, add to `SpeechQueue`:
+```python
+    def remove_where(self, pred) -> "list[SpeechItem]":
+        """Remove and return every queued item matching *pred* (SpeechItem -> bool).
+        The catch-up burn drops the pinned pile; a cut drops the render's siblings.
+        Caller holds the daemon lock."""
+        kept, removed = deque(), []
+        for it in self._items:
+            (removed if pred(it) else kept).append(it)
+        self._items = kept
+        return removed
+```
+In `src/sonari/daemon/host.py`, at the END of `note_spoken`'s `with self._lock:` block (after the `item.forward` advance), add:
+```python
+            # SP5 catch-up render lifecycle. Render items are forward=False, so the
+            # block above never advances the frontier: the burn is deferred to the
+            # WHOLE sequence completing (R-8, the render is one item). Any cut
+            # suppresses the burn and drops the remaining siblings (no lone tail).
+            rid = getattr(item, "render_id", None)
+            cu = self._catchup
+            if rid is not None and cu is not None and cu.get("render_id") == rid:
+                if not completed:
+                    self._drop_render_items(item.session, rid)
+                    self._catchup = None
+                elif getattr(item, "catchup_burn", False):
+                    self._burn_catchup(cu)
+                    self._catchup = None
+```
+and add two lock-free helper methods to the class (callers already hold `self._lock`):
+```python
+    def _drop_render_items(self, session, render_id) -> None:
+        st = self._state._streams.get(session)
+        if st is not None:
+            self._drop_pending(
+                st.queue.remove_where(lambda it: it.render_id == render_id))
+
+    def _burn_catchup(self, cu) -> None:
+        """Advance the caught-up target's frontier to the PINNED slice_end (never
+        newest-at-completion) and drop its queued pile items at or below it."""
+        st = self._state._streams.get(cu["target"])
+        if st is None:
+            return
+        slice_end = cu["slice_end"]
+        st.advance_frontier(slice_end)                # monotonic: a behind key is a no-op
+        ph = self._state._pending_heard
+
+        def below(it):
+            e = ph.get(it.id)
+            return e is not None and (e.msg_id, e.seq) <= slice_end
+        self._drop_pending(st.queue.remove_where(below))
+```
+In `src/sonari/daemon/features/catchup.py`, replace `_cancel_catchup` with the full version:
+```python
+def _cancel_catchup(host):
+    cu = host._catchup
+    if cu is None:
+        return
+    cu["cancel"].set()                       # kill an in-flight child if still preparing
+    rid = cu.get("render_id")
+    if rid is not None:                      # already speaking: cut + drop the render
+        dest = cu.get("dest")
+        if dest is not None:
+            host._drop_render_items(dest, rid)
+        cur = host._current_item
+        if cur is not None and getattr(cur, "render_id", None) == rid:
+            host.speaker.cancel()
+    host._catchup = None                     # no burn on cancel (§2.9)
+    dest = _cue_dest(host.sessions, cu["target"])
+    if dest is not None:
+        host._enqueue(dest, "prose", "Cancelled.", False,
+                      mute_exempt=True, pause_exempt=True, at_front=True)
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+```
+.venv/bin/python -m pytest -q tests/test_catchup_burn.py tests/test_catchup_render.py tests/test_catchup_press.py
+```
+Expect: all catch-up runtime tests pass.
+
+- [ ] **Step 5: Commit**
+```
+git add src/sonari/queue.py src/sonari/daemon/host.py src/sonari/daemon/features/catchup.py tests/test_catchup_burn.py
+git commit -m "feat(sp5): burn the pile on full render completion, suppress on cut"
+```
 
 ### Task 9: ⌃⌘W count-semantics unification (the 14-vs-2 seam)
 
