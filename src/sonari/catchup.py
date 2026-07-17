@@ -27,3 +27,49 @@ def sanitize_summary(text: str, ceiling: int = 8) -> str:
         return ""
     sentences = [p for p in _SENTENCE_SPLIT.split(s) if p.strip()]
     return " ".join(sentences[:ceiling])
+
+
+_KIND_TAGS = {
+    "prose": "assistant",
+    "tool": "tool",
+    "choice": "question",
+    "plan": "plan",
+    "permission": "permission",
+}
+
+
+def render_slice(entries, folder) -> str:
+    """The narrator's stdin: a header line then kind-tagged transcript lines,
+    oldest first. Sonari's own transcript is the source of truth, never the
+    host's session files."""
+    n = len(entries)
+    turns = len({e.turn_id for e in entries})
+    header = "Slice: {0} {1} across {2} {3} in {4}.".format(
+        n, "item" if n == 1 else "items",
+        turns, "turn" if turns == 1 else "turns",
+        folder or "this session")
+    lines = ["{0}: {1}".format(_KIND_TAGS.get(e.kind, e.kind), e.text)
+             for e in entries]
+    return "\n".join([header] + lines)
+
+
+def _last_sentence(text: str) -> str:
+    s = _WHITESPACE.sub(" ", text or "").strip()
+    if not s:
+        return ""
+    parts = [p for p in _SENTENCE_SPLIT.split(s) if p.strip()]
+    return parts[-1] if parts else s
+
+
+def build_digest(entries) -> str:
+    """The deterministic floor: the verbatim final recorded sentence, framed as
+    a degradation. Prefers the last assistant-prose entry; any-kind last entry
+    otherwise. Built at press from the pinned slice — no model, no network."""
+    prose = [e for e in entries if e.kind == "prose"]
+    source = prose[-1] if prose else (entries[-1] if entries else None)
+    last = _last_sentence(source.text) if source is not None else ""
+    if not last:
+        return "Summary unavailable."
+    if not last.endswith((".", "!", "?")):
+        last += "."
+    return "Summary unavailable. Last: {0}".format(last)
