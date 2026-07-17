@@ -3,6 +3,7 @@ import json
 
 from sonari.summarizer import (
     ClaudeCliSummarizer, SummarizeResult, select_summarizer, NARRATOR_PROMPT,
+    _DISALLOWED_TOOLS, _INSTRUCTION,
 )
 
 
@@ -72,12 +73,16 @@ def test_argv_carries_flags_model_and_stable_narrator_prompt():
     s.summarize("x", timeout_s=5)
     argv = fake.calls[0]["argv"]
     assert argv[0] == "/c" and argv[1] == "-p"   # argv[0] = the which()-resolved path
+    assert argv[2] == _INSTRUCTION               # the -p prompt is the stable instruction
     assert argv[argv.index("--model") + 1] == "haiku"
     # stream-json + --verbose: we read the FIRST assistant text block, not .result.
     assert argv[argv.index("--output-format") + 1] == "stream-json"
     assert "--verbose" in argv
     assert argv[argv.index("--max-turns") + 1] == "1"
-    assert NARRATOR_PROMPT in argv
+    # The child must stay tool-less: dropping/truncating this list would let the
+    # summarizer run Bash/Read/etc. Pin the exact value, adjacent to its flag.
+    assert argv[argv.index("--disallowedTools") + 1] == _DISALLOWED_TOOLS
+    assert argv[argv.index("--system-prompt") + 1] == NARRATOR_PROMPT
     # Spec §6 non-negotiable #3 pinned: never resume/continue the user's live session.
     assert "--continue" not in argv and "--resume" not in argv
     assert fake.calls[0]["cwd"]                  # neutral temp cwd, not the caller's
@@ -164,6 +169,14 @@ def test_select_summarizer_off_auto_claude():
     assert select_summarizer({"summarizer": "auto"}, which=lambda n: None) is None
     s = select_summarizer({"summarizer": "auto", "summary_model": "haiku"},
                           which=lambda n: "/c")
+    assert isinstance(s, ClaudeCliSummarizer)
+
+
+def test_select_summarizer_explicit_claude_ignores_path_probe():
+    # "claude" is an explicit owner choice: the adapter is wired even when the
+    # binary is not currently on PATH (summarize() degrades to `unavailable`).
+    s = select_summarizer({"summarizer": "claude", "summary_model": "haiku"},
+                          which=lambda n: None)
     assert isinstance(s, ClaudeCliSummarizer)
 
 
