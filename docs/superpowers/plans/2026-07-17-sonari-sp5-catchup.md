@@ -1382,6 +1382,7 @@ git commit -m "feat(sp5): render catch-up summary with frame, distinct-voice bod
 - Modify: `src/sonari/queue.py` (add `SpeechQueue.remove_where(pred)`)
 - Modify: `src/sonari/daemon/host.py` (`note_spoken` render block; `_drop_render_items`/`_burn_catchup` helpers)
 - Modify: `src/sonari/daemon/features/catchup.py` (rewrite `_cancel_catchup` to handle the rendering phase)
+- Modify: `src/sonari/daemon/features/control.py:347-351` (`on_where_am_i` re-queue SKIPS a render item — a cut render must not leave an orphan fragment)
 - Test: `tests/test_catchup_burn.py` (new)
 
 **Interfaces:**
@@ -1409,7 +1410,7 @@ def _inflight(daemon, target="fg", folder="r", slice_end=(0, 0)):
     daemon._catchup = {"id": 1, "target": target, "folder": folder,
                        "slice_end": slice_end, "digest": "Summary unavailable. Last: x.",
                        "cancel": threading.Event(), "phase": "preparing",
-                       "render_id": None, "ended": False}
+                       "render_id": None, "ended": False, "ack_id": None}
 
 
 def _drain(daemon, n=4):
@@ -1524,7 +1525,7 @@ def test_ended_render_completion_clears_bundle_so_next_press_starts_fresh():
     daemon._catchup = {"id": 1, "target": "gone", "folder": "oldrepo",
                        "slice_end": (0, 0), "digest": "Summary unavailable. Last: x.",
                        "cancel": threading.Event(), "phase": "preparing",
-                       "render_id": None, "ended": False}
+                       "render_id": None, "ended": False, "ack_id": None}
     daemon.handle_message(_result(1, ok=True, text="It finished."))   # 'gone' unregistered -> ended
     _drain(daemon)
     assert daemon._catchup is None                    # ended render CLEARED the bundle
@@ -1533,6 +1534,27 @@ def test_ended_render_completion_clears_bundle_so_next_press_starts_fresh():
     _drain(daemon)
     assert "Cancelled." not in speaker.spoken
     assert any("Catching up" in s for s in speaker.spoken)
+
+
+def test_where_am_i_barge_in_mid_render_leaves_no_orphan_fragment():
+    # A ⌃⌘W landing mid-body cuts the render (note_spoken's non-completion branch:
+    # no burn, siblings dropped) AND on_where_am_i must NOT re-queue the cut render
+    # item — a re-queued body would replay frame-less after the readout with no burn.
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon.history.record("fg", "prose", "a.")
+    _inflight(daemon, slice_end=(0, 0))
+    daemon.handle_message(_result(1, ok=True, text="Body one. Body two."))
+    daemon._speak_loop_once()          # frame plays
+    speaker.complete = False
+    daemon.handle_message({"v": 1, "type": "where_am_i", "session": "fg"})  # barge-in mid-body
+    speaker.complete = True
+    _drain(daemon, 4)
+    # The readout spoke; the body was cut and NOT replayed as an orphan; no burn.
+    assert not any(s in ("Body one. Body two.", "Body one.", "Body two.")
+                   for s in speaker.spoken)
+    assert daemon._catchup is None
+    assert daemon._stream("fg").frontier is None
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1619,6 +1641,20 @@ def _cancel_catchup(host):
         host._enqueue(dest, "prose", "Cancelled.", False,
                       mute_exempt=True, pause_exempt=True, at_front=True)
 ```
+In `src/sonari/daemon/features/control.py`, the `on_where_am_i` barge-in re-queues the interrupted item at_front (lines ~347-351). A cut catch-up render must NOT be re-queued — its `note_spoken` non-completion branch already dropped the siblings and cleared `_catchup`; re-queuing the lone body would replay it frame-less with no burn. Guard the re-queue on `render_id`:
+```python
+    # Resume-after-interjection: re-queue the interrupted item FIRST so it ends up
+    # DEEPEST (the status cue is appendleft'd in front of it below). A catch-up
+    # render item (render_id set) is NEVER re-queued — a cut render is gone by
+    # design (note_spoken dropped its siblings + cleared _catchup); the pile stays
+    # unburned and the next press re-summarizes (§2.8).
+    if cur is not None and getattr(cur, "render_id", None) is None:
+        host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
+                      entry=entry, mute_exempt=cur.mute_exempt,
+                      pause_exempt=cur.pause_exempt, names_session=cur.names_session,
+                      audio_path=cur.audio_path, forward=cur.forward, at_front=True)
+```
+(This replaces the existing `if cur is not None:` re-queue block — only the guard condition changes from `cur is not None` to `cur is not None and getattr(cur, "render_id", None) is None`; the enqueue body is unchanged.)
 
 - [ ] **Step 4: Run the catch-up tests, then the FULL suite**
 ```
@@ -1629,7 +1665,7 @@ Expect: all catch-up runtime tests pass, AND the full suite is green (this task 
 
 - [ ] **Step 5: Commit**
 ```
-git add src/sonari/queue.py src/sonari/daemon/host.py src/sonari/daemon/features/catchup.py tests/test_catchup_burn.py
+git add src/sonari/queue.py src/sonari/daemon/host.py src/sonari/daemon/features/catchup.py src/sonari/daemon/features/control.py tests/test_catchup_burn.py
 git commit -m "feat(sp5): burn the pile on full render completion, suppress on cut"
 ```
 
