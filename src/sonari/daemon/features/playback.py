@@ -33,28 +33,50 @@ def on_skip_pile(ctx, msg):
     # Deliberate PILE-SKIP (Fork B1): a distinct confirmatory gesture (NOT the safe ⌃⌘↓
     # browse return) that advances the frontier PAST the unheard pile to the live edge
     # and SPEAKS a count — the skipped entries stay heard=False in the transcript
-    # (browsable) but BELOW the frontier (out of the auto-catch-up path). Fork C1: under
-    # divergence (voice flowing, speaker != workspace) it targets the flooding SPEAKER
-    # and does NOT move the window; otherwise the workspace. Frontier write-path (b).
+    # (browsable) but BELOW the frontier (out of the auto-catch-up path). Fork C1'
+    # (owner ear-pass ruling, 2026-07-17 — supersedes C1): PILE-SEEKING,
+    # WORKSPACE-FIRST. C1 targeted the flooding SPEAKER under divergence and never
+    # looked at the workspace's own pile — standing ON a piled session while the
+    # voice flows elsewhere said "Nothing to skip." instead of clearing the pile
+    # under your keyboard. C1' targets the workspace whenever IT has a pile;
+    # only when the workspace is clean does it fall through to a flowing,
+    # diverged speaker's pile (the original flood remedy, preserved). Frontier
+    # write-path (b).
     host = ctx.host
     sessions = host.sessions
     ws = sessions.workspace()
     spk = sessions.speaker()
-    if host.voice_state == "flowing" and spk is not None and spk != ws:
-        target = spk                     # C1: skip the flooder, keep the window put
-    else:
-        target = ws
+
+    def pile(session):
+        st = host._stream(session)
+        entries, _ = host.history.unheard_from_frontier(session, st.frontier)
+        return entries
+
+    target = None
+    entries = []
+    ws_pile = pile(ws) if ws is not None else []
+    if ws is not None and len(ws_pile) > 0:
+        target, entries = ws, ws_pile
+    elif host.voice_state == "flowing" and spk is not None and spk != ws:
+        spk_pile = pile(spk)
+        if len(spk_pile) > 0:
+            target, entries = spk, spk_pile   # preserved §10.1 flood remedy: workspace is clean
+
     if target is None:
-        host.speaker.earcon("error")
-        return None
-    st = host._stream(target)
-    entries, _ = host.history.unheard_from_frontier(target, st.frontier)
-    count = len(entries)
-    if count == 0:
+        # No addressable pile anywhere. Route the "Nothing to skip." cue to
+        # whichever of workspace/speaker is addressable (workspace preferred,
+        # mirroring the old default target) — error earcon only when NEITHER
+        # is addressable.
+        cue_target = ws if ws is not None else spk
+        if cue_target is None:
+            host.speaker.earcon("error")
+            return None
         # Nothing ahead of the frontier — do NOT nag "skipped 0" (B3 rejected).
-        host._enqueue(target, "prose", "Nothing to skip.", False,
+        host._enqueue(cue_target, "prose", "Nothing to skip.", False,
                       mute_exempt=True, pause_exempt=True, at_front=True)
         return None
+    count = len(entries)
+    st = host._stream(target)
     # Advance PAST the pile to the live edge WITHOUT marking the skipped entries heard.
     st.advance_frontier(host.history.newest_key(target))
     # Stop the flood: drop the target's queued pile and cut its in-flight utterance.
@@ -63,9 +85,12 @@ def on_skip_pile(ctx, msg):
     if cur is not None and cur.session == target:
         host.speaker.cancel()
     # Confirmatory count — OWNER EAR-GATE string (grammar v2: role word "item(s)"
-    # adjacent to the number). Barge-in-class cue: mute_exempt + pause_exempt + at_front.
+    # adjacent to the number, folder-named like on_jump_waiting's crossed cue).
+    # Barge-in-class cue: mute_exempt + pause_exempt + at_front.
     noun = "item" if count == 1 else "items"
-    host._enqueue(target, "prose", "Skipping {0} {1}.".format(count, noun), False,
+    folder = sessions.folder(target)
+    where = "in {0}".format(folder) if folder else "in another session"
+    host._enqueue(target, "prose", "Skipping {0} {1} {2}.".format(count, noun, where), False,
                   mute_exempt=True, pause_exempt=True, at_front=True)
     return None
 

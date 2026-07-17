@@ -279,7 +279,7 @@ def test_skip_pile_advances_frontier_and_announces_count():
     assert all(not e.heard for e in d.history.entries_for_message("s0", 2))  # NOT marked heard
     ahead, _ = d.history.unheard_from_frontier("s0", st.frontier)
     assert ahead == []                                   # pile now below the frontier
-    assert [x.text for x in st.queue._items] == ["Skipping 3 items."]  # count cue; pile dropped
+    assert [x.text for x in st.queue._items] == ["Skipping 3 items in s0."]  # count+folder cue; pile dropped
     assert d._pending_heard == {}
 
 
@@ -293,7 +293,10 @@ def test_skip_pile_nothing_to_skip_does_not_nag():
     assert [x.text for x in d._stream("s0").queue._items] == ["Nothing to skip."]
 
 
-def test_skip_pile_targets_speaker_under_divergence():
+def test_skip_pile_falls_through_to_flowing_speaker_when_workspace_clean():
+    # C1' preserved flood remedy: the workspace has NO pile of its own, so
+    # skip falls through to the flowing, diverged speaker (the original C1
+    # target) instead of doing nothing.
     from sonari.protocol import MsgType, PROTOCOL_VERSION
     sessions = SessionManager(); sessions.set_foreground("ws")
     sessions.register("ws", cwd="/x/ws"); sessions.register("spk", cwd="/x/spk")
@@ -305,6 +308,90 @@ def test_skip_pile_targets_speaker_under_divergence():
     d._enqueue("spk", "prose", "flood", False, entry=e, forward=True)
     with d._state.transaction():
         d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "ws"})
-    assert spk_st.frontier == d.history.newest_key("spk")   # C1: the SPEAKER's frontier advanced
-    assert d._stream("ws").frontier is None                 # the workspace was NOT touched
+    assert spk_st.frontier == d.history.newest_key("spk")   # the SPEAKER's frontier advanced
+    assert d._stream("ws").frontier is None                 # the workspace was NOT touched (it was empty)
     assert sessions.workspace() == "ws"                     # window unmoved
+    assert [x.text for x in spk_st.queue._items] == ["Skipping 1 item in spk."]  # singular arm too
+
+
+def test_skip_pile_workspace_wins_over_diverged_flowing_speaker():
+    # THE OWNER'S EAR-PASS REPRO (C1' ruling, 2026-07-17): standing ON a piled
+    # session while the voice flows elsewhere used to say "Nothing to skip." —
+    # C1 targeted the clean flowing SPEAKER and never looked at the workspace's
+    # own pile. C1' is pile-seeking, workspace-first: the workspace wins whenever
+    # IT has a pile, regardless of voice_state or where the voice is flowing.
+    from sonari.protocol import MsgType, PROTOCOL_VERSION
+    sessions = SessionManager(); sessions.set_foreground("b")
+    sessions.register("b", cwd="/x/b"); sessions.register("a", cwd="/x/a")
+    sessions.set_speaker("a")                             # diverged: voice flows on a, workspace is b
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    d.voice_state = "flowing"
+    b_st = d._stream("b")
+    for i in range(5):
+        e = d.history.record("b", "prose", "p{0}".format(i)); d.history.end_message("b")
+        d._enqueue("b", "prose", "p{0}".format(i), False, entry=e, forward=True)
+    with d._state.transaction():
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "b"})
+    assert b_st.frontier == d.history.newest_key("b")        # workspace's OWN pile skipped
+    assert d._stream("a").frontier is None                   # the flowing speaker was NOT touched
+    assert [x.text for x in b_st.queue._items] == ["Skipping 5 items in b."]
+
+
+def test_skip_pile_both_piled_workspace_first_then_speaker_on_second_press():
+    # Both diverged sessions have a pile: the workspace wins the first press;
+    # a second press then drains the (still-piled) flowing speaker — two
+    # presses drain both, in that order.
+    from sonari.protocol import MsgType, PROTOCOL_VERSION
+    sessions = SessionManager(); sessions.set_foreground("ws")
+    sessions.register("ws", cwd="/x/ws"); sessions.register("spk", cwd="/x/spk")
+    sessions.set_speaker("spk")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    d.voice_state = "flowing"
+    ws_st = d._stream("ws"); spk_st = d._stream("spk")
+    for i in range(2):
+        e = d.history.record("ws", "prose", "w{0}".format(i)); d.history.end_message("ws")
+        d._enqueue("ws", "prose", "w{0}".format(i), False, entry=e, forward=True)
+    for i in range(3):
+        e = d.history.record("spk", "prose", "s{0}".format(i)); d.history.end_message("spk")
+        d._enqueue("spk", "prose", "s{0}".format(i), False, entry=e, forward=True)
+    with d._state.transaction():
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "ws"})
+    assert ws_st.frontier == d.history.newest_key("ws")      # first press: workspace pile cleared
+    assert spk_st.frontier is None                           # speaker pile untouched so far
+    assert [x.text for x in ws_st.queue._items] == ["Skipping 2 items in ws."]
+    with d._state.transaction():
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "ws"})
+    assert spk_st.frontier == d.history.newest_key("spk")    # second press: speaker pile cleared
+    assert [x.text for x in spk_st.queue._items] == ["Skipping 3 items in spk."]
+
+
+def test_skip_pile_non_flowing_gate_blocks_fallthrough_to_speaker():
+    # voice_state isn't "flowing" (quiet-hold/stopped-all): even though the
+    # speaker has a pile, the fall-through must NOT fire — the workspace being
+    # clean is not itself license to reach across to the speaker.
+    from sonari.protocol import MsgType, PROTOCOL_VERSION
+    sessions = SessionManager(); sessions.set_foreground("ws")
+    sessions.register("ws", cwd="/x/ws"); sessions.register("spk", cwd="/x/spk")
+    sessions.set_speaker("spk")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    d.voice_state = "quiet-hold"                              # NOT flowing
+    e = d.history.record("spk", "prose", "flood"); d.history.end_message("spk")
+    d._enqueue("spk", "prose", "flood", False, entry=e, forward=True)
+    with d._state.transaction():
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "ws"})
+    assert [x.text for x in d._stream("ws").queue._items] == ["Nothing to skip."]
+    assert d._stream("spk").frontier is None                 # speaker pile left untouched
+
+
+def test_skip_pile_singular_item_uses_singular_noun():
+    # T6 review gap: the workspace-first primary path with exactly one item
+    # must say "item", not "items".
+    from sonari.protocol import MsgType, PROTOCOL_VERSION
+    sessions = SessionManager(); sessions.set_foreground("s0")
+    sessions.register("s0", cwd="/x/s0")
+    d = SpeechDaemon(_FakeSpeaker(), sessions, _cfg())
+    e = d.history.record("s0", "prose", "only one"); d.history.end_message("s0")
+    d._enqueue("s0", "prose", "only one", False, entry=e, forward=True)
+    with d._state.transaction():
+        d.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SKIP_PILE, "session": "s0"})
+    assert [x.text for x in d._stream("s0").queue._items] == ["Skipping 1 item in s0."]
