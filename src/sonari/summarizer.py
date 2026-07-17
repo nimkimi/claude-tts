@@ -176,8 +176,9 @@ class ClaudeCliSummarizer:
 
 def select_summarizer(config, which=_default_which, popen=subprocess.Popen):
     """Wire the configured adapter, or None (→ digest floor). `auto` uses the
-    Claude adapter iff `claude` is on PATH; SP5 is a global choice (per-session
-    host routing arrives with SP6)."""
+    Claude adapter iff `claude` is findable — PATH first, then the conventional
+    install dirs (the daemon's LaunchAgent env carries no user PATH); SP5 is a
+    global choice (per-session host routing arrives with SP6)."""
     mode = config.get("summarizer", "auto")
     if mode == "off":
         return None

@@ -107,8 +107,11 @@ def on_catchup_result(ctx, msg):
     if not msg.get("ok"):
         # The spoken fallback is identical for every reason — the log is the only
         # place the WHY survives (the live PATH miss was invisible without it).
-        print("sonari[catchup]: summary failed reason={0}".format(
-            msg.get("reason") or "unknown"), file=sys.stderr)
+        try:
+            print("sonari[catchup]: summary failed reason={0}".format(
+                msg.get("reason") or "unknown"), file=sys.stderr)
+        except Exception:  # noqa: BLE001 - never raise from diagnostic emit
+            pass
     sessions = host.sessions
     target = cu["target"]
     ended = target not in sessions.session_ids()     # SESSION_END destroyed its live state

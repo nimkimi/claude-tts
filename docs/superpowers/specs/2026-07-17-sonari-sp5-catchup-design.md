@@ -197,7 +197,10 @@ slice, or fail detectably."* No host-specific shape crosses into protocol/histor
   (`codex exec --sandbox read-only --ephemeral`) and Copilot adapters are future drop-ins
   behind the same interface; **no adapter → digest floor**.
 - **Selection**: config `summarizer: auto | claude | off` (default `auto` =
-  `which("claude")` else off). Per-session host routing arrives with SP6's per-session
+  `claude` findable else off; findable = PATH, then the conventional install dirs
+  `~/.local/bin` / `~/.claude/local` / `/opt/homebrew/bin` / `/usr/local/bin` —
+  the daemon's LaunchAgent env carries no user PATH, live-diagnosed 2026-07-17).
+  Per-session host routing arrives with SP6's per-session
   `agent` field; SP5 is a global choice.
 - **Non-negotiables** (each pinned by a test):
   1. **Child env scrubbed of `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`** — the billing
