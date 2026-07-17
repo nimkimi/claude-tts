@@ -48,7 +48,7 @@ def test_fully_heard_sessions_show_no_unheard_clause():
     daemon, queue, speaker, sessions, config = make_daemon()
     sessions.register("b", cwd="/x/b")
     entry = daemon.history.record("b", "prose", "b line.")
-    daemon._enqueue("b", "prose", "b line.", False, entry=entry)
+    daemon._enqueue("b", "prose", "b line.", False, entry=entry, forward=True)
     sessions.set_speaker("b")
     daemon._speak_loop_once()                      # spoken to completion -> heard
     sessions.set_speaker("fg")

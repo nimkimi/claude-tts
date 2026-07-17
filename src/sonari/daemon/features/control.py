@@ -55,14 +55,16 @@ def _entry_clauses(host, session):
     k = len(st.queue) if st is not None else 0
     if k > 0:
         seg += ", {0} waiting".format(k)
-    # W10: the recorded-but-not-queued unheard FLOOR. Queued items' history
-    # entries are ALSO unheard until spoken (host.py:309-320 flips heard on
-    # completion), so a raw len(unheard) double-counts every queued item —
-    # subtract k (approximation in the caller's favor: never overstates).
-    # unheard() is current-turn-bounded: the spoken count is a floor across
-    # a multi-turn pile (documented; frontier counts are SP5, NOT built).
-    # The word "unheard" is an OWNER GATE (his ear tunes it at review).
-    u = max(0, len(host.history.unheard(session)) - k)
+    # W10 → SP5: the unheard count now decomposes the SAME transcript pile that
+    # skip and catch-up announce whole (spec §8), not the current-turn floor.
+    # unheard_from_frontier is frontier-keyed + heard-flag-independent; subtract
+    # k (the queued items, whose history entries are also still unheard) so the
+    # split stays imminent-vs-backlog and never double-counts. Floored at 0.
+    # (`stale` below still reads the current-turn unheard_age — spec §8 scopes
+    # only u; the age word is a separate approximation, unchanged this wave.)
+    frontier = st.frontier if st is not None else None
+    pile, _ = host.history.unheard_from_frontier(session, frontier)
+    u = max(0, len(pile) - k)
     if u > 0:
         seg += ", {0} unheard".format(u)
         age = host.history.unheard_age(session)
