@@ -18,7 +18,7 @@ DEFAULTS = {
     "spearcon_voice": "Samantha",
     "spearcon_rate": 525,
     "summarizer": "auto",        # SP5 host-LLM catch-up: auto|claude|off
-    "summary_voice": "auto",     # distinct voice for the LLM body; auto=pick distinct, else main
+    "summary_voice": "auto",     # LLM-body voice; auto=first curated say voice != main, else main
     "summary_model": "haiku",    # claude -p --model for the summary (owner override)
 }
 
