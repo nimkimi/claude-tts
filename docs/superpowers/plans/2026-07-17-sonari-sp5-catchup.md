@@ -14,6 +14,7 @@
 - **Spoken-grammar principles** (`2026-07-16-sonari-whereami-grammar-v2.md`) bind every new spoken string and the narrator prompt: sentence boundaries are the only rate-proof prosody (each spoken unit ends in a period); a role word sits adjacent to every number ("{N} items"); never leave a high-stakes fact as a standalone clippable landmark (the decision fact rides an inline tail, never a bare "Decision:").
 - **Env-scrub:** the `claude -p` child environment is a copy of the daemon env with `ANTHROPIC_API_KEY` AND `ANTHROPIC_AUTH_TOKEN` removed — the billing trap (a stray key silently flips subscription OAuth to metered API billing). This is the single most important line in the feature and has its own dedicated test.
 - **Explicit press only, one in flight globally, 30 s hard timeout** with the child process group killed on expiry; stdin written then closed promptly. SP5 fires no automatic summaries. A press while one is in flight is a pure cancel (never starts a new one).
+- **No Sonari-side retries** around `claude -p`. The CLI retries transient errors internally; any call Sonari sees fail (non-zero exit / `is_error` / timeout) falls STRAIGHT to the deterministic digest. This is deliberate (spec §4): a summary is best-effort, and a failed attempt already cost quota — retrying risks doubling the draw and compounding a false "usage limit" positive. One shot, then the floor.
 - **All state changes on the daemon loop.** The worker thread never mutates daemon state (not history, streams, sessions, or `self._catchup` fields the loop reads for rendering). It only calls the summarizer and posts to the mailbox.
 - **Guards green at every commit and never weakened:** the 6 concurrency/monotonicity guards must pass at every commit; existing tests are updated for new pile semantics, never weakened.
 - **Suite green at every commit:** `.venv/bin/python -m pytest -q` passes after every task's final step.
@@ -198,7 +199,7 @@ git commit -m "feat(sp5): add speech-safe summary sanitizer"
 **Interfaces:**
 - Consumes: `HistoryEntry`-shaped objects (attributes `.kind`, `.text`, `.turn_id`) — the entries returned by `history.unheard_from_frontier`.
 - Produces:
-  - `render_slice(entries, folder) -> str` — the narrator stdin body: header line `"Slice: {N} items across {T} turns in {folder}."` (folder falls back to `"this session"`), then one kind-tagged line per entry oldest-first. Kind→tag map is `{"prose": "assistant", "tool": "tool", "choice": "question", "plan": "plan", "permission": "permission"}`, unknown kinds tag as themselves.
+  - `render_slice(entries, folder) -> str` — the narrator stdin body: header line `"Slice: {N} item(s) across {T} turn(s) in {folder}."` (singular "item"/"turn" when the count is 1; folder falls back to `"this session"`), then one kind-tagged line per entry oldest-first. Kind→tag map is `{"prose": "assistant", "tool": "tool", "choice": "question", "plan": "plan", "permission": "permission"}`, unknown kinds tag as themselves.
   - `build_digest(entries) -> str` — the deterministic floor `"Summary unavailable. Last: {verbatim final sentence}."`; extracts the last `prose` entry's final sentence (any-kind last entry if no prose), guarantees exactly one terminal period. Built at PRESS time from the pinned slice (never touches the LLM).
 
 - [ ] **Step 1: Write the failing test**
@@ -226,7 +227,7 @@ def test_render_slice_header_and_tags_oldest_first():
 
 def test_render_slice_no_folder_fallback():
     lines = render_slice([_e("prose", "Hi.")], None).split("\n")
-    assert lines[0] == "Slice: 1 items across 1 turns in this session."
+    assert lines[0] == "Slice: 1 item across 1 turn in this session."
 
 
 def test_digest_extracts_last_assistant_sentence():
@@ -270,8 +271,10 @@ def render_slice(entries, folder) -> str:
     host's session files."""
     n = len(entries)
     turns = len({e.turn_id for e in entries})
-    header = "Slice: {0} items across {1} turns in {2}.".format(
-        n, turns, folder or "this session")
+    header = "Slice: {0} {1} across {2} {3} in {4}.".format(
+        n, "item" if n == 1 else "items",
+        turns, "turn" if turns == 1 else "turns",
+        folder or "this session")
     lines = ["{0}: {1}".format(_KIND_TAGS.get(e.kind, e.kind), e.text)
              for e in entries]
     return "\n".join([header] + lines)
@@ -384,11 +387,13 @@ def test_argv_carries_flags_model_and_stable_narrator_prompt():
                             which=lambda n: "/c", env={})
     s.summarize("x", timeout_s=5)
     argv = fake.calls[0]["argv"]
-    assert argv[:2] == ["claude", "-p"]
+    assert argv[0] == "/c" and argv[1] == "-p"   # argv[0] = the which()-resolved path
     assert argv[argv.index("--model") + 1] == "haiku"
     assert argv[argv.index("--output-format") + 1] == "json"
     assert argv[argv.index("--max-turns") + 1] == "1"
     assert NARRATOR_PROMPT in argv
+    # Spec §6 non-negotiable #3 pinned: never resume/continue the user's live session.
+    assert "--continue" not in argv and "--resume" not in argv
     assert fake.calls[0]["cwd"]                  # neutral temp cwd, not the caller's
 
 
@@ -567,9 +572,10 @@ class ClaudeCliSummarizer:
         return {k: v for k, v in self._env_source.items() if k not in _SCRUB_KEYS}
 
     def summarize(self, slice_text, timeout_s=30.0, cancel=None) -> "SummarizeResult":
-        if self._which("claude") is None:
+        resolved = self._which("claude")
+        if resolved is None:
             return SummarizeResult.failed("unavailable")
-        argv = ["claude", "-p", _INSTRUCTION, "--model", self._model,
+        argv = [resolved, "-p", _INSTRUCTION, "--model", self._model,
                 "--output-format", "json", "--max-turns", "1",
                 "--disallowedTools", _DISALLOWED_TOOLS,
                 "--system-prompt", NARRATOR_PROMPT]
@@ -997,7 +1003,10 @@ def on_catch_up(ctx, msg):
                       mute_exempt=True, pause_exempt=True, at_front=True)
         return None
     n = len(entries)
-    where = "in {0}".format(folder) if folder else "in another session"
+    # No-folder fallback = "this session" (the target IS the workspace the user sits
+    # at — never "another session"; matches render_slice's fallback). Owner ear-pass
+    # veto string, like every other spoken string here.
+    where = "in {0}".format(folder) if folder else "in this session"
     ack = "Catching up {0} {1} {2}.".format(n, "item" if n == 1 else "items", where)
     if aged_out:
         ack = "Earlier output aged out. " + ack
