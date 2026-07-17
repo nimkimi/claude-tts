@@ -130,6 +130,13 @@ def on_catchup_result(ctx, msg):
         host._catchup = None                         # nowhere audible (last session gone)
         return None
     cu["dest"] = dest                                # the stream the render items live on (for cancel/cut)
+    if dest != target and not ended and cu["folder"]:
+        # The speaker diverged from the caught-up target mid-prep: the render
+        # plays on dest's stream, where mute_exempt suppresses the standard
+        # folder prefix — carry the attribution inline on the first segment
+        # (the ended case already names the folder in its own first segment).
+        first_text, first_voice = segments[0]
+        segments[0] = ("{0}. {1}".format(cu["folder"], first_text), first_voice)
     last = len(segments) - 1
     ack_id = cu.get("ack_id")                        # land the render AFTER the still-queued ack
     for i in range(last, -1, -1):                    # reverse -> preserved play order (after the ack, else at_front)

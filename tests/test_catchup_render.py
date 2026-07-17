@@ -119,3 +119,39 @@ def test_wrong_request_id_is_dropped():
     daemon.handle_message(_result(999, ok=True, text="Wrong."))
     _drain(daemon)
     assert "Wrong." not in speaker.spoken
+
+
+def test_diverged_speaker_render_carries_folder_attribution():
+    # The summary can land after the user switched to another session mid-prep;
+    # the render then plays on the NEW speaker's stream, where mute_exempt
+    # suppresses the standard folder prefix. The frame must carry the
+    # attribution itself — an unattributed cross-session summary reads as the
+    # wrong session to an eyes-free user.
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    rid = _inflight(daemon, target="fg", folder="myrepo")
+    sessions.set_foreground("other", cwd="/x/other")   # speaker diverges mid-prep
+    daemon.handle_message(_result(rid, ok=True, text="The refactor landed."))
+    _drain(daemon)
+    assert "myrepo. Summary:" in speaker.spoken
+    assert "Summary:" not in speaker.spoken            # only the attributed frame
+
+
+def test_diverged_speaker_digest_carries_folder_attribution():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    rid = _inflight(daemon, target="fg", folder="myrepo",
+                    digest="Summary unavailable. Last: x.")
+    sessions.set_foreground("other", cwd="/x/other")
+    daemon.handle_message(_result(rid, ok=False, reason="timeout"))
+    _drain(daemon)
+    assert "myrepo. Summary unavailable. Last: x." in speaker.spoken
+
+
+def test_converged_render_frame_stays_unprefixed():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    rid = _inflight(daemon, target="fg", folder="myrepo")
+    daemon.handle_message(_result(rid, ok=True, text="Done."))
+    _drain(daemon)
+    assert "Summary:" in speaker.spoken                # no folder prefix when convergent
