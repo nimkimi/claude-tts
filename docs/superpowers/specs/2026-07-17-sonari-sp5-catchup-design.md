@@ -107,24 +107,29 @@ in the **main voice** throughout — it is ground truth, and the distinct voice 
 synthetic content. Ack and tail surround it as usual. The digest needs no model, no network; it is the floor on every host,
 including hosts with no adapter at all.
 
-Failure map (from the CC spike, all detectable — the daemon never guesses):
+Failure map (measured on this machine 2026-07-17, all detectable — the daemon never guesses).
+**Success = a non-empty first assistant text block was streamed** (§6) — *not* the result
+subtype, which is benignly `error_max_turns` when the model wanted to keep going after
+producing the summary. Failure = no text block:
 
 | Signal | Detection |
 | --- | --- |
-| Logged out / expired | exit ≠ 0, `is_error:true` (measured ~31 ms, free) |
-| Rate limit / overloaded / billing / server error | exit ≠ 0 / `is_error:true` |
-| Offline | non-zero exit after retries |
-| Hang | Sonari's own **30 s Popen timeout** → kill process group |
-| Empty/garbage output | empty after sanitize |
+| Logged out / expired | exit ≠ 0, no text block, output contains "login" (measured: exit 1, "Not logged in · Please run /login", ~31 ms, free) → reason `logged_out` |
+| Rate limit / overloaded / billing / server error | no text block, error event → reason `error` |
+| Offline | **measured: `claude` retries an unreachable endpoint past 30 s → caught by Sonari's own Popen timeout** (not a fast network-error exit) → reason `timeout` |
+| Hang | Sonari's own **30 s Popen timeout** → kill process group → reason `timeout` |
+| No usable output | no non-empty text block streamed → digest |
 
 Quota-false-positive note (Codex spike): treat "usage limit" as a soft signal — fall back
 this once, never disable the feature on one occurrence.
 
-**Build-entry gate (owner's quota, his go):** a live smoke run pinning the CC failure
-signatures on this machine — (a) logged-out (re-verify), (b) offline, (c) quota-exhausted /
-rate-limit shape if reachable, (d) concurrent-session safety (fire the call while an
-interactive `claude` session runs). Cross-host items (Copilot stdin, Codex exec hooks) defer
-to those adapters' builds.
+**Build-entry gate — PARTIALLY SATISFIED 2026-07-17 (the smoke run caught + fixed a real
+invocation bug — see §5/§6).** Verified on this machine: env-scrub → 0 keys reach the child;
+logged-out → clean `logged_out` signature; offline → retries into the 30 s timeout; baseline
+happy-path → clean spoken summaries on three diverse slices once the §6 invocation was
+corrected. STILL OWNER'S: (d) concurrent-session safety (fire the call while an interactive
+`claude` session runs) and, opportunistically, quota-exhausted shape. Cross-host items
+(Copilot stdin, Codex exec hooks) defer to those adapters' builds.
 
 ## 5. Narrator prompt + slice format
 
@@ -153,6 +158,16 @@ Model: `--model haiku` (live-proven sufficient; `summary_model` config override)
 prompt text is drafted at plan time under the spoken-grammar principles and is an owner
 veto item like any other string.
 
+**Invocation (corrected by the 2026-07-17 smoke run — load-bearing):** `claude -p` is an
+*agentic* harness, not a single-completion endpoint. Left to run more than one cycle it injects
+reflection turns where the model second-guesses and self-corrects into conversational mush
+("You're right — I was summarizing the transcript you provided…"), and `--output-format json`'s
+`.result` hands back that *last, polluted* turn. The clean summary is reliably the **first
+non-empty assistant text block** (preceded by a `thinking` block — one think→answer cycle).
+So the adapter uses **`--output-format stream-json --verbose --max-turns 1`** and extracts the
+**first non-empty assistant `text` block**, never `.result`. Verified clean and complete on
+three diverse slices (multi-tool, error/traceback, pending decision) 2026-07-17.
+
 ## 6. Adapter layer (agent-neutrality)
 
 Summary generation is an **adapter capability**. Core asks one question: *"summarize this
@@ -164,10 +179,12 @@ slice, or fail detectably."* No host-specific shape crosses into protocol/histor
   `SummarizeResult` = `ok(text)` | `failed(reason)` (`reason` ∈ unavailable / logged_out /
   timeout / error / empty — for logging; the spoken fallback is identical).
 - **Shipped adapter**: `ClaudeCliSummarizer` — `Popen` the user's own `claude` binary:
-  `claude -p "<instruction>" --model <model> --output-format json --max-turns 1
-  --disallowedTools <all> --system-prompt <stable narrator prefix>`, slice on stdin, parse
-  `.result`/`.is_error`. Codex (`codex exec --sandbox read-only --ephemeral`) and Copilot
-  adapters are future drop-ins behind the same interface; **no adapter → digest floor**.
+  `claude -p "<instruction>" --model <model> --output-format stream-json --verbose
+  --max-turns 1 --disallowedTools <all> --system-prompt <stable narrator prefix>`, slice on
+  stdin, **extract the first non-empty assistant `text` block from the stream** (§5 — never
+  the final `.result`; `error_max_turns` is a benign success here). Codex
+  (`codex exec --sandbox read-only --ephemeral`) and Copilot adapters are future drop-ins
+  behind the same interface; **no adapter → digest floor**.
 - **Selection**: config `summarizer: auto | claude | off` (default `auto` =
   `which("claude")` else off). Per-session host routing arrives with SP6's per-session
   `agent` field; SP5 is a global choice.
