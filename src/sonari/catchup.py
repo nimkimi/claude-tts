@@ -10,8 +10,10 @@ _FENCE = re.compile(r"`{3,}")
 _HEADING = re.compile(r"(?m)^[ \t]*#{1,6}[ \t]+")
 # Strip markdown DECORATION only, never bare [*_#] wherever they appear: a
 # blanket strip silently rewrites spoken facts (my_file_name.py -> myfilename.py,
-# issue #123 -> issue 123). Free-standing pure-mark runs (*** dividers) go too.
-_BARE_MARK_RUN = re.compile(r"(?:(?<=\s)|^)[*_#]+(?=\s|$)")
+# issue #123 -> issue 123). Free-standing runs need 3+ marks to count as a
+# divider (***): a lone * or # between spaces is an operator/symbol in coding
+# prose (2 * 3, O(n * m), SELECT * FROM, the # character) and must survive.
+_BARE_MARK_RUN = re.compile(r"(?:(?<=\s)|^)[*_#]{3,}(?=\s|$)")
 # Asterisk-only paired emphasis. Underscore is NEVER an emphasis delimiter here:
 # a whitespace-delimited __dunder__ or _sunder_ identifier is syntactically
 # identical to underscore-bold/italic, and stripping it rewrites a fact

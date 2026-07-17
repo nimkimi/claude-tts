@@ -48,6 +48,19 @@ def test_preserves_dunder_and_sunder_identifiers():
             == "Kept with__no__spaces_around intact.")
 
 
+def test_preserves_operator_and_symbol_marks():
+    # A lone * or # between spaces is an operator/symbol in coding prose
+    # (multiplication, Big-O, SQL star, the comment character) — never a
+    # markdown divider. Only 3+ mark runs (*** dividers) are decoration.
+    assert (sanitize_summary("The complexity is O(n * m) in the worst case.")
+            == "The complexity is O(n * m) in the worst case.")
+    assert sanitize_summary("The result is 2 * 3 = 6.") == "The result is 2 * 3 = 6."
+    assert (sanitize_summary("Ran SELECT * FROM users on the replica.")
+            == "Ran SELECT * FROM users on the replica.")
+    assert (sanitize_summary("The # character marks a comment.")
+            == "The # character marks a comment.")
+
+
 def test_still_strips_paired_and_nested_emphasis():
     assert sanitize_summary("**bold *nested* bold** works.") == "bold nested bold works."
 
