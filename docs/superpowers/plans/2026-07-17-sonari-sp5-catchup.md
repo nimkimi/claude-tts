@@ -857,6 +857,39 @@ def test_no_summarizer_posts_unavailable_without_a_worker():
     assert posted["ok"] is False and posted["reason"] == "unavailable"
 
 
+def test_render_never_precedes_its_ack_default_digest():
+    # No adapter (make_daemon's default summarizer=None): the failure result is
+    # mailed SYNCHRONOUSLY at press, so the digest render is drainable on the very
+    # next loop tick. It MUST still land AFTER the ack, never ahead of it — the
+    # ground-truth magnitude always speaks first (the ack->summary contract).
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=None)
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon.history.record("fg", "prose", "a.")
+    daemon.handle_message(_catch_up())
+    for _ in range(4):
+        daemon._speak_loop_once()
+    ack = "Catching up 1 item in r."
+    digest = "Summary unavailable. Last: a."
+    assert ack in speaker.spoken and digest in speaker.spoken
+    assert speaker.spoken.index(ack) < speaker.spoken.index(digest)
+
+
+def test_render_lands_after_ack_when_ack_queued_behind_a_busy_item():
+    # A busy utterance is already queued; the ack is enqueued at_front (ahead of
+    # it), then the digest result arrives while the ack is still queued ->
+    # insert_after keeps the render immediately behind the ack, never ahead of it.
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=None)
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon.history.record("fg", "prose", "a.")
+    daemon._enqueue("fg", "prose", "Busy line.", False)   # already queued ahead
+    daemon.handle_message(_catch_up())
+    for _ in range(5):
+        daemon._speak_loop_once()
+    ack = "Catching up 1 item in r."
+    digest = "Summary unavailable. Last: a."
+    assert speaker.spoken.index(ack) < speaker.spoken.index(digest)
+
+
 def test_press_while_in_flight_cancels_no_new_worker():
     daemon, queue, speaker, sessions, config = make_daemon(summarizer=FakeSummarizer())
     sessions.set_foreground("fg", cwd="/x/r")
