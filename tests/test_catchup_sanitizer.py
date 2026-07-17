@@ -27,6 +27,17 @@ def test_clamps_to_ceiling_sentences():
     assert "Sentence 9." not in out
 
 
+def test_preserves_marks_inside_identifiers_and_references():
+    assert (sanitize_summary("The file my_file_name.py was edited.")
+            == "The file my_file_name.py was edited.")
+    assert (sanitize_summary("Fixed issue #123 in the tracker.")
+            == "Fixed issue #123 in the tracker.")
+
+
+def test_still_strips_paired_and_nested_emphasis():
+    assert sanitize_summary("**_mixed_** emphasis works.") == "mixed emphasis works."
+
+
 def test_empty_and_pure_markdown_return_empty():
     assert sanitize_summary("") == ""
     assert sanitize_summary("   \n\t  ") == ""
