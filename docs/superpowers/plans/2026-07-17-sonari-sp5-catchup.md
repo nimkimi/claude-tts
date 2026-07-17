@@ -24,7 +24,170 @@
 
 ### Task 1: Protocol + keymap wiring for `catch_up` and `catchup_result`
 
+**Files:**
+- Modify: `src/sonari/protocol.py:45` (add two `MsgType` constants after `SKIP_PILE`)
+- Modify: `src/sonari/keymap.py:26-52` (add `catch_up` to `ACTION_MESSAGES`; ships UNBOUND — do NOT add to `_DEFAULT_KEYS`)
+- Modify: `tests/test_protocol.py:95-139` (add both new keys to the strict completeness guard `expected` dict)
+- Test: `tests/test_keymap.py` (new test asserting `catch_up` resolves and ships unbound)
+
+**Interfaces:**
+- Produces: `MsgType.CATCH_UP == "catch_up"` (keyboard press) and `MsgType.CATCHUP_RESULT == "catchup_result"` (internal worker→loop message). `ACTION_MESSAGES["catch_up"] == {"type": "catch_up"}`.
+- Note: `assert_complete(...)` in `daemon/__init__.py` is NOT touched here — the entries are added alongside their handlers in Task 6 (`catch_up`) and Task 7 (`catchup_result`), so the suite stays green (a MsgType constant with no handler is legal; only a type LISTED in `assert_complete` demands a handler).
+
+- [ ] **Step 1: Write the failing tests**
+
+In `tests/test_protocol.py`, add both keys to the `expected` dict inside `test_msgtype_defines_no_extra_string_constants` (after the `"SKIP_PILE": "skip_pile",` line):
+```python
+        "SKIP_PILE": "skip_pile",
+        "CATCH_UP": "catch_up",
+        "CATCHUP_RESULT": "catchup_result",
+```
+In `tests/test_keymap.py`, add:
+```python
+def test_catch_up_is_a_valid_unbound_action():
+    from sonari import keymap
+    # The catch-up press is a resolvable action...
+    assert keymap.ACTION_MESSAGES["catch_up"] == {"type": "catch_up"}
+    # ...but ships UNBOUND (owner ear-gate, like skip_pile): not in the defaults.
+    km = keymap.default_keymap()
+    assert "catch_up" not in km
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+```
+.venv/bin/python -m pytest -q tests/test_protocol.py::test_msgtype_defines_no_extra_string_constants tests/test_keymap.py::test_catch_up_is_a_valid_unbound_action
+```
+Expect: `test_catch_up_is_a_valid_unbound_action` fails with `KeyError: 'catch_up'`; the protocol test fails with an `actual == expected` mismatch (the two new keys missing from `actual`).
+
+- [ ] **Step 3: Write the minimal implementation**
+
+In `src/sonari/protocol.py`, after the `SKIP_PILE = "skip_pile"` line (protocol.py:45):
+```python
+    SKIP_PILE = "skip_pile"             # deliberate pile-skip: advance the frontier past the pile (SP4)
+    CATCH_UP = "catch_up"               # SP5: spoken host-LLM summary of the pile (ships unbound; ⌃⌘L proposed)
+    CATCHUP_RESULT = "catchup_result"   # SP5 internal: worker→daemon-loop delivery of a prepared summary
+```
+In `src/sonari/keymap.py`, add to `ACTION_MESSAGES` after the `"skip_pile"` entry (keymap.py:51):
+```python
+    "skip_pile": {"type": "skip_pile"},
+    # SP5 catch-up: bindable + resolvable, ships UNBOUND (NOT in _DEFAULT_KEYS) —
+    # Nima's ear-gate. Proposed: ⌃⌘L (keymap.json: key "l", mods ["ctrl","cmd"]).
+    "catch_up": {"type": "catch_up"},
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+```
+.venv/bin/python -m pytest -q tests/test_protocol.py tests/test_keymap.py
+```
+Expect: all pass (both the new tests and every existing protocol/keymap test).
+
+- [ ] **Step 5: Commit**
+```
+git add src/sonari/protocol.py src/sonari/keymap.py tests/test_protocol.py tests/test_keymap.py
+git commit -m "feat(sp5): add catch_up and catchup_result message types"
+```
+
 ### Task 2: Summary sanitizer (pure)
+
+**Files:**
+- Create: `src/sonari/catchup.py` (new module — pure catch-up text helpers; the daemon feature and the adapter import from here)
+- Test: `tests/test_catchup_sanitizer.py` (new)
+
+**Interfaces:**
+- Produces: `sanitize_summary(text: str, ceiling: int = 8) -> str` — deterministic; strips markdown, collapses whitespace, sentence-splits, clamps to `ceiling` sentences; returns `""` when nothing survives (the caller reads `""` as "fall to the digest"). No daemon imports; stdlib `re` only.
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/test_catchup_sanitizer.py`:
+```python
+from sonari.catchup import sanitize_summary
+
+
+def test_clean_prose_passes_through():
+    text = "Tests passed. The build is green. It asked to deploy."
+    assert sanitize_summary(text) == text
+
+
+def test_strips_markdown_fences_backticks_emphasis_headings():
+    raw = "# Result\nRan `pytest`. **All** green.\n```\ncode\n```"
+    out = sanitize_summary(raw)
+    assert "`" not in out and "*" not in out and "#" not in out
+    assert "```" not in out
+    assert "Ran pytest." in out and "All green." in out
+
+
+def test_strips_leading_list_markers_and_collapses_newlines():
+    raw = "- first thing.\n- second thing.\n\n1. third thing."
+    out = sanitize_summary(raw)
+    assert out == "first thing. second thing. third thing."
+
+
+def test_clamps_to_ceiling_sentences():
+    raw = " ".join("Sentence {0}.".format(i) for i in range(1, 13))
+    out = sanitize_summary(raw, ceiling=8)
+    assert out == " ".join("Sentence {0}.".format(i) for i in range(1, 9))
+    assert "Sentence 9." not in out
+
+
+def test_empty_and_pure_markdown_return_empty():
+    assert sanitize_summary("") == ""
+    assert sanitize_summary("   \n\t  ") == ""
+    assert sanitize_summary("```\n\n```") == ""
+    assert sanitize_summary("*** ___ ###") == ""
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+```
+.venv/bin/python -m pytest -q tests/test_catchup_sanitizer.py
+```
+Expect: `ModuleNotFoundError: No module named 'sonari.catchup'`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+`src/sonari/catchup.py`:
+```python
+"""Pure catch-up text helpers (SP5): sanitize LLM output, render the transcript
+slice for the narrator, and build the deterministic digest floor. No daemon
+imports — safe to unit-test in isolation and to call from the worker thread."""
+from __future__ import annotations
+
+import re
+
+_LIST_MARKER = re.compile(r"(?m)^[ \t]*(?:[-+*]|\d+\.)[ \t]+")
+_FENCE = re.compile(r"`{3,}")
+_EMPHASIS = re.compile(r"[*_#]+")
+_WHITESPACE = re.compile(r"\s+")
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def sanitize_summary(text: str, ceiling: int = 8) -> str:
+    """Speech-safe body text from whatever the model returned. Strip markdown,
+    collapse whitespace to single spaces, split into sentences, clamp to
+    *ceiling*. Returns '' when nothing survives (caller falls to the digest)."""
+    if not text:
+        return ""
+    s = _LIST_MARKER.sub("", text)          # leading bullets/numbers, per line
+    s = _FENCE.sub(" ", s)                   # ``` fences
+    s = s.replace("`", "")                   # inline code ticks
+    s = _EMPHASIS.sub("", s)                 # * _ # emphasis/heading marks
+    s = _WHITESPACE.sub(" ", s).strip()      # newlines/runs -> single spaces
+    if not s:
+        return ""
+    sentences = [p for p in _SENTENCE_SPLIT.split(s) if p.strip()]
+    return " ".join(sentences[:ceiling])
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+```
+.venv/bin/python -m pytest -q tests/test_catchup_sanitizer.py
+```
+Expect: 5 passed.
+
+- [ ] **Step 5: Commit**
+```
+git add src/sonari/catchup.py tests/test_catchup_sanitizer.py
+git commit -m "feat(sp5): add speech-safe summary sanitizer"
+```
 
 ### Task 3: Slice-text renderer + deterministic digest builder (pure)
 
