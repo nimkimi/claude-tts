@@ -26,8 +26,10 @@ phrase) are left as record.
 **A — Staleness fixes (reconcile to shipped code):**
 - **A1.** §8, §10.1, §13 D17 — "reuse the legacy `catch_up`" → **SP5 builds it net-new** (MsgType +
   handler + keymap action + co-designed chord); legacy `catch_up` was deleted end-to-end (`b4b3be1`).
-- **A2.** §10.1 — "then you're following again" → catch-up advances the frontier to live but does **not**
+- **A2.** §10.1 — "then you're following again" → catch-up advances the frontier but does **not**
   clear the stopped/muted flag (R-5); after catch-up new turns still ding + pile until `⌃⌘S`-start.
+  *(2026-07-16 record; superseded by the 2026-07-17 revision banner below — the shipped catch-up is an
+  async summary that burns only to the pinned slice edge, never a read-to-live.)*
 - **A3.** §3/§7/§9/§10.1 — absolute completeness ("append-only, full-fidelity, always recoverable, never
   a blind spot") → **bounded per-session window** (~200 items, not persisted across restart = SP6) plus a
   fail-**LOUD** spoken "earlier output aged out" cue at the evicted boundary (R-1).
@@ -261,8 +263,8 @@ for non-muted sessions. The specifically stopped session **stays muted** until y
 **Starting it is a *quiet resume* (D2, 2026-07-16):** it un-mutes and flows only **post-start** output;
 the **pre-start pile stays behind the frozen frontier** and is absorbed later with the catch-up key
 (§10.1), **not auto-drained on start**. While stopped, its output **piles** (dinging on
-turn-completion); you absorb that pile with the **catch-up key** (§10.1) — an async summary from the
-frozen marker forward, never an auto-blast. Navigating *to* a still-muted session raises its
+turn-completion); you absorb that pile with the **catch-up key** (§10.1) — an async summary of everything since the
+frozen marker, never an auto-blast. Navigating *to* a still-muted session raises its
 window (it becomes the workspace) but it **stays silent** until you start it (`⌃⌘S`) — navigation
 never un-mutes; only an explicit start does.
 
