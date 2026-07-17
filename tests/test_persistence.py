@@ -55,3 +55,53 @@ def test_concurrent_saves_never_tear_the_file(tmp_path):
     # No leftover temp files in the directory (each save cleaned up).
     leftovers = [p for p in os.listdir(tmp_path) if p.endswith(".state.tmp")]
     assert leftovers == []
+
+
+def test_history_state_round_trip_including_heard():
+    from sonari.history import SessionHistory
+    h = SessionHistory(cap=200)
+    e0 = h.record("s1", "prose", "one"); h.end_message("s1")
+    e1 = h.record("s1", "choice", "two")          # noqa: F841
+    e0.heard = True
+    state = json.loads(json.dumps(h.to_state()))  # must survive a JSON round-trip
+    h2 = SessionHistory(cap=200)
+    h2.load_state(state)
+    got = list(h2._entries["s1"])
+    assert [(e.text, e.kind, e.msg_id, e.seq, e.turn_id, e.heard) for e in got] == [
+        ("one", "prose", 0, 0, 0, True),
+        ("two", "choice", 1, 0, 0, False),
+    ]
+    assert h2._msg_id["s1"] == h._msg_id["s1"]
+    assert h2._group_seq["s1"] == h._group_seq["s1"]
+    assert h2._turn_id["s1"] == h._turn_id.get("s1", 0)
+
+
+def test_history_clock_normalization_spans_downtime_hermetically():
+    from sonari.history import SessionHistory
+    mono = [1000.0]; wall = [50000.0]
+    h = SessionHistory(clock=lambda: mono[0])
+    h.record("s1", "prose", "x")                        # stamp == 1000.0
+    state = h.to_state(clock=lambda: mono[0], now=lambda: wall[0])
+    # Simulate a 1h downtime spanning a fresh, unrelated process monotonic clock:
+    # the monotonic seam jumps (5000), wall advances by exactly 3600.
+    mono2 = [5000.0]; wall2 = [50000.0 + 3600.0]
+    h2 = SessionHistory()
+    h2.load_state(state, clock=lambda: mono2[0], now=lambda: wall2[0])
+    age = h2.unheard_age("s1")
+    assert abs(age - 3600.0) < 1e-6                     # true elapsed incl downtime
+    assert age >= 0                                     # never negative
+
+
+def test_history_shrunk_cap_keeps_newest_and_frontier_ages_out():
+    from sonari.history import SessionHistory
+    h = SessionHistory(cap=5)
+    for i in range(5):
+        h.record("s1", "prose", "p{0}".format(i)); h.end_message("s1")  # msg 0..4
+    state = h.to_state()
+    h2 = SessionHistory(cap=3)                          # SHRUNK cap
+    h2.load_state(state)
+    assert [e.text for e in h2._entries["s1"]] == ["p2", "p3", "p4"]    # newest 3
+    assert len(h2._entries["s1"]) == 3                  # maxlen honored, not unbounded
+    entries, aged_out = h2.unheard_from_frontier("s1", (0, 0))
+    assert aged_out is True                             # (0,0) behind oldest survivor (2,0)
+    assert [e.text for e in entries] == ["p2", "p3", "p4"]  # tuple compare, no TypeError

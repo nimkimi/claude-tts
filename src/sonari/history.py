@@ -209,3 +209,56 @@ class SessionHistory:
         self._group_seq.pop(session, None)
         self._turn_id.pop(session, None)
 
+    def to_state(self, *, clock=None, now=None) -> dict:
+        """Serialize the durable pile per session: every entry (incl. heard) with
+        its monotonic stamp converted to an absolute WALL-clock time, plus the
+        three load-bearing counters. PURE (no I/O). `clock`/`now` are the
+        monotonic and wall seams (default: this history's own clock + time.time),
+        injectable so the stamp<->wall math is hermetically testable (§5)."""
+        clk = clock if clock is not None else self._clock
+        wall = now if now is not None else time.time
+        mono_now = clk()
+        wall_now = wall()
+        out: dict = {}
+        for session, d in self._entries.items():
+            out[session] = {
+                "msg_id": self._msg_id.get(session, 0),
+                "group_seq": self._group_seq.get(session, 0),
+                "turn_id": self._turn_id.get(session, 0),
+                "entries": [
+                    {"text": e.text, "kind": e.kind, "msg_id": e.msg_id,
+                     "seq": e.seq, "turn_id": e.turn_id, "heard": e.heard,
+                     "wall_stamp": wall_now - (mono_now - e.stamp)}
+                    for e in d
+                ],
+            }
+        return out
+
+    def load_state(self, data, *, clock=None, now=None) -> None:
+        """Rebuild the pile from to_state() output. Each deque is rebuilt at the
+        CURRENT cap (deque(maxlen=self._cap), keeping the newest cap entries when
+        the saved pile is larger). Each wall_stamp is converted back to a
+        monotonic stamp on the RUNNING clock, CLAMPED <= now so it is never in the
+        future, so unheard_age spans the downtime truthfully (§5). Rebinds
+        self._clock to the injected clock so the mono_now2 capture here and later
+        unheard_age reads use one clock. PURE."""
+        clk = clock if clock is not None else self._clock
+        wall = now if now is not None else time.time
+        mono_now2 = clk()
+        wall_now2 = wall()
+        for session, sd in data.items():
+            entries = deque(maxlen=self._cap)
+            for ed in sd.get("entries", []):
+                entry = HistoryEntry(
+                    ed["text"], ed["kind"], ed["msg_id"], ed.get("seq", 0),
+                    ed.get("turn_id", 0),
+                    stamp=min(mono_now2,
+                              mono_now2 - (wall_now2 - ed["wall_stamp"])))
+                entry.heard = ed.get("heard", False)
+                entries.append(entry)
+            self._entries[session] = entries
+            self._msg_id[session] = sd.get("msg_id", 0)
+            self._group_seq[session] = sd.get("group_seq", 0)
+            self._turn_id[session] = sd.get("turn_id", 0)
+        self._clock = clk
+
