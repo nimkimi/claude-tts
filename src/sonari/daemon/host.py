@@ -358,6 +358,44 @@ class SpeechDaemon:
                     st = self._state._streams.get(item.session)
                     if st is not None:
                         st.advance_frontier((entry.msg_id, entry.seq))
+            # SP5 catch-up render lifecycle. Render items are forward=False, so the
+            # block above never advances the frontier: the burn is deferred to the
+            # WHOLE sequence completing (R-8, the render is one item). Any cut
+            # suppresses the burn and drops the remaining siblings (no lone tail).
+            rid = getattr(item, "render_id", None)
+            cu = self._catchup
+            if rid is not None and cu is not None and cu.get("render_id") == rid:
+                if not completed:
+                    self._drop_render_items(item.session, rid)
+                    self._catchup = None
+                elif getattr(item, "catchup_burn", False):
+                    # The render finished. Burn UNLESS the session ended mid-prep
+                    # (nothing left to burn) — but ALWAYS clear the bundle, so an
+                    # ended render never strands _catchup (a spurious next-press cancel).
+                    if not cu.get("ended"):
+                        self._burn_catchup(cu)
+                    self._catchup = None
+
+    def _drop_render_items(self, session, render_id) -> None:
+        st = self._state._streams.get(session)
+        if st is not None:
+            self._drop_pending(
+                st.queue.remove_where(lambda it: it.render_id == render_id))
+
+    def _burn_catchup(self, cu) -> None:
+        """Advance the caught-up target's frontier to the PINNED slice_end (never
+        newest-at-completion) and drop its queued pile items at or below it."""
+        st = self._state._streams.get(cu["target"])
+        if st is None:
+            return
+        slice_end = cu["slice_end"]
+        st.advance_frontier(slice_end)                # monotonic: a behind key is a no-op
+        ph = self._state._pending_heard
+
+        def below(it):
+            e = ph.get(it.id)
+            return e is not None and (e.msg_id, e.seq) <= slice_end
+        self._drop_pending(st.queue.remove_where(below))
 
     def _await_permission_decision(self, session: str, timeout: float) -> dict:
         """Block (OUTSIDE the daemon lock) until the focused-session answer arrives

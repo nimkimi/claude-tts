@@ -343,8 +343,11 @@ def on_where_am_i(ctx, msg):
     text = lead + _also_clause(host, exclude)
     host.speaker.cancel()                          # barge-in: cut the current utterance
     # Resume-after-interjection: re-queue the interrupted item FIRST so it ends up
-    # DEEPEST (the status cue is appendleft'd in front of it below).
-    if cur is not None:
+    # DEEPEST (the status cue is appendleft'd in front of it below). A catch-up
+    # render item (render_id set) is NEVER re-queued — a cut render is gone by
+    # design (note_spoken dropped its siblings + cleared _catchup); the pile stays
+    # unburned and the next press re-summarizes (§2.8).
+    if cur is not None and getattr(cur, "render_id", None) is None:
         host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
                       entry=entry, mute_exempt=cur.mute_exempt,
                       pause_exempt=cur.pause_exempt, names_session=cur.names_session,

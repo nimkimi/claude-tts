@@ -82,7 +82,15 @@ def _cancel_catchup(host):
     if cu is None:
         return
     cu["cancel"].set()                       # kill an in-flight child if still preparing
-    host._catchup = None                     # Task 8 extends this to cut a SPEAKING render
+    rid = cu.get("render_id")
+    if rid is not None:                      # already speaking: cut + drop the render
+        dest = cu.get("dest")
+        if dest is not None:
+            host._drop_render_items(dest, rid)
+        cur = host._current_item
+        if cur is not None and getattr(cur, "render_id", None) == rid:
+            host.speaker.cancel()
+    host._catchup = None                     # no burn on cancel (§2.9)
     dest = _cue_dest(host.sessions, cu["target"])
     if dest is not None:
         host._enqueue(dest, "prose", "Cancelled.", False,

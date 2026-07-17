@@ -111,6 +111,16 @@ class SpeechQueue:
                 return item
         return None
 
+    def remove_where(self, pred) -> "list[SpeechItem]":
+        """Remove and return every queued item matching *pred* (SpeechItem -> bool).
+        The catch-up burn drops the pinned pile; a cut drops the render's siblings.
+        Caller holds the daemon lock."""
+        kept, removed = deque(), []
+        for it in self._items:
+            (removed if pred(it) else kept).append(it)
+        self._items = kept
+        return removed
+
     def insert_after(self, item_id, items) -> bool:
         """Insert *items* (in order) immediately after the queued item with id
         *item_id*. Returns False when that item is no longer queued (already
