@@ -316,6 +316,7 @@ git commit -m "feat(sp5): add slice renderer and deterministic digest builder"
 **Files:**
 - Create: `src/sonari/summarizer.py` (new module — the adapter seam)
 - Modify: `src/sonari/config.py:9-20` (three new DEFAULTS keys)
+- Modify: `tests/test_config.py:5-17` (extend the exact-set completeness guard `test_defaults_has_documented_top_level_keys` — its literal must track DEFAULTS, so the three new keys are added; this EXTENDS a completeness guard, it does not weaken one)
 - Test: `tests/test_summarizer.py` (new)
 
 **Interfaces:**
@@ -624,16 +625,25 @@ In `src/sonari/config.py`, add to `DEFAULTS` (after `"spearcon_rate": 525,`):
     "summary_voice": "auto",     # distinct voice for the LLM body; auto=pick distinct, else main
     "summary_model": "haiku",    # claude -p --model for the summary (owner override)
 ```
+In `tests/test_config.py`, extend the exact-set completeness guard `test_defaults_has_documented_top_level_keys` (lines 5-17) — its literal set asserts `set(DEFAULTS.keys()) ==` a fixed key list, so the three new keys MUST be added or it goes red. This EXTENDS the guard to the new keys (it stays an exact-set assertion), it does NOT weaken it:
+```python
+        "spearcon_voice",
+        "spearcon_rate",
+        "summarizer",
+        "summary_voice",
+        "summary_model",
+    }
+```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 ```
 .venv/bin/python -m pytest -q tests/test_summarizer.py tests/test_config.py
 ```
-Expect: all pass (11 in test_summarizer.py + the existing config tests). If `tests/test_config.py` does not exist, run only `tests/test_summarizer.py`.
+Expect: all pass (11 in test_summarizer.py + every config test, including the now-extended exact-set guard `test_defaults_has_documented_top_level_keys`).
 
 - [ ] **Step 5: Commit**
 ```
-git add src/sonari/summarizer.py src/sonari/config.py tests/test_summarizer.py
+git add src/sonari/summarizer.py src/sonari/config.py tests/test_config.py tests/test_summarizer.py
 git commit -m "feat(sp5): add host-LLM summarizer adapter with API-key env scrub"
 ```
 
