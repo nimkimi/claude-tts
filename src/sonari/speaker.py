@@ -49,7 +49,7 @@ class Speaker:
         with self._current_lock:
             return self._cancel_epoch
 
-    def speak(self, text=None, audio_path=None, cancel_epoch=None) -> bool:
+    def speak(self, text=None, audio_path=None, cancel_epoch=None, voice=None) -> bool:
         """Play an utterance, blocking. When *audio_path* is set, afplay that file
         (a spearcon); otherwise say *text*. Return True iff it COMPLETED (exit 0).
         A cancelled/terminated/failed-to-spawn utterance returns False so the caller
@@ -73,8 +73,9 @@ class Speaker:
         # reporting the utterance as NOT completed (so the caller replays it).
         with self._current_lock:
             epoch = self._cancel_epoch if cancel_epoch is None else cancel_epoch
+        say_voice = voice if voice is not None else self._voice
         proc = (runner(audio_path) if audio_path is not None
-                else runner(text, self._voice, self._rate))
+                else runner(text, say_voice, self._rate))
         if proc is None:
             return False                # afplay could not spawn / the file vanished
         with self._current_lock:

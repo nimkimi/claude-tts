@@ -232,7 +232,7 @@ class SpeechDaemon:
                  entry=None, mute_exempt: bool = False,
                  pause_exempt: bool = False, at_front: bool = False,
                  names_session: bool = False, audio_path=None,
-                 forward: bool = False) -> int:
+                 forward: bool = False, voice=None) -> int:
         """Returns the new item's id (W7: on_permission_request tracks its queued
         ask); all other callers ignore it."""
         item = SpeechItem(
@@ -246,6 +246,7 @@ class SpeechDaemon:
             names_session=names_session,
             audio_path=audio_path,
             forward=forward,
+            voice=voice,
         )
         st = self._stream(session)
         if entry is not None:
@@ -511,12 +512,15 @@ class SpeechDaemon:
                 self._state._wake.wait(self._poll_interval)
                 self._state._wake.clear()
                 return
+            vkw = {"voice": item.voice} if item.voice is not None else {}
             try:
                 if item.audio_path:
                     completed = self.speaker.speak(
-                        item.text, audio_path=item.audio_path, cancel_epoch=cancel_epoch)
+                        item.text, audio_path=item.audio_path,
+                        cancel_epoch=cancel_epoch, **vkw)
                 else:
-                    completed = self.speaker.speak(item.text, cancel_epoch=cancel_epoch)
+                    completed = self.speaker.speak(
+                        item.text, cancel_epoch=cancel_epoch, **vkw)
             except Exception:  # noqa: BLE001 - one bad cue must not wedge the hold
                 self._signal_speak_failure()
                 completed = False
@@ -584,12 +588,15 @@ class SpeechDaemon:
             self._state._wake.wait(self._poll_interval)
             self._state._wake.clear()
             return
+        vkw = {"voice": item.voice} if item.voice is not None else {}
         try:
             if item.audio_path:
                 completed = self.speaker.speak(
-                    text, audio_path=item.audio_path, cancel_epoch=cancel_epoch)
+                    text, audio_path=item.audio_path,
+                    cancel_epoch=cancel_epoch, **vkw)
             else:
-                completed = self.speaker.speak(text, cancel_epoch=cancel_epoch)
+                completed = self.speaker.speak(
+                    text, cancel_epoch=cancel_epoch, **vkw)
         except Exception:  # noqa: BLE001 - one bad utterance must not abort the item
             self._signal_speak_failure()
             completed = False
