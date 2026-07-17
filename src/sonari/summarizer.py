@@ -30,6 +30,24 @@ _DISALLOWED_TOOLS = ("Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,Task,"
                      "TodoWrite,NotebookEdit,BashOutput,KillShell,SlashCommand")
 _SCRUB_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 _POLL_S = 0.05
+# The daemon runs as a LaunchAgent whose environment carries no user PATH, so
+# shutil.which misses a claude installed in the usual per-user locations
+# (live-diagnosed 2026-07-17: ~/.local/bin/claude invisible to the daemon).
+_FALLBACK_DIRS = ("~/.local/bin", "~/.claude/local",
+                  "/opt/homebrew/bin", "/usr/local/bin")
+
+
+def _default_which(name):
+    """shutil.which, then the conventional install dirs a bare daemon PATH
+    misses. Injected fakes replace this wholesale in tests."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for d in _FALLBACK_DIRS:
+        cand = os.path.join(os.path.expanduser(d), name)
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return None
 
 
 class SummarizeResult:
@@ -100,7 +118,7 @@ def _parse(out: str, err: str, returncode) -> "SummarizeResult":
 
 class ClaudeCliSummarizer:
     def __init__(self, popen=subprocess.Popen, model="haiku",
-                 which=shutil.which, env=None) -> None:
+                 which=_default_which, env=None) -> None:
         self._popen = popen
         self._model = model
         self._which = which
@@ -156,7 +174,7 @@ class ClaudeCliSummarizer:
             shutil.rmtree(cwd, ignore_errors=True)
 
 
-def select_summarizer(config, which=shutil.which, popen=subprocess.Popen):
+def select_summarizer(config, which=_default_which, popen=subprocess.Popen):
     """Wire the configured adapter, or None (→ digest floor). `auto` uses the
     Claude adapter iff `claude` is on PATH; SP5 is a global choice (per-session
     host routing arrives with SP6)."""

@@ -185,3 +185,39 @@ def test_config_defaults_include_summarizer_keys():
     assert DEFAULTS["summarizer"] == "auto"
     assert DEFAULTS["summary_voice"] == "auto"
     assert DEFAULTS["summary_model"] == "haiku"
+
+
+def test_default_which_falls_back_to_conventional_dirs(tmp_path, monkeypatch):
+    # The daemon runs as a LaunchAgent with a bare PATH: shutil.which misses a
+    # claude installed in ~/.local/bin. The default resolver must probe the
+    # conventional install dirs before giving up.
+    import sonari.summarizer as m
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(m.shutil, "which", lambda n: None)
+    monkeypatch.setattr(m, "_FALLBACK_DIRS", (str(tmp_path),))
+    assert m._default_which("claude") == str(fake)
+
+
+def test_default_which_prefers_path_hit_and_requires_executable(tmp_path, monkeypatch):
+    import sonari.summarizer as m
+    monkeypatch.setattr(m.shutil, "which", lambda n: "/from/path/claude")
+    assert m._default_which("claude") == "/from/path/claude"
+    plain = tmp_path / "claude"
+    plain.write_text("")               # exists but not executable
+    plain.chmod(0o644)
+    monkeypatch.setattr(m.shutil, "which", lambda n: None)
+    monkeypatch.setattr(m, "_FALLBACK_DIRS", (str(tmp_path),))
+    assert m._default_which("claude") is None
+
+
+def test_select_summarizer_auto_uses_fallback_resolution(tmp_path, monkeypatch):
+    import sonari.summarizer as m
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(m.shutil, "which", lambda n: None)
+    monkeypatch.setattr(m, "_FALLBACK_DIRS", (str(tmp_path),))
+    s = m.select_summarizer({"summarizer": "auto", "summary_model": "haiku"})
+    assert isinstance(s, m.ClaudeCliSummarizer)

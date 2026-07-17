@@ -155,3 +155,13 @@ def test_converged_render_frame_stays_unprefixed():
     daemon.handle_message(_result(rid, ok=True, text="Done."))
     _drain(daemon)
     assert "Summary:" in speaker.spoken                # no folder prefix when convergent
+
+
+def test_failure_reason_is_logged(capsys):
+    # A silent fall to the digest floor made the live PATH miss invisible —
+    # the failure reason must land in speechd.log (stderr), focus-log idiom.
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    rid = _inflight(daemon, folder="r")
+    daemon.handle_message(_result(rid, ok=False, reason="unavailable"))
+    assert "sonari[catchup]: summary failed reason=unavailable" in capsys.readouterr().err
