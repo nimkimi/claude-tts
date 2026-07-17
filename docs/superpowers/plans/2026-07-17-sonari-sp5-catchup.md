@@ -1109,7 +1109,24 @@ git commit -m "feat(sp5): catch-up press handler, worker thread, and result mail
 - Consumes: `sanitize_summary` (Task 2), `build_digest` (Task 3), `_has_decision` from `features/control.py`, `resolve_summary_voice` (this task), `_enqueue(..., voice=, render_id=, catchup_burn=, after_id=)`, `cu["ack_id"]` (Task 6).
 - Produces: `SpeechItem.render_id: int|None`, `SpeechItem.catchup_burn: bool=False`; `SpeechQueue.insert_after(item_id, items) -> bool` (inserts `items` right after the queued item with id `item_id`; returns False when that item is no longer queued — the caller falls back to `at_front`; caller holds the daemon lock); `_enqueue(..., after_id=None)` (when `after_id` is set and still queued, insert after it; otherwise honor `at_front`); `resolve_summary_voice(cfg_value, main_voice, voices) -> str|None` (concrete name wins; `auto` picks the first voice `!= main_voice`, else main voice; `off`/`None` → main voice); `host._installed_voices() -> list[str]`. The result handler id-matches `msg["request_id"]` against `host._catchup["id"]` (stale → drop), assembles `[ "{folder} ended." (if ended) ] + [ frame+body | digest ] + [ tail if decision & not ended ]`, routes to `_cue_dest`, and enqueues the segments REVERSED with `after_id=cu.get("ack_id")` so — when the ack is still queued — the whole render lands immediately AFTER the ack in play order (never ahead of it); when the ack has already been spoken, `insert_after` returns False and the reversed enqueue falls to `at_front` as before. It marks the LAST item `catchup_burn=True` ALWAYS (it is the render-done marker that clears `self._catchup` on completion; Task 8 gates the actual frontier burn on `not cu["ended"]`, so an ended render still clears the bundle). Task 8 consumes `render_id`/`catchup_burn` in `note_spoken`.
 
-- [ ] **Step 1: Write the failing tests** — `tests/test_catchup_render.py`:
+- [ ] **Step 1a: Write the failing `insert_after` unit test** — append to `tests/test_queue.py` (idiom: `_item(id, ...)` helper already defined at the top of that file):
+```python
+def test_insert_after_lands_items_right_behind_the_anchor():
+    q = SpeechQueue()
+    q.enqueue(_item(1, text="ack"))
+    q.enqueue(_item(2, text="tail"))
+    assert q.insert_after(1, [_item(3, text="render")]) is True
+    assert [q.pop_next().text for _ in range(3)] == ["ack", "render", "tail"]
+
+
+def test_insert_after_returns_false_when_anchor_absent():
+    q = SpeechQueue()
+    q.enqueue(_item(1, text="only"))
+    assert q.insert_after(999, [_item(2, text="render")]) is False
+    assert len(q) == 1 and q.pop_next().text == "only"   # nothing inserted
+```
+
+- [ ] **Step 1b: Write the failing render tests** — `tests/test_catchup_render.py`:
 ```python
 import threading
 
@@ -1236,9 +1253,9 @@ def test_wrong_request_id_is_dropped():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 ```
-.venv/bin/python -m pytest -q tests/test_catchup_render.py
+.venv/bin/python -m pytest -q tests/test_queue.py tests/test_catchup_render.py
 ```
-Expect: `ImportError: cannot import name 'resolve_summary_voice'` (and, once that exists, the render assertions fail — no `catchup_result` handler yet).
+Expect: the two `insert_after` tests fail with `AttributeError: 'SpeechQueue' object has no attribute 'insert_after'`; `test_catchup_render.py` fails with `ImportError: cannot import name 'resolve_summary_voice'` (and, once that exists, the render assertions fail — no `catchup_result` handler yet).
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -1366,13 +1383,13 @@ In `tests/daemon_helpers.py`, in `make_daemon`, after constructing `daemon`, add
 
 - [ ] **Step 4: Run the tests to verify they pass**
 ```
-.venv/bin/python -m pytest -q tests/test_catchup_render.py tests/test_catchup_press.py tests/test_daemon_registry.py
+.venv/bin/python -m pytest -q tests/test_queue.py tests/test_catchup_render.py tests/test_catchup_press.py tests/test_daemon_registry.py
 ```
-Expect: all render + press tests pass; `assert_complete` still green (both types now have handlers); `test_all_msgtypes_registered` green with CATCHUP_RESULT now in `ALL_TYPES`.
+Expect: the two `insert_after` unit tests + all render + press tests pass; `assert_complete` still green (both types now have handlers); `test_all_msgtypes_registered` green with CATCHUP_RESULT now in `ALL_TYPES`.
 
 - [ ] **Step 5: Commit**
 ```
-git add src/sonari/queue.py src/sonari/daemon/host.py src/sonari/catchup.py src/sonari/daemon/features/catchup.py src/sonari/daemon/__init__.py tests/test_daemon_registry.py tests/daemon_helpers.py tests/test_catchup_render.py
+git add src/sonari/queue.py src/sonari/daemon/host.py src/sonari/catchup.py src/sonari/daemon/features/catchup.py src/sonari/daemon/__init__.py tests/test_daemon_registry.py tests/test_queue.py tests/daemon_helpers.py tests/test_catchup_render.py
 git commit -m "feat(sp5): render catch-up summary with frame, distinct-voice body, and tail"
 ```
 
@@ -1766,6 +1783,7 @@ git commit -m "feat(sp5): unify unheard count to the transcript pile across surf
 - Modify: `docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md` (rewrite the stale verbatim-catch-up model per the §10 table + a top-of-file revision banner)
 - Modify: `docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-reconciliation.md` (superseded banner)
 - Modify: `docs/superpowers/specs/2026-07-16-sonari-whereami-grammar-v2.md` (reconcile the `u` source)
+- Modify: `README.md:14` (one quota-honesty sentence where catch-up is described — spec §6)
 - Modify: `.superpowers/sdd/progress.md` (dated ledger line — this repo has no CHANGELOG.md; see the flag)
 
 **Spec ambiguity to flag (do not resolve silently):** the SP5 spec §10 table lists a "Changelog | New entry pointing here" row, but this repo has NO `CHANGELOG.md` and the 2026-06-29 design spec has no changelog section. This task routes that requirement to (a) a top-of-file revision banner on the 2026-06-29 spec pointing to `2026-07-17-sonari-sp5-catchup-design.md`, and (b) a dated line in `.superpowers/sdd/progress.md`. Surface this substitution in the task's completion note.
@@ -1790,6 +1808,7 @@ In `docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md`:
 - [ ] **Step 3: Superseded banner + whereami-v2 reconcile + ledger line**
 - In `docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-reconciliation.md`, add under the header: `> **Superseded (2026-07-17):** a point-in-time audit record. The catch-up verb it maps is now the async summary of docs/superpowers/specs/2026-07-17-sonari-sp5-catchup-design.md. Banner only — the audit body is left as-is.`
 - In `docs/superpowers/specs/2026-07-16-sonari-whereami-grammar-v2.md`, reconcile the `u` source (§8 of the SP5 spec): find the line stating `u` remains the current-turn floor (`max(0, unheard−k)`, ~line 51) and amend it to note that **SP5 changed `u`'s SOURCE to the transcript pile** (`unheard_from_frontier`); the grammar (the waiting/unheard split, the `unheard` word) is unchanged. Note the `stale` word still reads the current-turn `unheard_age` (the documented minor inconsistency from Task 9).
+- In `README.md`, the catch-up hotkey is listed at line 14 (`- **Global hotkeys** — stop, repeat, skip, jump-to-decision, catch-up, rate, verbosity, re-read …`). Add ONE quota-honesty sentence to the feature area so the subscription draw is disclosed (spec §6). Append after that bullet: `  - **Catch-up** summarizes a session via your own logged-in coding-agent CLI (no separate API key). It draws from that subscription's usage — roughly 16–32k tokens a press, far cheaper on repeats within the hour — and falls back to a plain last-line digest when the summary is unavailable.`
 - In `.superpowers/sdd/progress.md`, append a dated line: `2026-07-17 — SP5 catch-up (async host-LLM summary + burn + count unification) built; spec docs/superpowers/specs/2026-07-17-sonari-sp5-catchup-design.md; supersedes the verbatim catch-up model in 2026-06-29-sonari-voice-arbitration-design.md §8/§9/§10.1/D17.`
 
 - [ ] **Step 4: Re-run the completeness grep (the gate)**
@@ -1801,7 +1820,7 @@ Expect: the literal "Reads forward…" phrase is GONE (rewritten). Every remaini
 
 - [ ] **Step 5: Commit**
 ```
-git add docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-reconciliation.md docs/superpowers/specs/2026-07-16-sonari-whereami-grammar-v2.md .superpowers/sdd/progress.md
+git add docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-reconciliation.md docs/superpowers/specs/2026-07-16-sonari-whereami-grammar-v2.md README.md .superpowers/sdd/progress.md
 git commit -m "docs(sp5): rewrite the stale verbatim catch-up model to the summary verb"
 ```
 
@@ -1815,7 +1834,7 @@ git commit -m "docs(sp5): rewrite the stale verbatim catch-up model to the summa
 ```
 .venv/bin/python -m pytest -q
 ```
-Expect: all pass, 1 skipped. Baseline before SP5 was **1105 passed / 1 skipped**; this plan adds ~52 new tests (T1 keymap +1, T2 sanitizer +5, T3 slice/digest +5, T4 summarizer +11, T5 voice +3, T6 press +8, T7 render +9, T8 burn +8, T9 counts +2) plus in-place updates to existing ⌃⌘W tests (count corrections, not new tests), so the target is roughly **~1157 passed / 1 skipped**. Record the EXACT final number here.
+Expect: all pass, 1 skipped. Baseline before SP5 was **1105 passed / 1 skipped**; this plan adds ~57 new tests (T1 keymap +1, T2 sanitizer +5, T3 slice/digest +5, T4 summarizer +10, T5 voice +3, T6 press +10 [+2 ack-before-render ordering, fix wave F3], T7 render +9 incl. +2 `insert_after` unit tests in test_queue.py, T8 burn +9 [+1 W-barge-in orphan guard, F6.9], T9 counts +2) plus in-place updates to existing ⌃⌘W tests (count corrections, not new tests), so the target is roughly **~1162 passed / 1 skipped**. These per-task counts are estimates — record the EXACT final number here after the run.
 
 - [ ] **Step 2: Confirm the import-time + protocol guards**
 ```
