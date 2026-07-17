@@ -340,3 +340,12 @@ def test_resolved_default_keymap_has_chooser_and_no_cycle(mac):
     msgs = [json.loads(e["message"]) for e in resolved]
     assert {"type": "chooser_step", "direction": "next"} in msgs
     assert not any(m.get("type") == "cycle_session" for m in msgs)
+
+
+def test_catch_up_is_a_valid_unbound_action():
+    from sonari import keymap
+    # The catch-up press is a resolvable action...
+    assert keymap.ACTION_MESSAGES["catch_up"] == {"type": "catch_up"}
+    # ...but ships UNBOUND (owner ear-gate, like skip_pile): not in the defaults.
+    km = keymap.default_keymap()
+    assert "catch_up" not in km

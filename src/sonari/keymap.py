@@ -49,6 +49,9 @@ ACTION_MESSAGES = {
     # the chord is Nima's ear-gate. Proposed: ⌃⌘⇧↓ (keymap.json: key "down",
     # mods ["ctrl","cmd","shift"]).
     "skip_pile": {"type": "skip_pile"},
+    # SP5 catch-up: bindable + resolvable, ships UNBOUND (NOT in _DEFAULT_KEYS) —
+    # Nima's ear-gate. Proposed: ⌃⌘L (keymap.json: key "l", mods ["ctrl","cmd"]).
+    "catch_up": {"type": "catch_up"},
 }
 
 # Shared action -> default key. The chord modifiers are platform-defaulted (macOS:

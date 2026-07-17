@@ -135,6 +135,8 @@ def test_msgtype_defines_no_extra_string_constants():
         "CHOOSER_CANCEL": "chooser_cancel",
         "REPEAT_LAST": "repeat_last",
         "SKIP_PILE": "skip_pile",
+        "CATCH_UP": "catch_up",
+        "CATCHUP_RESULT": "catchup_result",
     }
     assert actual == expected
 
