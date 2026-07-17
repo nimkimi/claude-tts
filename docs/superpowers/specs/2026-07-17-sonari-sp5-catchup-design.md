@@ -97,13 +97,14 @@ Rules:
 
 ## 4. Digest floor + failure detection
 
-Any failure → the deterministic digest replaces the body, and it **announces the
-degradation**:
+Any failure → the deterministic digest replaces **the frame and the body together** (no
+"Summary:" — there is no summary), and it **announces the degradation**:
 
 > **"Summary unavailable. Last: {verbatim final assistant sentence of the slice}."**
 
-(Extractive anchor — real recorded words, the single most valuable fact.) Ack and tail
-surround it as usual. The digest needs no model, no network; it is the floor on every host,
+(Extractive anchor — real recorded words, the single most valuable fact.) The digest speaks
+in the **main voice** throughout — it is ground truth, and the distinct voice marks only
+synthetic content. Ack and tail surround it as usual. The digest needs no model, no network; it is the floor on every host,
 including hosts with no adapter at all.
 
 Failure map (from the CC spike, all detectable — the daemon never guesses):
@@ -229,6 +230,9 @@ streamline pass.)
   the next catch-up picks them up.
 - **minqueue > 1**: no interaction — the render rides the same `at_front` path as the skip
   cue, which the SP4 review verified audible under quiet-hold.
+- **Verbosity**: catch-up is verbosity-independent — the summary abstracts over tool lines
+  by nature (the direction doc's dissolved wart), and the slice always feeds the narrator
+  every recorded kind regardless of the speaking verbosity.
 
 ## 10. Spec-hygiene rewrite (the stale verbatim model)
 
