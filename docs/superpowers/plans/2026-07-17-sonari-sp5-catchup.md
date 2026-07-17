@@ -652,12 +652,13 @@ git commit -m "feat(sp5): add host-LLM summarizer adapter with API-key env scrub
 **Files:**
 - Modify: `src/sonari/queue.py:7-20` (SpeechItem: one new field)
 - Modify: `src/sonari/speaker.py:52-97` (`speak` accepts a per-call voice override)
-- Modify: `src/sonari/daemon/host.py` (`_enqueue` :231-260 threads `voice`; the FOUR `speak()` call sites at ~515-519 held branch and ~588-592 normal branch pass `voice=item.voice`)
+- Modify: `src/sonari/daemon/host.py` (`_enqueue` :231-260 threads `voice`; the FOUR `speak()` call sites at ~515-519 held branch and ~588-592 normal branch pass `voice` ONLY when the item sets one — the conditional-kwarg splat below)
 - Modify: `tests/daemon_helpers.py:36-54` (FakeSpeaker records the per-call voice)
 - Test: `tests/test_voice_per_utterance.py` (new)
 
 **Interfaces:**
-- Produces: `SpeechItem.voice: "str | None" = None`; `Speaker.speak(text=None, audio_path=None, voice=None, cancel_epoch=None)` — `voice` overrides `self._voice` for exactly that call, reverting after; `_enqueue(..., voice=None)` passes it onto the item. FakeSpeaker gains `self.spoken_voices: list` (one entry per `speak()`).
+- Produces: `SpeechItem.voice: "str | None" = None`; `Speaker.speak(text=None, audio_path=None, cancel_epoch=None, voice=None)` — `voice` overrides `self._voice` for exactly that call, reverting after; `_enqueue(..., voice=None)` passes it onto the item. FakeSpeaker gains `self.spoken_voices: list` (one entry per `speak()`).
+- **Blast-radius contract (load-bearing):** `voice` reaches the speaker ONLY for items that set it — the loop calls `speak(**{"voice": item.voice})` conditionally and calls `speak()` with NO `voice` kwarg for the None-voiced default. This is why legacy/guard test-double Speakers with voice-less signatures (`tests/test_concurrency_guards.py` ×3, `tests/test_blackbox_net.py`, `tests/test_keepgoing_preroll.py`, `tests/test_frontier.py`) are NEVER passed `voice` and stay untouched — do NOT edit those files. Only the real `Speaker` and `FakeSpeaker` gain the param.
 - Rationale (advisor): the catch-up render items are `pause_exempt`, so the body plays through the HELD branch when the target session is stopped — the voice MUST be threaded at the held-branch call sites too, or a stopped-session catch-up body silently reverts to the main voice.
 
 - [ ] **Step 1: Write the failing test** — `tests/test_voice_per_utterance.py`:
@@ -737,17 +738,18 @@ In `src/sonari/daemon/host.py`, add `voice=None` to `_enqueue`'s signature and p
                  names_session: bool = False, audio_path=None,
                  forward: bool = False, voice=None) -> int:
 ```
-and in the `SpeechItem(...)` construction add `voice=voice,` alongside `forward=forward,`. Then at ALL FOUR `speak()` call sites in `_speak_loop_once` (held branch ~515-519 and normal branch ~588-592), add `voice=item.voice`, e.g.:
+and in the `SpeechItem(...)` construction add `voice=voice,` alongside `forward=forward,`. Then at ALL FOUR `speak()` call sites in `_speak_loop_once` (held branch ~515-519 and normal branch ~588-592), pass `voice` CONDITIONALLY — build a kwarg dict that is empty unless the item carries a voice, so voice-less test-double Speakers are never handed a `voice=` they can't accept:
 ```python
+            vkw = {"voice": item.voice} if item.voice is not None else {}
             if item.audio_path:
                 completed = self.speaker.speak(
                     item.text, audio_path=item.audio_path,
-                    voice=item.voice, cancel_epoch=cancel_epoch)
+                    cancel_epoch=cancel_epoch, **vkw)
             else:
                 completed = self.speaker.speak(
-                    item.text, voice=item.voice, cancel_epoch=cancel_epoch)
+                    item.text, cancel_epoch=cancel_epoch, **vkw)
 ```
-(held branch uses `item.text`; the normal branch uses the attributed `text` — keep each branch's existing first argument, only add `voice=item.voice`).
+(held branch uses `item.text`; the normal branch uses the attributed `text` — keep each branch's existing first argument, only add `cancel_epoch=cancel_epoch, **vkw`. Compute `vkw` once per pop, before the `if item.audio_path` split, and reuse it in both branches. The default None-voiced item calls `speak()` with NO `voice` kwarg — so guard/legacy doubles are untouched; only a catch-up body item ever passes it.)
 In `tests/daemon_helpers.py`, add `self.spoken_voices: list = []` in `FakeSpeaker.__init__` and record it (mirror the appended-`voice` order):
 ```python
     def speak(self, text=None, audio_path=None, cancel_epoch=None, voice=None) -> bool:
@@ -757,13 +759,12 @@ In `tests/daemon_helpers.py`, add `self.spoken_voices: list = []` in `FakeSpeake
         return self.complete
 ```
 
-- [ ] **Step 4: Run the focused tests, a positional-caller grep, then the FULL suite**
+- [ ] **Step 4: Run the focused tests, then the FULL suite**
 ```
 .venv/bin/python -m pytest -q tests/test_voice_per_utterance.py tests/test_speaker.py
-grep -rn "\.speak(" src/ tests/    # confirm no caller passes a 3rd/4th POSITIONAL arg that would bind to voice
 .venv/bin/python -m pytest -q
 ```
-Expect: the 3 new tests pass; the grep shows every `.speak(` call uses `voice=`/`cancel_epoch=`/`audio_path=` by keyword (no positional shift); the full suite is green (this task changed the `speak` signature — verify globally, not just the two files).
+Expect: the 3 new tests pass; the full suite is green. The conditional-kwarg splat means voice-less Speaker doubles (`test_concurrency_guards.py`, `test_blackbox_net.py`, `test_keepgoing_preroll.py`, `test_frontier.py`) are never handed a `voice=` kwarg, so no guard/legacy test breaks — a global run confirms it (this task changed the `speak` signature; verify the whole suite, not just the two files). If ANY existing test errors with `unexpected keyword argument 'voice'`, the conditional splat was applied wrong (an item with `voice=None` must call `speak()` with no `voice` kwarg) — fix the call site, do NOT add `voice=` to the failing double.
 
 - [ ] **Step 5: Commit**
 ```
