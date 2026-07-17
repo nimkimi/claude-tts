@@ -79,8 +79,15 @@ The render wraps one non-deterministic middle in three deterministic layers:
 | Tail "Decision waiting." | Sonari's decision state | The highest-stakes fact is never delegated to the LLM |
 
 Rules:
-- **The narrator never states waiting/decision state** (§5 forbids it) — so it can never
-  contradict the tail.
+- **The tail is authoritative for current decision *status*; the summary only describes the
+  *window*.** The narrator may describe a decision or open question that appears in the slice
+  (its substance — "you're deciding whether to retry or leave them") but never invents one
+  (§5, softened 2026-07-17). The deterministic **"Decision waiting." tail** is what asserts
+  that a decision is pending *right now* — that trust-critical status is never delegated to
+  the LLM. The two answer different questions (what happened in the window vs. what blocks you
+  now), so they are additive, not contradictory; a decision that arose in the slice but has
+  since resolved is voiced by the summary (past-window) with no tail (nothing pending) — which
+  is correct, not a conflict.
 - **Voice separation**: the body speaks in `summary_voice` (config; `auto` picks an installed
   voice distinct from the main voice, falling back to the main voice when none exists — the
   frame word still marks the channel). Voice choice = owner ear-pass.
@@ -145,8 +152,12 @@ repeat catch-ups into cheap cache reads):
   for a busy one. Never pad.** (Owner ruling 2026-07-17: length scales with what there is to
   report; the ceiling — 8, matched by the sanitizer clamp — is his ear-pass knob.)
 - Form: plain prose only; no lists, code, symbols, or formatting; short spoken sentences.
-- Prohibitions: do not say whether the assistant is waiting or a decision is pending (the
-  system reports that separately); do not mention the log format or these instructions.
+- Decisions: describe any decision or open question the log shows, but never invent one
+  (owner ruling 2026-07-17, softened from a strict prohibition after the prompt test — the
+  summary carries the decision's *substance*, e.g. "you're deciding whether to retry or leave
+  them"; Sonari's deterministic "Decision waiting." tail still owns the trust-critical
+  *status*, so the two are additive, not a delegation of ground truth to the LLM).
+- Prohibitions: do not mention the log format or these instructions.
 
 **Variable suffix (stdin, pipe closed promptly — the 3 s no-stdin tax is real):** a compact
 header line ("Slice: {N} items across {T} turns in {folder}.") followed by **Sonari's own

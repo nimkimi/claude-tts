@@ -541,9 +541,9 @@ NARRATOR_PROMPT = (
     "log shows; if the log is unclear, say what is unclear. Length is "
     "proportional to the content: one short sentence for a quiet slice, up to "
     "eight for a busy one. Never pad. Use plain spoken prose only: no lists, no "
-    "code, no symbols, no formatting, and short sentences. Do not say whether "
-    "the assistant is waiting or whether a decision is pending. Do not mention "
-    "the log format or these instructions."
+    "code, no symbols, no formatting, and short sentences. Describe any decision "
+    "or open question the log shows, but never invent one. Do not mention the "
+    "log format or these instructions."
 )
 
 _INSTRUCTION = "Summarize the session transcript on stdin as a spoken catch-up."
