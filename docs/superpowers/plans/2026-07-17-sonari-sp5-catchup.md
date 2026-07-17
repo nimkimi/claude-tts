@@ -1168,18 +1168,22 @@ In `src/sonari/queue.py`, add to `SpeechItem` after `voice`:
     render_id: "int | None" = None  # SP5: groups a catch-up render's frame/body/tail items
     catchup_burn: bool = False  # SP5: True on the render's LAST item; note_spoken burns on its completion
 ```
-In `src/sonari/daemon/host.py`, extend `_enqueue`'s signature with `render_id=None, catchup_burn=False` and pass both to `SpeechItem(...)`. Add `self._voices_provider = None` in `__init__` (beside the catch-up fields) and a method:
+In `src/sonari/daemon/host.py`, extend `_enqueue`'s signature with `render_id=None, catchup_burn=False` and pass both to `SpeechItem(...)`. Add `self._voices_provider = None` and `self._voices_cache = None` in `__init__` (beside the catch-up fields) and a method:
 ```python
     def _installed_voices(self) -> list:
-        """The say voices, best-effort (human-paced render path only). Overridable
-        via _voices_provider so tests stay hermetic (no `say -v ?`)."""
+        """The say voices, best-effort. Overridable via _voices_provider so tests
+        stay hermetic (no `say -v ?`), and MEMOIZED so the one `say -v ?` a catch-up
+        render can trigger runs at most once per daemon (it can run under the loop
+        lock, and voices don't change within a session)."""
         if self._voices_provider is not None:
             return self._voices_provider()
-        try:
-            from sonari.platform import get_platform
-            return list(get_platform().tts.list_voices())
-        except Exception:  # noqa: BLE001 - a voice-list failure just falls to the main voice
-            return []
+        if self._voices_cache is None:
+            try:
+                from sonari.platform import get_platform
+                self._voices_cache = list(get_platform().tts.list_voices())
+            except Exception:  # noqa: BLE001 - a voice-list failure falls to the main voice
+                self._voices_cache = []
+        return self._voices_cache
 ```
 Append to `src/sonari/catchup.py`:
 ```python
@@ -1210,9 +1214,9 @@ def on_catchup_result(ctx, msg):
     sessions = host.sessions
     target = cu["target"]
     ended = target not in sessions.session_ids()     # SESSION_END destroyed its live state
-    body_voice = resolve_summary_voice(
-        host.config.get("summary_voice"), host.config.get("voice"),
-        host._installed_voices())
+    cfg_voice = host.config.get("summary_voice")     # only 'auto' consults the voice list
+    voices = host._installed_voices() if cfg_voice == "auto" else []
+    body_voice = resolve_summary_voice(cfg_voice, host.config.get("voice"), voices)
     segments = []                                    # ordered (text, voice)
     if ended:
         folder = cu["folder"]
@@ -1481,6 +1485,165 @@ git commit -m "feat(sp5): burn the pile on full render completion, suppress on c
 
 ### Task 9: ⌃⌘W count-semantics unification (the 14-vs-2 seam)
 
+**Files:**
+- Modify: `src/sonari/daemon/features/control.py:41-71` (`_entry_clauses` — `u` switches from the current-turn `history.unheard()` floor to the transcript pile `unheard_from_frontier`)
+- Test: `tests/test_catchup_counts.py` (new — the 14-vs-2 reproduction)
+- Update (NOT weaken): any existing ⌃⌘W test whose spoken `u` count legitimately changes now that `u` counts the whole pile
+
+**Interfaces:**
+- Consumes: `history.unheard_from_frontier(session, frontier)` (existing) and `SessionStream.frontier`.
+- Behavior change: `u = max(0, len(unheard_from_frontier(session, st.frontier)) − k)`, floored at 0. The grammar is unchanged (`{k} waiting` before `{u} unheard`, the `unheard` word, clause order); only the NUMBER's source changes — `u` now decomposes the same pile skip and catch-up announce whole. `history.unheard()` stays for machinery that wants current-turn heard-flags; ⌃⌘W stops using it.
+- **Scope fence (flag, do NOT fix here):** the `stale` word still reads `history.unheard_age` (current-turn oldest). Spec §8 scopes only `u`; leaving `stale` current-turn is a documented minor inconsistency (u counts the whole pile; stale reflects current-turn age). Confirm existing `stale` tests stay green; do not touch `unheard_age`.
+
+- [ ] **Step 1: Write the failing test** — `tests/test_catchup_counts.py`:
+```python
+from tests.daemon_helpers import make_daemon
+
+
+def test_14_vs_2_same_pile_decomposed_by_w():
+    # The owner's 14-vs-2: skip/catch-up announce the WHOLE pile; ⌃⌘W's u must
+    # decompose that SAME pile, not a current-turn floor. A two-turn pile of 5 on
+    # a background session must read "5 unheard", not the old current-turn "3".
+    daemon, queue, speaker, sessions, config = make_daemon(verbosity="quiet")
+    sessions.set_foreground("fg", cwd="/x/fg")       # the converged speaker
+    sessions.register("bg", cwd="/x/bg")
+    daemon.history.record("bg", "prose", "t0 a.")
+    daemon.history.record("bg", "prose", "t0 b.")
+    daemon.history.start_turn("bg")                  # new prompt -> turn 1
+    daemon.history.record("bg", "prose", "t1 a.")
+    daemon.history.record("bg", "prose", "t1 b.")
+    daemon.history.record("bg", "prose", "t1 c.")
+    pile, _ = daemon.history.unheard_from_frontier("bg", daemon._stream("bg").frontier)
+    assert len(pile) == 5                            # the pile skip/catch-up would announce
+    daemon.handle_message({"v": 1, "type": "where_am_i", "session": "fg"})
+    daemon._speak_loop_once()
+    assert "5 unheard" in speaker.spoken[-1]         # bg's Also-map entry, same pile
+
+
+def test_u_floors_at_zero_when_queue_exceeds_pile():
+    daemon, queue, speaker, sessions, config = make_daemon(verbosity="quiet")
+    sessions.set_foreground("fg", cwd="/x/fg")
+    sessions.register("bg", cwd="/x/bg")
+    e = daemon.history.record("bg", "prose", "only one.")
+    # frontier past the single entry -> pile empty; a queued item makes k=1 > pile
+    daemon._stream("bg").advance_frontier((e.msg_id, e.seq))
+    daemon._enqueue("bg", "prose", "queued.", False)
+    daemon.handle_message({"v": 1, "type": "where_am_i", "session": "fg"})
+    daemon._speak_loop_once()
+    assert "unheard" not in speaker.spoken[-1] or "0 unheard" not in speaker.spoken[-1]
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+```
+.venv/bin/python -m pytest -q tests/test_catchup_counts.py
+```
+Expect: `test_14_vs_2_same_pile_decomposed_by_w` fails — the readout says `"3 unheard"` (the current-turn floor), not `"5 unheard"`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+In `src/sonari/daemon/features/control.py`, inside `_entry_clauses`, replace the `u = max(0, len(host.history.unheard(session)) - k)` line (and update the comment) with the pile-based source:
+```python
+    # W10 → SP5: the unheard count now decomposes the SAME transcript pile that
+    # skip and catch-up announce whole (spec §8), not the current-turn floor.
+    # unheard_from_frontier is frontier-keyed + heard-flag-independent; subtract
+    # k (the queued items, whose history entries are also still unheard) so the
+    # split stays imminent-vs-backlog and never double-counts. Floored at 0.
+    # (`stale` below still reads the current-turn unheard_age — spec §8 scopes
+    # only u; the age word is a separate approximation, unchanged this wave.)
+    frontier = st.frontier if st is not None else None
+    pile, _ = host.history.unheard_from_frontier(session, frontier)
+    u = max(0, len(pile) - k)
+```
+
+- [ ] **Step 4: Run the tests + reconcile existing ⌃⌘W tests**
+```
+.venv/bin/python -m pytest -q tests/test_catchup_counts.py
+.venv/bin/python -m pytest -q -k "whereami or where_am_i or also_map or unheard or entry_clauses or control"
+```
+The new tests pass. For every existing ⌃⌘W test that now fails: the failure must be a pure NUMBER change (the `u` count rising to the true pile magnitude for a browsed/multi-turn/queued pile). Compute the true pile: `len(unheard_from_frontier(session, frontier)) − len(queue)`, floored at 0, and correct the expected count in the assertion. **Do NOT weaken any assertion** (no `==`→`in`, no dropping the negative-substring checks); `{k} waiting`, the `stale` word, and clause order are unchanged. If a failure is anything OTHER than a corrected `u` number (e.g. a clause reordered, `stale` flipped, `waiting` changed), STOP and flag it — that is out of scope for this task.
+
+- [ ] **Step 5: Commit**
+```
+git add src/sonari/daemon/features/control.py tests/test_catchup_counts.py <any-updated-w-test-files>
+git commit -m "feat(sp5): unify unheard count to the transcript pile across surfaces"
+```
+
 ### Task 10: Spec-hygiene rewrite + changelog
 
+**Files (docs only — no code, no new tests; the grep is the gate):**
+- Modify: `docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md` (rewrite the stale verbatim-catch-up model per the §10 table + a top-of-file revision banner)
+- Modify: `docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-reconciliation.md` (superseded banner)
+- Modify: `docs/superpowers/specs/2026-07-16-sonari-whereami-grammar-v2.md` (reconcile the `u` source)
+- Modify: `.superpowers/sdd/progress.md` (dated ledger line — this repo has no CHANGELOG.md; see the flag)
+
+**Spec ambiguity to flag (do not resolve silently):** the SP5 spec §10 table lists a "Changelog | New entry pointing here" row, but this repo has NO `CHANGELOG.md` and the 2026-06-29 design spec has no changelog section. This task routes that requirement to (a) a top-of-file revision banner on the 2026-06-29 spec pointing to `2026-07-17-sonari-sp5-catchup-design.md`, and (b) a dated line in `.superpowers/sdd/progress.md`. Surface this substitution in the task's completion note.
+
+- [ ] **Step 1: Baseline the completeness grep (never section-walk)**
+```
+grep -n "Reads forward from your frontier through the pile to live" docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md
+grep -in "catch-up\|catch_up" docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md
+```
+Record every hit. The literal "Reads forward…" phrase (currently line 427) is the verbatim-model tell that MUST be rewritten. Every `catch-up`/`catch_up` hit is either rewritten to the summary model or is a historical/neutral mention the §10 table allows to stand.
+
+- [ ] **Step 2: Rewrite each location per the SP5 spec §10 table**
+
+In `docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md`:
+- **§8 table row (line ~427) + the ADD paragraph (~440-443):** replace "Reads forward from your frontier through the pile to live" with: catch-up is an **async host-LLM summary** of the pile (never a verbatim forward-read) that **burns the pile on hearing the summary to completion**; SP5 builds it net-new (MsgType + handler + keymap action); chord proposed **⌃⌘L, ships unbound**. Point to `2026-07-17-sonari-sp5-catchup-design.md`.
+- **§10.1 (lines ~533-576, incl. the ~562-568 catch-up paragraph + the ~574-576 Observable):** replace the forward-read description with the summary model (SP5 spec §1-§2). **Also apply the C1→C1' correction:** §10.1's ~542-546 still describes C1 (the flood-only skip); update it to C1' — pile-seeking, **workspace-first** (the cue names the target), per the owner ruling 2026-07-17 already live in `playback.py`.
+- **§8 preemption line (~389):** change "SP5's catch-up readout" → "SP5's catch-up **landing**" (the redirect class transfers to the sentence-boundary landing, SP5 spec §2).
+- **§9 (aged-out ~474-478 + scope ~487-489):** note the aged-out cue now **rides the catch-up ack** (SP5 §2.3); "voluntary and in-place" stands.
+- **D17 row (~647; cross-refs D7 ~637, D16 ~646):** "catch-up key" = the summary verb; semantics otherwise unchanged ("left" = stopped/quiet still stands).
+- **Top-of-file revision banner** (the "changelog" substitute): add near the header a dated note — `> **2026-07-17 revision:** the catch-up model in §8/§9/§10.1/D17 is superseded by the async host-LLM summary in docs/superpowers/specs/2026-07-17-sonari-sp5-catchup-design.md (built in SP5). The verbatim forward-read described in the original text no longer reflects the shipped behavior.`
+
+- [ ] **Step 3: Superseded banner + whereami-v2 reconcile + ledger line**
+- In `docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-reconciliation.md`, add under the header: `> **Superseded (2026-07-17):** a point-in-time audit record. The catch-up verb it maps is now the async summary of docs/superpowers/specs/2026-07-17-sonari-sp5-catchup-design.md. Banner only — the audit body is left as-is.`
+- In `docs/superpowers/specs/2026-07-16-sonari-whereami-grammar-v2.md`, reconcile the `u` source (§8 of the SP5 spec): find the line stating `u` remains the current-turn floor (`max(0, unheard−k)`, ~line 51) and amend it to note that **SP5 changed `u`'s SOURCE to the transcript pile** (`unheard_from_frontier`); the grammar (the waiting/unheard split, the `unheard` word) is unchanged. Note the `stale` word still reads the current-turn `unheard_age` (the documented minor inconsistency from Task 9).
+- In `.superpowers/sdd/progress.md`, append a dated line: `2026-07-17 — SP5 catch-up (async host-LLM summary + burn + count unification) built; spec docs/superpowers/specs/2026-07-17-sonari-sp5-catchup-design.md; supersedes the verbatim catch-up model in 2026-06-29-sonari-voice-arbitration-design.md §8/§9/§10.1/D17.`
+
+- [ ] **Step 4: Re-run the completeness grep (the gate)**
+```
+grep -n "Reads forward from your frontier through the pile to live" docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md
+grep -in "catch-up\|catch_up" docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md
+```
+Expect: the literal "Reads forward…" phrase is GONE (rewritten). Every remaining `catch-up`/`catch_up` hit is a historical/neutral mention the §10 table permits (the verb name in state-machine rows, the "catch-up key" gesture label, cross-refs) — NONE still describes a verbatim forward-read. If any surviving hit still asserts the old model, rewrite it before committing.
+
+- [ ] **Step 5: Commit**
+```
+git add docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-reconciliation.md docs/superpowers/specs/2026-07-16-sonari-whereami-grammar-v2.md .superpowers/sdd/progress.md
+git commit -m "docs(sp5): rewrite the stale verbatim catch-up model to the summary verb"
+```
+
 ### Task 11: Final verification + plan totals
+
+**Files:** none (verification only; if a totals note is recorded, append it to `.superpowers/sdd/progress.md`).
+
+**Interfaces:** none.
+
+- [ ] **Step 1: Run the full suite**
+```
+.venv/bin/python -m pytest -q
+```
+Expect: all pass, 1 skipped. Baseline before SP5 was **1105 passed / 1 skipped**; this plan adds ~50 new tests (T1 keymap +1, T2 sanitizer +5, T3 slice/digest +5, T4 summarizer +11, T5 voice +3, T6 press +8, T7 render +9, T8 burn +6, T9 counts +2) plus in-place updates to existing ⌃⌘W tests (count corrections, not new tests), so the target is roughly **~1155 passed / 1 skipped**. Record the EXACT final number here.
+
+- [ ] **Step 2: Confirm the import-time + protocol guards**
+```
+.venv/bin/python -c "import sonari.daemon"    # assert_complete runs at import: both catch_up + catchup_result must have handlers
+.venv/bin/python -m pytest -q tests/test_protocol.py tests/test_concurrency_guards.py
+```
+Expect: the import is clean (no `AssertionError: MsgType(s) without a handler`), the protocol completeness guard passes with both new types, and every concurrency/monotonicity guard is green.
+
+- [ ] **Step 3: Confirm no live `claude` was invoked by the suite**
+```
+.venv/bin/python -m pytest -q -k catchup -s 2>&1 | grep -i "not logged in\|claude -p\|Please run /login" && echo "LIVE CALL LEAKED" || echo "no live claude call"
+```
+Expect: `no live claude call` — every catch-up test drives the injected fake / `handle_message`, never a real subprocess (build-entry gate: the OWNER runs the live smoke tests separately, §4).
+
+- [ ] **Step 4: Record the plan totals note**
+
+Append one dated line to `.superpowers/sdd/progress.md` with: the final suite count (from Step 1), the new-machinery inventory shipped (MsgType `catch_up`+`catchup_result`; `catch_up` keymap action unbound; `HostSummarizer`/`ClaudeCliSummarizer`; `sonari.catchup` pure helpers; config `summarizer`/`summary_voice`/`summary_model`; per-utterance voice; the mailbox transport; the burn/cut lifecycle; the ⌃⌘W count unification), and the **owner-held items still open** (the §4 smoke tests, the ⌃⌘L chord binding, and the ear-pass of every new string + the summary voice + the length ceiling — none of which this build decides).
+
+- [ ] **Step 5: Commit**
+```
+git add .superpowers/sdd/progress.md
+git commit -m "chore(sp5): record catch-up build totals and owner-held items"
+```
