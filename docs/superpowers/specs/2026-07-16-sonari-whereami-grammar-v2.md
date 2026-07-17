@@ -48,7 +48,12 @@ Roster: 1 board (2 unheard) · 2 jam (voice+keyboard, playing) · 3 hackimi (5 u
 
 - A folder literally named like a role word ("unheard", "muted"…) stays positionally parseable (first token after the digit is always the folder); no guard built — the owner controls his folder names.
 - Session numbers >9 are spoken as-is (multi-digit identifiers; the ≤9 dial keys are the common case; folder-only fallback rejected as YAGNI).
-- `u` remains the ratified current-turn floor (`max(0, unheard−k)`); `stale` reads the oldest unheard entry's stamp as an approximation of pile age.
+- `u` keeps the ratified floor shape (`max(0, unheard−k)`), but **SP5 changed its SOURCE** to the
+  transcript pile (`unheard_from_frontier`, cross-turn, frontier-keyed) instead of the current-turn
+  `history.unheard()` — the grammar (the waiting/unheard split, the `unheard` word) is unchanged, only
+  the number's provenance moved (`2026-07-17-sonari-sp5-catchup-design.md` §8). `stale` still reads the
+  current-turn `unheard_age` as an approximation of pile age — the documented minor inconsistency from
+  Task 9 (not reconciled by SP5).
 
 ## Unchanged / re-affirmed
 

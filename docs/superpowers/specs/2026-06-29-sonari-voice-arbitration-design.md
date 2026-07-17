@@ -66,6 +66,10 @@ phrase) are left as record.
 are a primary teleport handle relying on a once-only registration cue; the cheap wave's `⌃⌘W` count work
 and any future re-announce affordance are the teaching dependency.
 
+> **2026-07-17 revision:** the catch-up model in §8/§9/§10.1/D17 is superseded by the async host-LLM
+> summary in docs/superpowers/specs/2026-07-17-sonari-sp5-catchup-design.md (built in SP5). The verbatim
+> forward-read described in the original text no longer reflects the shipped behavior.
+
 ## 1. Why this spec exists
 
 The "which session do I hear, and when" logic was never specified. It accreted as features plus
@@ -257,8 +261,8 @@ for non-muted sessions. The specifically stopped session **stays muted** until y
 **Starting it is a *quiet resume* (D2, 2026-07-16):** it un-mutes and flows only **post-start** output;
 the **pre-start pile stays behind the frozen frontier** and is absorbed later with the catch-up key
 (§10.1), **not auto-drained on start**. While stopped, its output **piles** (dinging on
-turn-completion); you absorb that pile with the **catch-up key** (§10.1) — reading from the frozen
-marker forward, never an auto-blast. Navigating *to* a still-muted session raises its
+turn-completion); you absorb that pile with the **catch-up key** (§10.1) — an async summary from the
+frozen marker forward, never an auto-blast. Navigating *to* a still-muted session raises its
 window (it becomes the workspace) but it **stays silent** until you start it (`⌃⌘S`) — navigation
 never un-mutes; only an explicit start does.
 
@@ -386,7 +390,7 @@ past their markers). This is the contract Pass 2 checks the queue implementation
   **(a) Barge-in class** — a transient *speaking* cue (⌃⌘W, a jump / where-am-I announcement, chooser
   step-previews): cuts the current utterance, speaks at the front, then the interrupted item
   **re-queues at the front** and resumes from that item's start. **(b) Preemption class** — a deliberate
-  redirect (submit / jump / chooser commit, and SP5's catch-up readout): cuts but **does not resume** the
+  redirect (submit / jump / chooser commit, and SP5's catch-up landing): cuts but **does not resume** the
   interrupted item. Because the frontier's unit is the whole item and it advances only on **full
   completion** (§10, R3), a mid-item cut of *either* class leaves the frontier untouched — no rollback is
   ever needed. **Rate (⌃⌘+/−) does not cut** — immediacy is its feedback.
@@ -424,7 +428,7 @@ Pass 2's first job here is to confirm them against the real bindings before trus
 | Submit a typed prompt (R5, R6) | *(type + enter)* | **KEEP** | A **human-typed** submit preempts (R5); an autonomous session's own submit does **not** (R6) — it dings + queues. Workspace already there. |
 | Within-response nav / hear-again (R3) | ⌃⌘← / → | **KEEP** | Moves within the transcript; ← re-reads (marker-aware). |
 | Between-response nav (R3) | ⌃⌘↑ / ↓ | **KEEP** | ⌃⌘↓ = safe single-step return to newest / live edge — a browse gesture that **never advances the frontier** (B1, 2026-07-16). Burning a pile is a **distinct pile-skip gesture**, not this key (§10.1). |
-| Catch up the focused session (§10) | catch-up key (**SP5** builds it net-new) | **ADD** | Reads forward from your frontier through the pile to live — the bridge for navigable (stopped / quiet) sessions. The new model makes it first-class. Legacy `catch_up` was deleted end-to-end (`b4b3be1`); SP5 builds a net-new MsgType + handler + keymap action + co-designed chord. |
+| Catch up the focused session (§10) | catch-up key, chord proposed **⌃⌘L**, ships unbound (**SP5** builds it net-new) | **ADD** | An **async host-LLM summary** of the pile — never a verbatim forward-read — the bridge for navigable (stopped / quiet) sessions; hearing it to completion **burns the pile**. The new model makes it first-class. Legacy `catch_up` was deleted end-to-end (`b4b3be1`); SP5 builds a net-new MsgType + handler + keymap action. Full model: `2026-07-17-sonari-sp5-catchup-design.md`. |
 | Go to the waiting decision (R9) | ⌃⌘D | **KEEP** | How you reach a permission prompt that (by R9) waits its turn; it's a go-there (raises). |
 | Approve / deny a permission (R10) | ⌃⌘⏎ / ⌃⌘⎋ | **KEEP** | Targets the workspace's pending decision; wrong target → error tone (fail-closed). |
 | Where am I (R7, R8) | ⌃⌘W | **CHANGE** | Now also reports the **voice state** (flowing / quiet-hold / stopped-all) so a deliberate stop is never a silent surprise. |
@@ -439,7 +443,9 @@ ambient, R8 identity, R11 restart cue) need no key — no behavior is left witho
   **superseded** by the full arbitration (R1–R6) — remove it, don't preserve it.
 - **ADD (real):** the **catch-up key** (row above) — first-class in the new model; **SP5 builds it
   net-new** (legacy `catch_up` was deleted end-to-end, `b4b3be1` — a net-new MsgType + handler + keymap
-  action + co-designed chord, *not* a reuse). It's how you absorb a navigable pile. **Skip** is a
+  action, chord proposed **⌃⌘L**, ships unbound, *not* a reuse). It's an **async host-LLM summary** of
+  the navigable pile (never a verbatim forward-read) that **burns the pile on hearing the summary to
+  completion** — full model: `2026-07-17-sonari-sp5-catchup-design.md`. **Skip** is a
   **distinct pile-skip gesture** (B1) — **not ⌃⌘↓**, which stays the safe single-step return.
 - **No hotkey is a cut candidate** — the cockpit binding *set* is largely correct; the rebuild is the
   arbitration *semantics* behind the keys (the CHANGE rows), not the key inventory.
@@ -472,10 +478,11 @@ sessions go navigable) is parked (§15) — a Pass-2 / product call.
 window* (a bounded, evicting store — default ~200 items — not persisted across restart; durable
 persistence is SP6, R11), you can get the full captured detail of anything still in the window: navigate
 to it, raise verbosity, or switch a quiet session to everything. **Aging out fails LOUD, never silent:**
-when a forward read or catch-up reaches for content older than the oldest surviving entry, a distinct
-spoken **"earlier output aged out"** cue plays and the read resumes at the oldest surviving entry — the
-window is finite, but its edge is always *announced*, never a silent mid-pile start. Within the window,
-a quiet stretch is never a blind spot.
+when a forward read (keep-going) reaches for content older than the oldest surviving entry, a distinct
+spoken **"earlier output aged out"** cue plays and the read resumes at the oldest surviving entry. For
+**catch-up** (SP5, an async summary rather than a forward read), the same cue rides the **ack** and the
+summary covers what survives (SP5 spec §2.3) — the window is finite, but its edge is always *announced*,
+never a silent mid-pile start. Within the window, a quiet stretch is never a blind spot.
 
 **Scope of the auto-readout layer.** R1 (speaker / ding), R3 (read forward from the frontier), R4
 (keep-going), and the invariant's "keeps it going on its own" describe the **auto-readout** of
@@ -539,11 +546,14 @@ away** — *not* by how big the pile is (no fuzzy threshold):
   active thread, and when that idles it rolls to other **active** sessions and catches them up from
   their frontiers — contiguous, **no gaps**, hands-free. Small real-time piles drain smoothly; a rare
   big one you drop with the **distinct pile-skip gesture** (B1 — a confirmatory skip that **announces
-  its count**, *not* the safe ⌃⌘↓; chord co-designed at SP5). **Under divergence** (voice flowing and
-  speaker ≠ workspace), the pile-skip targets the **SPEAKER** — it advances the flooding speaker's
-  frontier to live and **does not move your window** (Fork C = C1, 2026-07-16), so "skip the flooder,
-  keep flowing" works hands-free. This is safe **because** a passive keep-going switch is now audible
-  (the pre-roll spearcon, R8/B2) — you can hear which session the skip will hit.
+  its count**, *not* the safe ⌃⌘↓; chord co-designed at SP5). **Pile-seeking, workspace-first** (Fork
+  C = **C1'**, supersedes C1, 2026-07-17 owner ruling): the pile-skip targets the **workspace** session
+  whenever it has a pile; only when the workspace is clean does it fall through to a flowing, diverged
+  **speaker's** pile (the original C1 flood remedy, preserved) — it advances the target's frontier to
+  live and **does not move your window**, and the confirmatory cue **names the target** ("skipping {N}
+  items in {folder}"), so "skip what's under my hands, or the flooder if I'm clean" works hands-free.
+  This is safe **because** a passive keep-going switch is now audible (the pre-roll spearcon, R8/B2) —
+  you can hear which session the skip will hit.
 - **Navigable — after a deliberate stop / quiet.** A session you **stopped** (⌃⌘S / ⌃⌘M) or that's in
   **quiet** is **not** auto-drained; its output piles (dinging on turn-completion), and you pull it
   with the **catch-up key**. This is the "I stepped away and several piled up" case — no flood, you
@@ -559,21 +569,26 @@ whole pile) or **wait** (navigable) — there is no "read just the new bit." Con
 rigor (navigable) therefore genuinely trade off; the deliberate stop/quiet is the clean switch between
 them.
 
-**The catch-up key** (a net-new gesture **SP5** builds — MsgType + handler + keymap action + co-designed
-chord; the legacy `catch_up` was deleted end-to-end, `b4b3be1`, and is *not* reused) reads **forward
-from your frontier** on the focused session, through its whole pile *and anything that arrived while you
-were away*, until you reach live. **"Following again" means your ear is caught up — not that the session
-rejoined auto-flow:** a catch-up read advances the frontier to the live edge but does **not** clear the
-stopped / muted flag (R7, R-5). After catch-up, new turns still **ding + pile (still muted)** until an
-explicit `⌃⌘S`-start un-mutes and resumes auto-flow. It **can never lose its place within the window**,
-because the frontier moves *only when you hear content* (R3), never when new content arrives — new output
-only extends the pile *beyond* the frontier; if the pile's tail has **aged out** of the bounded window,
-the read fails LOUD ("earlier output aged out", §9) and resumes at the oldest surviving entry. The pile
-is now surfaced by the single-press `⌃⌘W` Also-map ("{k} waiting", chooser spec §7).
+**The catch-up key** (a net-new gesture **SP5** builds — `MsgType.catch_up` + handler + keymap action,
+chord proposed **⌃⌘L**, ships unbound; the legacy `catch_up` was deleted end-to-end, `b4b3be1`, and is
+*not* reused) is an **async host-LLM summary** of the focused session's pile — **never a verbatim
+forward-read**. Pressing it pins the pile at that instant, speaks an immediate deterministic **ack**
+carrying the ground-truth item count, then — prepared out of band — lands a summary voiced at a sentence
+boundary. **"Following again" means your ear is caught up — not that the session rejoined auto-flow:**
+hearing the summary **to completion burns the pile**, advancing the frontier to the pinned slice edge,
+but does **not** clear the stopped / muted flag (R7, R-5). After catch-up, new turns still **ding + pile
+(still muted)** until an explicit `⌃⌘S`-start un-mutes and resumes auto-flow. Content that arrives
+*during* preparation stays unheard and joins the **next** pile (D17's no-gaps rule preserved) — it can
+never lose its place within the window, because the frontier moves *only when you hear content* (R3). If
+the pinned slice's tail has **aged out** of the bounded window, the aged-out cue rides the **ack** (§9)
+and the summary covers what survives. The pile is now surfaced by the single-press `⌃⌘W` Also-map ("{k}
+waiting", chooser spec §7). Full model (control flow, trust design, digest floor, failure handling):
+`2026-07-17-sonari-sp5-catchup-design.md`.
 
 > **Observable:** you ⌃⌘S-stop session B (it keeps working) → B's new turns ding + pile, the voice does
-> not read them; you focus B and press catch-up → it reads from B's frontier forward through the pile to
-> live. Meanwhile session C, which you never stopped, is still auto-flowed when the voice is free.
+> not read them; you focus B and press catch-up → an immediate ack ("Catching up 4 items in B") then, a
+> few seconds later, a spoken summary of what happened; hearing it to completion burns the pile.
+> Meanwhile session C, which you never stopped, is still auto-flowed when the voice is free.
 
 ## 11. Sound language (reuse, not invent)
 
@@ -644,7 +659,7 @@ Recorded so Pass 2 does not re-litigate, and so a reversal sweeps every dependen
 | D14 | Marker ↔ navigation | **Two positions — a monotonic frontier + a separate browse cursor** | Reviewing must never re-queue everything after the point you went back to. |
 | D15 | How often a background session dings | **On turn-completion** (= the existing turn-done earcon) | You monitor by "a session finished a thing"; per-chunk dinging machine-guns. |
 | D16 | Auto-flow vs navigable backlog (the sweet spot) | **A (auto-flow) by default; B (navigable + catch-up) after a deliberate stop / quiet** (§10.1) | Convenience normally, rigor for the rare "away + multiple piles." No gaps were allowed, so a behind session can only flood or wait — stop/quiet picks "wait." |
-| D17 | What "left" means + the catch-up key | **"Left" = stopped / quiet (NOT merely switched focus); a first-class catch-up key** (SP5 builds it net-new — legacy `catch_up` deleted `b4b3be1`) | The frontier moves only by *hearing*, so catch-up never loses position; switching focus keeps the other session active / auto-flowed. |
+| D17 | What "left" means + the catch-up key | **"Left" = stopped / quiet (NOT merely switched focus); a first-class catch-up key** (SP5 builds it net-new — legacy `catch_up` deleted `b4b3be1`; the key is now the async summary verb, §10.1) | The frontier moves only by *hearing*, so catch-up never loses position; switching focus keeps the other session active / auto-flowed. |
 
 ## 14. Vetoable defaults (chosen by inference, easy to flip in Pass 2)
 

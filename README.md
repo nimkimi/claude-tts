@@ -12,6 +12,7 @@ off.
 - **Per-decision earcons** — a distinct sound the moment a question, plan, permission, or error appears.
 - **Selection by number** — answer prompts with the option's number; no key injection.
 - **Global hotkeys** — stop, repeat, skip, jump-to-decision, catch-up, rate, verbosity, re-read (work mid-speech).
+  - **Catch-up** summarizes a session via your own logged-in coding-agent CLI (no separate API key). It draws from that subscription's usage — roughly 16–32k tokens a press, far cheaper on repeats within the hour — and falls back to a plain last-line digest when the summary is unavailable.
 - **Self-contained** — runs on the macOS system Python; no `pip`, no third-party packages.
 
 ## Requirements

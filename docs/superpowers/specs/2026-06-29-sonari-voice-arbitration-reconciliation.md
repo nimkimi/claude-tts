@@ -1,5 +1,9 @@
 # Sonari — Voice-Arbitration Reconciliation Reference (Pass 2 — RECONCILE)
 
+> **Superseded (2026-07-17):** a point-in-time audit record. The catch-up verb it maps is now the async
+> summary of docs/superpowers/specs/2026-07-17-sonari-sp5-catchup-design.md. Banner only — the audit
+> body is left as-is.
+
 - **Date:** 2026-06-29
 - **Branch:** `design/voice-arbitration` · **Baseline:** `836 passed, 1 skipped` (this branch, not 858 — that was the Phase-1 branch)
 - **Oracle (the WHAT):** `docs/superpowers/specs/2026-06-29-sonari-voice-arbitration-design.md` @ `36b5cfb` (§1–§16 + §10.1)
