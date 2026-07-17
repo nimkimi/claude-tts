@@ -324,7 +324,7 @@ git commit -m "feat(sp5): add slice renderer and deterministic digest builder"
 
 **Interfaces:**
 - Produces:
-  - `SummarizeResult` with `.is_ok: bool`, `.text: str`, `.reason: str`; classmethods `SummarizeResult.ok(text)` / `SummarizeResult.failed(reason)` (reason ∈ `unavailable|logged_out|timeout|error|empty`).
+  - `SummarizeResult` with `.is_ok: bool`, `.text: str`, `.reason: str`; classmethods `SummarizeResult.ok(text)` / `SummarizeResult.failed(reason)` (reason ∈ `unavailable|logged_out|timeout|error` — the spoken fallback is identical for all; an empty/whitespace summary is caught downstream by the sanitizer, §Task 2).
   - `HostSummarizer` protocol: `summarize(slice_text: str, timeout_s: float, cancel=None) -> SummarizeResult` (`cancel` is a `threading.Event` set by the daemon to kill an in-flight child).
   - `ClaudeCliSummarizer(popen=subprocess.Popen, model="haiku", which=shutil.which, env=None)` — the shipped adapter (DI via injected `popen`/`which`, `env` defaults to `os.environ`).
   - `select_summarizer(config, which=shutil.which, popen=subprocess.Popen) -> HostSummarizer | None` — `off`→None, `auto`→adapter iff `which("claude")`, `claude`→adapter.
@@ -342,31 +342,50 @@ from sonari.summarizer import (
 
 
 class _FakeProc:
-    def __init__(self, out, returncode=0):
-        self._out = out
+    def __init__(self, out, err="", returncode=0):
         self.returncode = returncode
         self.pid = 4242
         self.stdin = io.StringIO()
         self.stdout = io.StringIO(out)
+        self.stderr = io.StringIO(err)
 
     def poll(self):
         return self.returncode      # already complete
 
-    def communicate(self, input=None, timeout=None):
-        return (self._out, "")
-
 
 class _FakePopen:
-    def __init__(self, out, returncode=0):
-        self._out, self._rc, self.calls = out, returncode, []
+    def __init__(self, out, err="", returncode=0):
+        self._out, self._err, self._rc, self.calls = out, err, returncode, []
 
     def __call__(self, argv, **kwargs):
         self.calls.append({"argv": argv, **kwargs})
-        return _FakeProc(self._out, self._rc)
+        return _FakeProc(self._out, self._err, self._rc)
+
+
+def _stream(*events):
+    """Build a stream-json stdout blob (one JSON object per line)."""
+    return "\n".join(json.dumps(e) for e in events)
+
+
+def _assistant(*blocks):
+    return {"type": "assistant", "message": {"content": list(blocks)}}
+
+
+def _text(t):
+    return {"type": "text", "text": t}
+
+
+def _thinking(t="mulling"):
+    return {"type": "thinking", "thinking": t}
+
+
+def _result(subtype="success", is_error=False):
+    return {"type": "result", "subtype": subtype, "is_error": is_error, "num_turns": 1}
 
 
 def _ok(text="All tests passed."):
-    return json.dumps({"is_error": False, "result": text})
+    # Real shape: a thinking block, then the clean text block, then a result event.
+    return _stream(_assistant(_thinking(), _text(text)), _result())
 
 
 def test_child_env_scrubs_both_api_keys_and_inherits_the_rest():
@@ -374,7 +393,7 @@ def test_child_env_scrubs_both_api_keys_and_inherits_the_rest():
            "PATH": "/usr/bin", "HOME": "/home/nima"}
     fake = _FakePopen(_ok())
     s = ClaudeCliSummarizer(popen=fake, which=lambda n: "/usr/bin/claude", env=env)
-    s.summarize("Slice: 1 items.\nassistant: hi.", timeout_s=5)
+    s.summarize("Slice: 1 item.\nassistant: hi.", timeout_s=5)
     child_env = fake.calls[0]["env"]
     assert "ANTHROPIC_API_KEY" not in child_env
     assert "ANTHROPIC_AUTH_TOKEN" not in child_env
@@ -389,7 +408,9 @@ def test_argv_carries_flags_model_and_stable_narrator_prompt():
     argv = fake.calls[0]["argv"]
     assert argv[0] == "/c" and argv[1] == "-p"   # argv[0] = the which()-resolved path
     assert argv[argv.index("--model") + 1] == "haiku"
-    assert argv[argv.index("--output-format") + 1] == "json"
+    # stream-json + --verbose: we read the FIRST assistant text block, not .result.
+    assert argv[argv.index("--output-format") + 1] == "stream-json"
+    assert "--verbose" in argv
     assert argv[argv.index("--max-turns") + 1] == "1"
     assert NARRATOR_PROMPT in argv
     # Spec §6 non-negotiable #3 pinned: never resume/continue the user's live session.
@@ -397,31 +418,49 @@ def test_argv_carries_flags_model_and_stable_narrator_prompt():
     assert fake.calls[0]["cwd"]                  # neutral temp cwd, not the caller's
 
 
-def test_ok_result_parses_to_success_text():
-    r = ClaudeCliSummarizer(popen=_FakePopen(_ok("The build is green.")),
+def test_first_text_block_is_the_summary():
+    out = _ok("The build is green.")
+    r = ClaudeCliSummarizer(popen=_FakePopen(out),
                             which=lambda n: "/c", env={}).summarize("x", timeout_s=5)
     assert r.is_ok and r.text == "The build is green."
 
 
-def test_nonzero_exit_logged_out_is_detected():
-    out = json.dumps({"is_error": True, "result": "Not logged in · Please run /login"})
+def test_error_max_turns_with_text_is_still_success():
+    # The load-bearing case: the model produced a clean summary, then the harness
+    # aborted with error_max_turns (it wanted to keep going). We ALREADY have the
+    # answer -> success, ignore the error subtype and the non-zero exit.
+    out = _stream(_assistant(_thinking(), _text("All 1105 tests passed.")),
+                  _result(subtype="error_max_turns", is_error=True))
     r = ClaudeCliSummarizer(popen=_FakePopen(out, returncode=1),
+                            which=lambda n: "/c", env={}).summarize("x", timeout_s=5)
+    assert r.is_ok and r.text == "All 1105 tests passed."
+
+
+def test_first_text_block_wins_over_later_pollution():
+    # A later reflection turn ("You're right...") must NOT be what we speak.
+    out = _stream(
+        _assistant(_thinking(), _text("Tests passed and the build is green.")),
+        _assistant(_thinking(), _text("You're right, I was summarizing the transcript.")),
+        _result())
+    r = ClaudeCliSummarizer(popen=_FakePopen(out),
+                            which=lambda n: "/c", env={}).summarize("x", timeout_s=5)
+    assert r.is_ok and r.text == "Tests passed and the build is green."
+
+
+def test_logged_out_no_text_block_is_detected():
+    # Logged-out fails before any assistant text; the message may land on stderr.
+    r = ClaudeCliSummarizer(popen=_FakePopen("", err="Not logged in · Please run /login",
+                                             returncode=1),
                             which=lambda n: "/c", env={}).summarize("x", timeout_s=5)
     assert not r.is_ok and r.reason == "logged_out"
 
 
-def test_is_error_true_maps_to_error_reason():
-    out = json.dumps({"is_error": True, "result": "overloaded"})
-    r = ClaudeCliSummarizer(popen=_FakePopen(out), which=lambda n: "/c",
-                            env={}).summarize("x", timeout_s=5)
+def test_no_text_block_maps_to_error():
+    # Only a thinking block + an error result, no text -> failure (=> digest).
+    out = _stream(_assistant(_thinking()), _result(subtype="error", is_error=True))
+    r = ClaudeCliSummarizer(popen=_FakePopen(out, returncode=1),
+                            which=lambda n: "/c", env={}).summarize("x", timeout_s=5)
     assert not r.is_ok and r.reason == "error"
-
-
-def test_empty_result_maps_to_empty_reason():
-    out = json.dumps({"is_error": False, "result": "   "})
-    r = ClaudeCliSummarizer(popen=_FakePopen(out), which=lambda n: "/c",
-                            env={}).summarize("x", timeout_s=5)
-    assert not r.is_ok and r.reason == "empty"
 
 
 def test_missing_binary_is_unavailable_without_spawning():
@@ -441,9 +480,8 @@ class _HangingPopen:
 
         class _P:
             pid, returncode = 4243, None
-            stdin, stdout = io.StringIO(), io.StringIO("")
+            stdin, stdout, stderr = io.StringIO(), io.StringIO(""), io.StringIO("")
             poll = staticmethod(lambda: None)          # never completes
-            communicate = staticmethod(lambda input=None, timeout=None: ("", ""))
         return _P()
 
 
@@ -540,24 +578,45 @@ def _kill_group(proc) -> None:
             pass
 
 
-def _reason_from(data) -> str:
-    result = (data.get("result") or "").lower() if isinstance(data, dict) else ""
-    return "logged_out" if ("login" in result or "logged in" in result) else "error"
+def _reason_from(raw: str) -> str:
+    low = (raw or "").lower()
+    return "logged_out" if ("login" in low or "logged in" in low) else "error"
 
 
-def _parse(out: str, returncode) -> "SummarizeResult":
-    try:
-        data = json.loads(out)
-    except (ValueError, TypeError):
-        return SummarizeResult.failed("error")
-    if not isinstance(data, dict):
-        return SummarizeResult.failed("error")
-    if returncode != 0 or data.get("is_error"):
-        return SummarizeResult.failed(_reason_from(data))
-    text = data.get("result") or ""
-    if not text.strip():
-        return SummarizeResult.failed("empty")
-    return SummarizeResult.ok(text)
+def _first_text_block(out: str) -> str:
+    """The clean summary is the FIRST non-empty assistant `text` block in the
+    stream-json output. `claude -p` is an agent harness: run past one cycle it
+    injects reflection turns that self-correct into conversational mush, and the
+    final `.result` returns that polluted turn — so we take the FIRST text block,
+    never the last (smoke-verified 2026-07-17). Preceded by a `thinking` block
+    (one think->answer cycle). Returns "" when no assistant text was produced."""
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(ev, dict) or ev.get("type") != "assistant":
+            continue
+        for block in ev.get("message", {}).get("content", []):
+            if isinstance(block, dict) and block.get("type") == "text":
+                txt = (block.get("text") or "").strip()
+                if txt:
+                    return txt
+    return ""
+
+
+def _parse(out: str, err: str, returncode) -> "SummarizeResult":
+    """Success == a non-empty first assistant text block was streamed, REGARDLESS
+    of returncode/subtype: a benign `error_max_turns` (the model wanted to keep
+    going after producing the summary) still carries the clean answer. No text
+    block => failure; the reason is scanned across stdout+stderr for logging."""
+    text = _first_text_block(out)
+    if text:
+        return SummarizeResult.ok(text)
+    return SummarizeResult.failed(_reason_from((out or "") + "\n" + (err or "")))
 
 
 class ClaudeCliSummarizer:
@@ -576,7 +635,7 @@ class ClaudeCliSummarizer:
         if resolved is None:
             return SummarizeResult.failed("unavailable")
         argv = [resolved, "-p", _INSTRUCTION, "--model", self._model,
-                "--output-format", "json", "--max-turns", "1",
+                "--output-format", "stream-json", "--verbose", "--max-turns", "1",
                 "--disallowedTools", _DISALLOWED_TOOLS,
                 "--system-prompt", NARRATOR_PROMPT]
         cwd = tempfile.mkdtemp(prefix="sonari-catchup-")
@@ -602,11 +661,18 @@ class ClaudeCliSummarizer:
                     _kill_group(proc)
                     return SummarizeResult.failed("timeout")
                 time.sleep(_POLL_S)
+            # Process has exited (poll() != None) -> both pipes are fully buffered,
+            # so these reads cannot deadlock. stderr feeds reason detection (a
+            # logged-out message can land there).
             try:
                 out = proc.stdout.read() or ""
             except (OSError, ValueError):
                 out = ""
-            return _parse(out, proc.returncode)
+            try:
+                err = proc.stderr.read() or ""
+            except (OSError, ValueError, AttributeError):
+                err = ""
+            return _parse(out, err, proc.returncode)
         finally:
             shutil.rmtree(cwd, ignore_errors=True)
 
@@ -1834,7 +1900,7 @@ git commit -m "docs(sp5): rewrite the stale verbatim catch-up model to the summa
 ```
 .venv/bin/python -m pytest -q
 ```
-Expect: all pass, 1 skipped. Baseline before SP5 was **1105 passed / 1 skipped**; this plan adds ~57 new tests (T1 keymap +1, T2 sanitizer +5, T3 slice/digest +5, T4 summarizer +10, T5 voice +3, T6 press +10 [+2 ack-before-render ordering, fix wave F3], T7 render +9 incl. +2 `insert_after` unit tests in test_queue.py, T8 burn +9 [+1 W-barge-in orphan guard, F6.9], T9 counts +2) plus in-place updates to existing ⌃⌘W tests (count corrections, not new tests), so the target is roughly **~1162 passed / 1 skipped**. These per-task counts are estimates — record the EXACT final number here after the run.
+Expect: all pass, 1 skipped. Baseline before SP5 was **1105 passed / 1 skipped**; this plan adds ~58 new tests (T1 keymap +1, T2 sanitizer +5, T3 slice/digest +5, T4 summarizer +11 [stream-json first-text-block extraction, incl. the error_max_turns-is-success + first-block-wins-over-pollution cases from the 2026-07-17 smoke fix], T5 voice +3, T6 press +10 [+2 ack-before-render ordering, fix wave F3], T7 render +9 incl. +2 `insert_after` unit tests in test_queue.py, T8 burn +9 [+1 W-barge-in orphan guard, F6.9], T9 counts +2) plus in-place updates to existing ⌃⌘W tests (count corrections, not new tests), so the target is roughly **~1163 passed / 1 skipped**. These per-task counts are estimates — record the EXACT final number here after the run.
 
 - [ ] **Step 2: Confirm the import-time + protocol guards**
 ```
