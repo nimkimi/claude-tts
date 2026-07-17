@@ -61,6 +61,14 @@ def test_preserves_operator_and_symbol_marks():
             == "The # character marks a comment.")
 
 
+def test_preserves_chained_exponentiation_operators():
+    # Two separate spaced ** tokens (Python exponentiation) must never be
+    # paired as bold delimiters — that would rewrite ** into * (multiplication).
+    assert (sanitize_summary("Compare a ** 2 to b ** 2.")
+            == "Compare a ** 2 to b ** 2.")
+    assert sanitize_summary("x ** y ** z stays.") == "x ** y ** z stays."
+
+
 def test_still_strips_paired_and_nested_emphasis():
     assert sanitize_summary("**bold *nested* bold** works.") == "bold nested bold works."
 

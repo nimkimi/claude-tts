@@ -18,9 +18,11 @@ _BARE_MARK_RUN = re.compile(r"(?:(?<=\s)|^)[*_#]{3,}(?=\s|$)")
 # a whitespace-delimited __dunder__ or _sunder_ identifier is syntactically
 # identical to underscore-bold/italic, and stripping it rewrites a fact
 # (__init__ -> init) while a stray _italic_ left intact costs only a silent
-# character in speech. The * in both guards stops matches starting mid-run.
+# character in speech. Each delimiter must be a COMPLETE mark run (the (?!\*)
+# and (?<!\*) guards): a partial backed-off match inside a run would pair two
+# spaced ** exponentiation operators as bold and rewrite ** into *.
 _PAIRED_EMPHASIS = re.compile(
-    r"(?<![A-Za-z0-9*])(\*{1,3})(?=\S)(.+?)(?<=\S)\1(?![A-Za-z0-9*])")
+    r"(?<![A-Za-z0-9*])(\*{1,3})(?!\*)(?=\S)(.+?)(?<=\S)(?<!\*)\1(?![A-Za-z0-9*])")
 _WHITESPACE = re.compile(r"\s+")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
