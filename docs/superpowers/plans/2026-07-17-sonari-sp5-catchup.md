@@ -18,7 +18,7 @@
 - **Guards green at every commit and never weakened:** the 6 concurrency/monotonicity guards must pass at every commit; existing tests are updated for new pile semantics, never weakened.
 - **Suite green at every commit:** `.venv/bin/python -m pytest -q` passes after every task's final step.
 - **Conventional commits, NO AI/tool/session mentions ever** in any commit message or code comment.
-- **Every new `MsgType` is added to `tests/test_protocol.py`'s completeness guard** (`test_msgtype_defines_no_extra_string_constants`, line 95 — the strict one) AND to `assert_complete(...)` in `src/sonari/daemon/__init__.py` (empirically required — SP4 T6 lesson).
+- **Every new `MsgType` is registered in all three completeness guards:** (1) `tests/test_protocol.py`'s `test_msgtype_defines_no_extra_string_constants` (line 95 — the strict string-constant set); (2) `tests/test_daemon_registry.py`'s `ALL_TYPES` list (~line 108, feeds `test_all_msgtypes_registered` — every listed type must have a handler); and (3) `assert_complete(...)` in `src/sonari/daemon/__init__.py` (the import-time guard). Guards (2) and (3) demand a handler, so their entries land ALONGSIDE the handler (Tasks 6/7), never in Task 1 (empirically required — SP4 T6 lesson).
 - **Build-entry gate:** this build starts only after the OWNER runs the §4 smoke tests on his machine (his quota, his go). Plan tasks NEVER run a live `claude -p`; all tests use the injected fake summarizer.
 - **No result caching, no mid-prep progress ticks, no auto-triggers** in v1 (out of scope, §14 of the spec).
 
@@ -766,7 +766,8 @@ git commit -m "feat(sp5): per-utterance voice override through the speak loop"
 **Files:**
 - Create: `src/sonari/daemon/features/catchup.py` (new feature module — the `catch_up` handler + worker + cancel; the `catchup_result` handler is added in Task 7 in this same file)
 - Modify: `src/sonari/daemon/host.py` (add `summarizer` ctor param + `_summarizer()`; the catch-up in-flight fields + `queue.Queue` inbox in `__init__`; `_drain_catchup_inbox()` called at the TOP of `_speak_loop_once`; import the new feature module)
-- Modify: `src/sonari/daemon/__init__.py:11` (add `MsgType.CATCH_UP` to `assert_complete`)
+- Modify: `src/sonari/daemon/__init__.py:11` (add `MsgType.CATCH_UP` — and close the pre-existing `MsgType.SKIP_PILE` omission — to `assert_complete`; reword the stale count comment)
+- Modify: `tests/test_daemon_registry.py:108-124` (add `_MsgType.CATCH_UP` to `ALL_TYPES` — the second real completeness guard, feeding `test_all_msgtypes_registered`)
 - Modify: `tests/daemon_helpers.py` (add `FakeSummarizer`; `make_daemon(..., summarizer=None)`)
 - Test: `tests/test_catchup_press.py` (new)
 
@@ -990,7 +991,19 @@ def _cancel_catchup(host):
         host._enqueue(dest, "prose", "Cancelled.", False,
                       mute_exempt=True, pause_exempt=True, at_front=True)
 ```
-In `src/sonari/daemon/__init__.py`, add `MsgType.CATCH_UP,` to the `assert_complete([...])` list (its handler now exists; do NOT add `CATCHUP_RESULT` yet — Task 7).
+In `src/sonari/daemon/__init__.py`, add `MsgType.CATCH_UP,` to the `assert_complete([...])` list (its handler now exists; do NOT add `CATCHUP_RESULT` yet — Task 7). While here, also insert `MsgType.SKIP_PILE,` immediately after it — a pre-existing SP4 omission (its handler is live at `playback.py:31`, so this is safe to close now), and reword the stale count comment above the list (`# ... we enumerate all 35 known keys explicitly.`) to name no count — e.g. `# ... we enumerate every known key explicitly.` The tail of the list becomes:
+```python
+    MsgType.REPEAT_LAST,
+    MsgType.SKIP_PILE,     # close the pre-existing SP4 omission (handler at playback.py:31)
+    MsgType.CATCH_UP,
+])
+```
+In `tests/test_daemon_registry.py`, add `_MsgType.CATCH_UP,` to the `ALL_TYPES` list right after `_MsgType.SKIP_PILE,` (the second real completeness guard — `test_all_msgtypes_registered` now demands CATCH_UP have a handler, which it does):
+```python
+    _MsgType.SKIP_PILE,
+    _MsgType.CATCH_UP,
+]
+```
 In `tests/daemon_helpers.py`, add the fake summarizer and the `make_daemon` seam:
 ```python
 class FakeSummarizer:
@@ -1010,13 +1023,13 @@ and change `make_daemon` to `def make_daemon(verbosity="everything", foreground=
 
 - [ ] **Step 4: Run the tests to verify they pass**
 ```
-.venv/bin/python -m pytest -q tests/test_catchup_press.py tests/test_protocol.py
+.venv/bin/python -m pytest -q tests/test_catchup_press.py tests/test_protocol.py tests/test_daemon_registry.py
 ```
-Expect: the 8 press tests pass; the import-time `assert_complete` guard passes (CATCH_UP has a handler).
+Expect: the 8 press tests pass; the import-time `assert_complete` guard passes (CATCH_UP + the newly-closed SKIP_PILE both have handlers); `test_all_msgtypes_registered` passes with CATCH_UP now in `ALL_TYPES`.
 
 - [ ] **Step 5: Commit**
 ```
-git add src/sonari/daemon/features/catchup.py src/sonari/daemon/host.py src/sonari/daemon/__init__.py tests/daemon_helpers.py tests/test_catchup_press.py
+git add src/sonari/daemon/features/catchup.py src/sonari/daemon/host.py src/sonari/daemon/__init__.py tests/test_daemon_registry.py tests/daemon_helpers.py tests/test_catchup_press.py
 git commit -m "feat(sp5): catch-up press handler, worker thread, and result mailbox"
 ```
 
@@ -1028,6 +1041,7 @@ git commit -m "feat(sp5): catch-up press handler, worker thread, and result mail
 - Modify: `src/sonari/catchup.py` (append `resolve_summary_voice`)
 - Modify: `src/sonari/daemon/features/catchup.py` (add the `on_catchup_result` handler)
 - Modify: `src/sonari/daemon/__init__.py` (add `MsgType.CATCHUP_RESULT` to `assert_complete`)
+- Modify: `tests/test_daemon_registry.py` (add `_MsgType.CATCHUP_RESULT` to `ALL_TYPES` — the second real completeness guard, alongside its handler landing)
 - Modify: `tests/daemon_helpers.py` (`make_daemon` sets `daemon._voices_provider = lambda: []` for hermetic renders)
 - Test: `tests/test_catchup_render.py` (new)
 
@@ -1252,17 +1266,23 @@ def on_catchup_result(ctx, msg):
     return None
 ```
 In `src/sonari/daemon/__init__.py`, add `MsgType.CATCHUP_RESULT,` to `assert_complete([...])` (its handler now exists).
+In `tests/test_daemon_registry.py`, add `_MsgType.CATCHUP_RESULT,` to `ALL_TYPES` right after `_MsgType.CATCH_UP,` (its handler now exists — `test_all_msgtypes_registered` stays green):
+```python
+    _MsgType.CATCH_UP,
+    _MsgType.CATCHUP_RESULT,
+]
+```
 In `tests/daemon_helpers.py`, in `make_daemon`, after constructing `daemon`, add `daemon._voices_provider = lambda: []` (hermetic renders: `auto` → main voice).
 
 - [ ] **Step 4: Run the tests to verify they pass**
 ```
-.venv/bin/python -m pytest -q tests/test_catchup_render.py tests/test_catchup_press.py
+.venv/bin/python -m pytest -q tests/test_catchup_render.py tests/test_catchup_press.py tests/test_daemon_registry.py
 ```
-Expect: all render + press tests pass; `assert_complete` still green (both types now have handlers).
+Expect: all render + press tests pass; `assert_complete` still green (both types now have handlers); `test_all_msgtypes_registered` green with CATCHUP_RESULT now in `ALL_TYPES`.
 
 - [ ] **Step 5: Commit**
 ```
-git add src/sonari/queue.py src/sonari/daemon/host.py src/sonari/catchup.py src/sonari/daemon/features/catchup.py src/sonari/daemon/__init__.py tests/daemon_helpers.py tests/test_catchup_render.py
+git add src/sonari/queue.py src/sonari/daemon/host.py src/sonari/catchup.py src/sonari/daemon/features/catchup.py src/sonari/daemon/__init__.py tests/test_daemon_registry.py tests/daemon_helpers.py tests/test_catchup_render.py
 git commit -m "feat(sp5): render catch-up summary with frame, distinct-voice body, and tail"
 ```
 
