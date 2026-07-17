@@ -14,6 +14,9 @@ def test_defaults_has_documented_top_level_keys():
         "focus_follow",
         "spearcon_voice",
         "spearcon_rate",
+        "summarizer",
+        "summary_voice",
+        "summary_model",
     }
 
 
