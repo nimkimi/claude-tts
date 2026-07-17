@@ -1671,7 +1671,9 @@ def test_u_floors_at_zero_when_queue_exceeds_pile():
     daemon._enqueue("bg", "prose", "queued.", False)
     daemon.handle_message({"v": 1, "type": "where_am_i", "session": "fg"})
     daemon._speak_loop_once()
-    assert "unheard" not in speaker.spoken[-1] or "0 unheard" not in speaker.spoken[-1]
+    # Floored to 0 -> the unheard clause is suppressed entirely (never "0 unheard",
+    # never "-1 unheard"). Strict: the word must not appear at all in this fixture.
+    assert "unheard" not in speaker.spoken[-1]
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
