@@ -10,11 +10,15 @@ _FENCE = re.compile(r"`{3,}")
 _HEADING = re.compile(r"(?m)^[ \t]*#{1,6}[ \t]+")
 # Strip markdown DECORATION only, never bare [*_#] wherever they appear: a
 # blanket strip silently rewrites spoken facts (my_file_name.py -> myfilename.py,
-# issue #123 -> issue 123). Emphasis delimiters must be paired and word-adjacent
-# (markdown's own intra-word rule); free-standing mark runs (*** dividers) go too.
+# issue #123 -> issue 123). Free-standing pure-mark runs (*** dividers) go too.
 _BARE_MARK_RUN = re.compile(r"(?:(?<=\s)|^)[*_#]+(?=\s|$)")
+# Asterisk-only paired emphasis. Underscore is NEVER an emphasis delimiter here:
+# a whitespace-delimited __dunder__ or _sunder_ identifier is syntactically
+# identical to underscore-bold/italic, and stripping it rewrites a fact
+# (__init__ -> init) while a stray _italic_ left intact costs only a silent
+# character in speech. The * in both guards stops matches starting mid-run.
 _PAIRED_EMPHASIS = re.compile(
-    r"(?<![A-Za-z0-9])([*_]{1,3})(?=\S)(.+?)(?<=\S)\1(?![A-Za-z0-9])")
+    r"(?<![A-Za-z0-9*])(\*{1,3})(?=\S)(.+?)(?<=\S)\1(?![A-Za-z0-9*])")
 _WHITESPACE = re.compile(r"\s+")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
@@ -30,8 +34,8 @@ def sanitize_summary(text: str, ceiling: int = 8) -> str:
     s = _FENCE.sub(" ", s)                   # ``` fences
     s = s.replace("`", "")                   # inline code ticks
     s = _BARE_MARK_RUN.sub("", s)            # free-standing *** ___ ### runs
-    s = _PAIRED_EMPHASIS.sub(r"\2", s)       # **bold** / _italic_ delimiters...
-    s = _PAIRED_EMPHASIS.sub(r"\2", s)       # ...twice for nested **_both_**
+    s = _PAIRED_EMPHASIS.sub(r"\2", s)       # *italic* / **bold** delimiters...
+    s = _PAIRED_EMPHASIS.sub(r"\2", s)       # ...twice for nested **bold *it***
     s = _WHITESPACE.sub(" ", s).strip()      # newlines/runs -> single spaces
     if not s:
         return ""

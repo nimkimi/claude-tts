@@ -34,8 +34,22 @@ def test_preserves_marks_inside_identifiers_and_references():
             == "Fixed issue #123 in the tracker.")
 
 
+def test_preserves_dunder_and_sunder_identifiers():
+    # Whitespace-delimited __dunder__ / _sunder_ names are syntactically
+    # identical to underscore-emphasis markdown — the sanitizer must never
+    # rewrite them (underscore is not an emphasis delimiter here).
+    assert (sanitize_summary("Called __init__ during setup.")
+            == "Called __init__ during setup.")
+    assert (sanitize_summary("Renamed __init__ to __new__ in the base class.")
+            == "Renamed __init__ to __new__ in the base class.")
+    assert (sanitize_summary("The _internal_ variable holds state.")
+            == "The _internal_ variable holds state.")
+    assert (sanitize_summary("Kept with__no__spaces_around intact.")
+            == "Kept with__no__spaces_around intact.")
+
+
 def test_still_strips_paired_and_nested_emphasis():
-    assert sanitize_summary("**_mixed_** emphasis works.") == "mixed emphasis works."
+    assert sanitize_summary("**bold *nested* bold** works.") == "bold nested bold works."
 
 
 def test_empty_and_pure_markdown_return_empty():
