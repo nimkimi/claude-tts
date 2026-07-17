@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import queue
 import secrets
 import threading
 import time
@@ -28,6 +29,7 @@ from sonari.daemon.features import focus  # noqa: F401
 from sonari.daemon.features import prose  # noqa: F401
 from sonari.daemon.features import hotkeys  # noqa: F401
 from sonari.daemon.features import chooser  # noqa: F401
+from sonari.daemon.features import catchup  # noqa: F401
 
 
 def _stream_quiescent(st) -> bool:
@@ -70,7 +72,7 @@ def _select_keep_going(streams, sessions) -> "str | None":
 
 class SpeechDaemon:
     def __init__(self, speaker, sessions, config, raise_service=None,
-                 spearcons=None) -> None:
+                 spearcons=None, summarizer=None) -> None:
         self.speaker = speaker
         self.sessions = sessions
         self.config = config
@@ -105,6 +107,12 @@ class SpeechDaemon:
         # and this is observe-only data for status/diagnosis).
         self._started_at: float = time.time()
         self._last_drain: "float | None" = None
+        # SP5 catch-up: the in-flight bundle (mutated only on the daemon loop),
+        # a monotonic request id, and the worker→loop mailbox.
+        self._summarizer_override = summarizer
+        self._catchup = None
+        self._catchup_seq = 0
+        self._catchup_inbox = queue.Queue()
 
     # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
     # (speak loop + kernel ops) goes through self._state._X directly; these
@@ -388,6 +396,27 @@ class SpeechDaemon:
         self._ctx.bind(msg)
         return dispatch(self._ctx, msg)
 
+    def _summarizer(self):
+        if self._summarizer_override is not None:
+            return self._summarizer_override
+        from sonari.summarizer import select_summarizer
+        return select_summarizer(self.config)
+
+    def _drain_catchup_inbox(self) -> None:
+        """Deliver any worker-posted catchup_result on the daemon loop, under the
+        transaction lock (mirrors the socket/hotkey dispatch). Called at the top of
+        _speak_loop_once BEFORE the held-branch return so results land in all states.
+        This position guards STATE-DELIVERY (results reach the loop while held), NOT
+        ordering: ack-before-render is guaranteed by on_catchup_result inserting the
+        render after the ack's queued id (Task 7), independent of when this drains."""
+        while True:
+            try:
+                msg = self._catchup_inbox.get_nowait()
+            except queue.Empty:
+                break
+            with self._state.transaction():
+                self.handle_message(msg)
+
     def stop(self) -> None:
         self._running.clear()
         self._state._wake.set()
@@ -497,6 +526,7 @@ class SpeechDaemon:
         ("Stopped." / "All stopped.") is voiced — until it is started again.
         SP1: speaker() == foreground(); SP2 keep-going advances speaker()
         independently."""
+        self._drain_catchup_inbox()
         fg0 = self.sessions.speaker()
         st0 = self._state._streams.get(fg0)
         if st0 is not None and st0.stopped:

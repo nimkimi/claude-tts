@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+import threading
+
+from sonari.protocol import MsgType, PROTOCOL_VERSION
+from sonari.daemon.registry import handler
+from sonari.catchup import render_slice, build_digest
+
+
+def _result_msg(request_id, result):
+    return {"v": PROTOCOL_VERSION, "type": MsgType.CATCHUP_RESULT,
+            "request_id": request_id, "ok": result.is_ok,
+            "text": result.text, "reason": result.reason}
+
+
+def _cue_dest(sessions, target):
+    # Route audible cues to the SPEAKER when it diverges from the caught-up target
+    # (the SP4 skip-cue lesson: a diverged target's stream isn't heard). Else target.
+    spk = sessions.speaker()
+    return spk if (spk is not None and spk != target) else target
+
+
+@handler(MsgType.CATCH_UP)
+def on_catch_up(ctx, msg):
+    host = ctx.host
+    sessions = host.sessions
+    if host._catchup is not None:            # in flight -> pure cancel (§2.9)
+        _cancel_catchup(host)
+        return None
+    target = sessions.workspace()
+    if target is None:
+        host.speaker.earcon("error")
+        return None
+    st = host._stream(target)
+    entries, aged_out = host.history.unheard_from_frontier(target, st.frontier)
+    folder = sessions.folder(target)
+    dest = _cue_dest(sessions, target)
+    if not entries:
+        host._enqueue(dest, "prose", "Nothing to catch up.", False,
+                      mute_exempt=True, pause_exempt=True, at_front=True)
+        return None
+    n = len(entries)
+    # No-folder fallback = "this session" (the target IS the workspace the user sits
+    # at — never "another session"; matches render_slice's fallback). Owner ear-pass
+    # veto string, like every other spoken string here.
+    where = "in {0}".format(folder) if folder else "in this session"
+    ack = "Catching up {0} {1} {2}.".format(n, "item" if n == 1 else "items", where)
+    if aged_out:
+        ack = "Earlier output aged out. " + ack
+    ack_id = host._enqueue(dest, "prose", ack, False,
+                           mute_exempt=True, pause_exempt=True, at_front=True)
+    last = entries[-1]
+    slice_text = render_slice(entries, folder)      # pinned + rendered AT PRESS
+    host._catchup_seq += 1
+    request_id = host._catchup_seq
+    cancel = threading.Event()
+    # `ack_id` lets on_catchup_result land the render RIGHT AFTER the still-queued
+    # ack (never ahead of it), so the ground-truth magnitude always speaks first.
+    host._catchup = {"id": request_id, "target": target, "folder": folder,
+                     "slice_end": (last.msg_id, last.seq),
+                     "digest": build_digest(entries), "cancel": cancel,
+                     "phase": "preparing", "render_id": None, "ended": False,
+                     "ack_id": ack_id}
+    summarizer = host._summarizer()
+    if summarizer is None:                          # no adapter -> straight to the floor
+        from sonari.summarizer import SummarizeResult
+        host._catchup_inbox.put(_result_msg(request_id, SummarizeResult.failed("unavailable")))
+        host._wake.set()
+        return None
+
+    def _run():                                     # worker: touches NO daemon state
+        result = summarizer.summarize(slice_text, timeout_s=30.0, cancel=cancel)
+        host._catchup_inbox.put(_result_msg(request_id, result))
+        host._wake.set()
+    threading.Thread(target=_run, daemon=True).start()
+    return None
+
+
+def _cancel_catchup(host):
+    cu = host._catchup
+    if cu is None:
+        return
+    cu["cancel"].set()                       # kill an in-flight child if still preparing
+    host._catchup = None                     # Task 8 extends this to cut a SPEAKING render
+    dest = _cue_dest(host.sessions, cu["target"])
+    if dest is not None:
+        host._enqueue(dest, "prose", "Cancelled.", False,
+                      mute_exempt=True, pause_exempt=True, at_front=True)

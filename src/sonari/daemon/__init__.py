@@ -7,7 +7,7 @@ from sonari.protocol import MsgType
 
 # Guard: every MsgType must have a registered handler — a dropped @handler
 # registration becomes an import-time error, not a silent runtime no-op.
-# MsgType is a plain class (not Enum), so we enumerate all 35 known keys explicitly.
+# MsgType is a plain class (not Enum), so we enumerate every known key explicitly.
 assert_complete([
     MsgType.PROSE,
     MsgType.CHOICE,
@@ -44,6 +44,8 @@ assert_complete([
     MsgType.CHOOSER_COMMIT,
     MsgType.CHOOSER_CANCEL,
     MsgType.REPEAT_LAST,
+    MsgType.SKIP_PILE,     # close the pre-existing SP4 omission (handler at playback.py:31)
+    MsgType.CATCH_UP,
 ])
 
 __all__ = ["SpeechDaemon", "main", "ensure_running"]

@@ -78,7 +78,22 @@ class FakeSpeaker:
         self.voices.append(v)
 
 
-def make_daemon(verbosity: str = "everything", foreground: "str | None" = "fg"):
+class FakeSummarizer:
+    """Records the slice text; returns a scripted SummarizeResult (default: ok)."""
+    def __init__(self, result=None):
+        self.result = result
+        self.calls: list = []
+
+    def summarize(self, slice_text, timeout_s=30.0, cancel=None):
+        self.calls.append(slice_text)
+        if self.result is not None:
+            return self.result
+        from sonari.summarizer import SummarizeResult
+        return SummarizeResult.ok("Fake summary.")
+
+
+def make_daemon(verbosity: str = "everything", foreground: "str | None" = "fg",
+                 summarizer=None):
     """Build a SpeechDaemon. The returned `queue` is the FOREGROUND session's own
     stream queue (where its items now land and where the loop drains), so most
     single-session tests need no change. Use stream_queue() for other sessions."""
@@ -88,7 +103,9 @@ def make_daemon(verbosity: str = "everything", foreground: "str | None" = "fg"):
         sessions.set_foreground(foreground)
     config = {k: (v.copy() if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
     config["verbosity"] = verbosity
-    daemon = SpeechDaemon(speaker, sessions, config, spearcons=FakeSpearconCache())
+    config["summarizer"] = "off"      # SP5: no test may ever reach a real `claude`
+    daemon = SpeechDaemon(speaker, sessions, config, spearcons=FakeSpearconCache(),
+                          summarizer=summarizer)
     queue = daemon._stream(foreground).queue if foreground is not None else SpeechQueue()
     return daemon, queue, speaker, sessions, config
 
