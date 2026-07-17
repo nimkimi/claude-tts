@@ -709,9 +709,9 @@ In `src/sonari/queue.py`, add to the `SpeechItem` dataclass after `forward`:
                            # gesture never advances the frontier (B1). Read only by note_spoken's advance.
     voice: "str | None" = None  # SP5: per-utterance say voice override (the summary body); None == main voice
 ```
-In `src/sonari/speaker.py`, change the `speak` signature and the say-runner call:
+In `src/sonari/speaker.py`, change the `speak` signature and the say-runner call. Append `voice` at the END (after `cancel_epoch`) so no existing positional caller shifts — every daemon call site passes `voice=`/`cancel_epoch=` by keyword anyway:
 ```python
-    def speak(self, text=None, audio_path=None, voice=None, cancel_epoch=None) -> bool:
+    def speak(self, text=None, audio_path=None, cancel_epoch=None, voice=None) -> bool:
 ```
 and inside, replace the runner call for the say path (the `else` of the `audio_path is not None` spawn):
 ```python
@@ -738,20 +738,22 @@ and in the `SpeechItem(...)` construction add `voice=voice,` alongside `forward=
                     item.text, voice=item.voice, cancel_epoch=cancel_epoch)
 ```
 (held branch uses `item.text`; the normal branch uses the attributed `text` — keep each branch's existing first argument, only add `voice=item.voice`).
-In `tests/daemon_helpers.py`, add `self.spoken_voices: list = []` in `FakeSpeaker.__init__` and record it:
+In `tests/daemon_helpers.py`, add `self.spoken_voices: list = []` in `FakeSpeaker.__init__` and record it (mirror the appended-`voice` order):
 ```python
-    def speak(self, text=None, audio_path=None, voice=None, cancel_epoch=None) -> bool:
+    def speak(self, text=None, audio_path=None, cancel_epoch=None, voice=None) -> bool:
         self.spoken.append(text)
         self.audio_paths.append(audio_path)
         self.spoken_voices.append(voice)
         return self.complete
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 4: Run the focused tests, a positional-caller grep, then the FULL suite**
 ```
 .venv/bin/python -m pytest -q tests/test_voice_per_utterance.py tests/test_speaker.py
+grep -rn "\.speak(" src/ tests/    # confirm no caller passes a 3rd/4th POSITIONAL arg that would bind to voice
+.venv/bin/python -m pytest -q
 ```
-Expect: the 3 new tests pass and every existing speaker test stays green.
+Expect: the 3 new tests pass; the grep shows every `.speak(` call uses `voice=`/`cancel_epoch=`/`audio_path=` by keyword (no positional shift); the full suite is green (this task changed the `speak` signature — verify globally, not just the two files).
 
 - [ ] **Step 5: Commit**
 ```
@@ -1031,7 +1033,7 @@ git commit -m "feat(sp5): catch-up press handler, worker thread, and result mail
 
 **Interfaces:**
 - Consumes: `sanitize_summary` (Task 2), `build_digest` (Task 3), `_has_decision` from `features/control.py`, `resolve_summary_voice` (this task), `_enqueue(..., voice=, render_id=, catchup_burn=)`.
-- Produces: `SpeechItem.render_id: int|None`, `SpeechItem.catchup_burn: bool=False`; `resolve_summary_voice(cfg_value, main_voice, voices) -> str|None` (concrete name wins; `auto` picks the first voice `!= main_voice`, else main voice; `off`/`None` → main voice); `host._installed_voices() -> list[str]`. The result handler id-matches `msg["request_id"]` against `host._catchup["id"]` (stale → drop), assembles `[ "{folder} ended." (if ended) ] + [ frame+body | digest ] + [ tail if decision & not ended ]`, routes to `_cue_dest`, enqueues reversed-at_front (so play order is preserved), and marks the LAST item `catchup_burn=True` unless ended. Task 8 consumes `render_id`/`catchup_burn` in `note_spoken`.
+- Produces: `SpeechItem.render_id: int|None`, `SpeechItem.catchup_burn: bool=False`; `resolve_summary_voice(cfg_value, main_voice, voices) -> str|None` (concrete name wins; `auto` picks the first voice `!= main_voice`, else main voice; `off`/`None` → main voice); `host._installed_voices() -> list[str]`. The result handler id-matches `msg["request_id"]` against `host._catchup["id"]` (stale → drop), assembles `[ "{folder} ended." (if ended) ] + [ frame+body | digest ] + [ tail if decision & not ended ]`, routes to `_cue_dest`, enqueues reversed-at_front (so play order is preserved), and marks the LAST item `catchup_burn=True` ALWAYS (it is the render-done marker that clears `self._catchup` on completion; Task 8 gates the actual frontier burn on `not cu["ended"]`, so an ended render still clears the bundle). Task 8 consumes `render_id`/`catchup_burn` in `note_spoken`.
 
 - [ ] **Step 1: Write the failing tests** — `tests/test_catchup_render.py`:
 ```python
@@ -1241,9 +1243,12 @@ def on_catchup_result(ctx, msg):
     last = len(segments) - 1
     for i in range(last, -1, -1):                    # reverse enqueue -> preserved play order
         text, voice = segments[i]
+        # The last item is the render-DONE marker (always) — it clears self._catchup
+        # on completion; whether it also BURNS is gated on `not ended` in Task 8, so
+        # an ended render still clears the bundle (no spurious "Cancelled." next press).
         host._enqueue(dest, "prose", text, False, mute_exempt=True, pause_exempt=True,
                       at_front=True, voice=voice, render_id=render_id,
-                      catchup_burn=(i == last and not ended))
+                      catchup_burn=(i == last))
     return None
 ```
 In `src/sonari/daemon/__init__.py`, add `MsgType.CATCHUP_RESULT,` to `assert_complete([...])` (its handler now exists).
@@ -1388,6 +1393,36 @@ def test_cancel_during_render_drops_items_and_no_burn():
     assert "Body one. Body two." not in speaker.spoken # render items dropped
     assert "Cancelled." in speaker.spoken
     assert daemon._stream("fg").frontier is None       # no burn
+
+
+def test_failure_digest_render_burns_to_slice_end():
+    # On an adapter-less/failed host the digest IS the only render, so it MUST
+    # burn or catch-up would never clear the pile there (owner-flagged, kept).
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/r")
+    e1 = daemon.history.record("fg", "prose", "b.")
+    _inflight(daemon, slice_end=(e1.msg_id, e1.seq))
+    daemon.handle_message(_result(1, ok=False, reason="timeout"))
+    _drain(daemon)
+    assert daemon._stream("fg").frontier == (e1.msg_id, e1.seq)   # digest burns too
+    assert daemon._catchup is None
+
+
+def test_ended_render_completion_clears_bundle_so_next_press_starts_fresh():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("live", cwd="/x/live")   # a live session to voice on
+    daemon._catchup = {"id": 1, "target": "gone", "folder": "oldrepo",
+                       "slice_end": (0, 0), "digest": "Summary unavailable. Last: x.",
+                       "cancel": threading.Event(), "phase": "preparing",
+                       "render_id": None, "ended": False}
+    daemon.handle_message(_result(1, ok=True, text="It finished."))   # 'gone' unregistered -> ended
+    _drain(daemon)
+    assert daemon._catchup is None                    # ended render CLEARED the bundle
+    daemon.history.record("live", "prose", "new output.")
+    daemon.handle_message(_catch_up("live"))          # a fresh press must START, not cancel
+    _drain(daemon)
+    assert "Cancelled." not in speaker.spoken
+    assert any("Catching up" in s for s in speaker.spoken)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1423,7 +1458,11 @@ In `src/sonari/daemon/host.py`, at the END of `note_spoken`'s `with self._lock:`
                     self._drop_render_items(item.session, rid)
                     self._catchup = None
                 elif getattr(item, "catchup_burn", False):
-                    self._burn_catchup(cu)
+                    # The render finished. Burn UNLESS the session ended mid-prep
+                    # (nothing left to burn) — but ALWAYS clear the bundle, so an
+                    # ended render never strands _catchup (a spurious next-press cancel).
+                    if not cu.get("ended"):
+                        self._burn_catchup(cu)
                     self._catchup = None
 ```
 and add two lock-free helper methods to the class (callers already hold `self._lock`):
@@ -1471,11 +1510,12 @@ def _cancel_catchup(host):
                       mute_exempt=True, pause_exempt=True, at_front=True)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 4: Run the catch-up tests, then the FULL suite**
 ```
 .venv/bin/python -m pytest -q tests/test_catchup_burn.py tests/test_catchup_render.py tests/test_catchup_press.py
+.venv/bin/python -m pytest -q
 ```
-Expect: all catch-up runtime tests pass.
+Expect: all catch-up runtime tests pass, AND the full suite is green (this task edits `note_spoken` on the hot path — verify globally).
 
 - [ ] **Step 5: Commit**
 ```
@@ -1560,7 +1600,11 @@ In `src/sonari/daemon/features/control.py`, inside `_entry_clauses`, replace the
 .venv/bin/python -m pytest -q tests/test_catchup_counts.py
 .venv/bin/python -m pytest -q -k "whereami or where_am_i or also_map or unheard or entry_clauses or control"
 ```
-The new tests pass. For every existing ⌃⌘W test that now fails: the failure must be a pure NUMBER change (the `u` count rising to the true pile magnitude for a browsed/multi-turn/queued pile). Compute the true pile: `len(unheard_from_frontier(session, frontier)) − len(queue)`, floored at 0, and correct the expected count in the assertion. **Do NOT weaken any assertion** (no `==`→`in`, no dropping the negative-substring checks); `{k} waiting`, the `stale` word, and clause order are unchanged. If a failure is anything OTHER than a corrected `u` number (e.g. a clause reordered, `stale` flipped, `waiting` changed), STOP and flag it — that is out of scope for this task.
+The new tests pass. For every existing ⌃⌘W test that now fails: the failure must be a pure NUMBER change (the `u` count rising to the true pile magnitude for a browsed/multi-turn/queued pile). Compute the true pile: `len(unheard_from_frontier(session, frontier)) − len(queue)`, floored at 0, and correct the expected count in the assertion. **Do NOT weaken any assertion** (no `==`→`in`, no dropping the negative-substring checks); `{k} waiting`, the `stale` word, and clause order are unchanged. If a failure is anything OTHER than a corrected `u` number (e.g. a clause reordered, `stale` flipped, `waiting` changed), STOP and flag it — that is out of scope for this task. Finish with a full-suite run:
+```
+.venv/bin/python -m pytest -q
+```
+Expect: green (all ⌃⌘W tests reconciled to the pile-based count).
 
 - [ ] **Step 5: Commit**
 ```
@@ -1623,7 +1667,7 @@ git commit -m "docs(sp5): rewrite the stale verbatim catch-up model to the summa
 ```
 .venv/bin/python -m pytest -q
 ```
-Expect: all pass, 1 skipped. Baseline before SP5 was **1105 passed / 1 skipped**; this plan adds ~50 new tests (T1 keymap +1, T2 sanitizer +5, T3 slice/digest +5, T4 summarizer +11, T5 voice +3, T6 press +8, T7 render +9, T8 burn +6, T9 counts +2) plus in-place updates to existing ⌃⌘W tests (count corrections, not new tests), so the target is roughly **~1155 passed / 1 skipped**. Record the EXACT final number here.
+Expect: all pass, 1 skipped. Baseline before SP5 was **1105 passed / 1 skipped**; this plan adds ~52 new tests (T1 keymap +1, T2 sanitizer +5, T3 slice/digest +5, T4 summarizer +11, T5 voice +3, T6 press +8, T7 render +9, T8 burn +8, T9 counts +2) plus in-place updates to existing ⌃⌘W tests (count corrections, not new tests), so the target is roughly **~1157 passed / 1 skipped**. Record the EXACT final number here.
 
 - [ ] **Step 2: Confirm the import-time + protocol guards**
 ```
