@@ -639,7 +639,384 @@ git commit -m "feat(sp5): add host-LLM summarizer adapter with API-key env scrub
 
 ### Task 5: Voice-per-utterance plumbing
 
+**Files:**
+- Modify: `src/sonari/queue.py:7-20` (SpeechItem: one new field)
+- Modify: `src/sonari/speaker.py:52-97` (`speak` accepts a per-call voice override)
+- Modify: `src/sonari/daemon/host.py` (`_enqueue` :231-260 threads `voice`; the FOUR `speak()` call sites at ~515-519 held branch and ~588-592 normal branch pass `voice=item.voice`)
+- Modify: `tests/daemon_helpers.py:36-54` (FakeSpeaker records the per-call voice)
+- Test: `tests/test_voice_per_utterance.py` (new)
+
+**Interfaces:**
+- Produces: `SpeechItem.voice: "str | None" = None`; `Speaker.speak(text=None, audio_path=None, voice=None, cancel_epoch=None)` — `voice` overrides `self._voice` for exactly that call, reverting after; `_enqueue(..., voice=None)` passes it onto the item. FakeSpeaker gains `self.spoken_voices: list` (one entry per `speak()`).
+- Rationale (advisor): the catch-up render items are `pause_exempt`, so the body plays through the HELD branch when the target session is stopped — the voice MUST be threaded at the held-branch call sites too, or a stopped-session catch-up body silently reverts to the main voice.
+
+- [ ] **Step 1: Write the failing test** — `tests/test_voice_per_utterance.py`:
+```python
+from sonari.speaker import Speaker
+from tests.daemon_helpers import make_daemon
+
+
+class _Proc:
+    returncode = 0
+
+    def wait(self, timeout=None):
+        return 0
+
+    def terminate(self):
+        pass
+
+
+def test_speaker_speak_overrides_voice_then_reverts():
+    seen = []
+
+    def runner(text, voice, rate):
+        seen.append(voice)
+        return _Proc()
+
+    sp = Speaker(voice="Main", rate=200, say_runner=runner)
+    assert sp.speak("hi", voice="Alt") is True
+    assert sp.speak("bye") is True
+    assert seen == ["Alt", "Main"]
+
+
+def test_item_voice_reaches_speaker_through_the_loop():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon._enqueue("fg", "prose", "Body sentence.", False, voice="Daniel")
+    daemon._speak_loop_once()
+    assert speaker.spoken[-1] == "Body sentence."
+    assert speaker.spoken_voices[-1] == "Daniel"
+
+
+def test_default_item_voice_is_none():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon._enqueue("fg", "prose", "Plain.", False)
+    daemon._speak_loop_once()
+    assert speaker.spoken_voices[-1] is None
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+```
+.venv/bin/python -m pytest -q tests/test_voice_per_utterance.py
+```
+Expect: `TypeError: __init__() got an unexpected keyword argument 'voice'` (SpeechItem via `_enqueue`) / `AttributeError: 'FakeSpeaker' object has no attribute 'spoken_voices'`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+In `src/sonari/queue.py`, add to the `SpeechItem` dataclass after `forward`:
+```python
+    forward: bool = False  # SP4 provenance: True only at forward-readout enqueue sites (prose/decision/
+                           # tool-announce readout). Browse-replay + control cues stay False so a review
+                           # gesture never advances the frontier (B1). Read only by note_spoken's advance.
+    voice: "str | None" = None  # SP5: per-utterance say voice override (the summary body); None == main voice
+```
+In `src/sonari/speaker.py`, change the `speak` signature and the say-runner call:
+```python
+    def speak(self, text=None, audio_path=None, voice=None, cancel_epoch=None) -> bool:
+```
+and inside, replace the runner call for the say path (the `else` of the `audio_path is not None` spawn):
+```python
+        say_voice = voice if voice is not None else self._voice
+        proc = (runner(audio_path) if audio_path is not None
+                else runner(text, say_voice, self._rate))
+```
+In `src/sonari/daemon/host.py`, add `voice=None` to `_enqueue`'s signature and pass it to `SpeechItem`:
+```python
+    def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
+                 entry=None, mute_exempt: bool = False,
+                 pause_exempt: bool = False, at_front: bool = False,
+                 names_session: bool = False, audio_path=None,
+                 forward: bool = False, voice=None) -> int:
+```
+and in the `SpeechItem(...)` construction add `voice=voice,` alongside `forward=forward,`. Then at ALL FOUR `speak()` call sites in `_speak_loop_once` (held branch ~515-519 and normal branch ~588-592), add `voice=item.voice`, e.g.:
+```python
+            if item.audio_path:
+                completed = self.speaker.speak(
+                    item.text, audio_path=item.audio_path,
+                    voice=item.voice, cancel_epoch=cancel_epoch)
+            else:
+                completed = self.speaker.speak(
+                    item.text, voice=item.voice, cancel_epoch=cancel_epoch)
+```
+(held branch uses `item.text`; the normal branch uses the attributed `text` — keep each branch's existing first argument, only add `voice=item.voice`).
+In `tests/daemon_helpers.py`, add `self.spoken_voices: list = []` in `FakeSpeaker.__init__` and record it:
+```python
+    def speak(self, text=None, audio_path=None, voice=None, cancel_epoch=None) -> bool:
+        self.spoken.append(text)
+        self.audio_paths.append(audio_path)
+        self.spoken_voices.append(voice)
+        return self.complete
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+```
+.venv/bin/python -m pytest -q tests/test_voice_per_utterance.py tests/test_speaker.py
+```
+Expect: the 3 new tests pass and every existing speaker test stays green.
+
+- [ ] **Step 5: Commit**
+```
+git add src/sonari/queue.py src/sonari/speaker.py src/sonari/daemon/host.py tests/daemon_helpers.py tests/test_voice_per_utterance.py
+git commit -m "feat(sp5): per-utterance voice override through the speak loop"
+```
+
 ### Task 6: Catch-up press handler + worker thread + mailbox transport
+
+**Files:**
+- Create: `src/sonari/daemon/features/catchup.py` (new feature module — the `catch_up` handler + worker + cancel; the `catchup_result` handler is added in Task 7 in this same file)
+- Modify: `src/sonari/daemon/host.py` (add `summarizer` ctor param + `_summarizer()`; the catch-up in-flight fields + `queue.Queue` inbox in `__init__`; `_drain_catchup_inbox()` called at the TOP of `_speak_loop_once`; import the new feature module)
+- Modify: `src/sonari/daemon/__init__.py:11` (add `MsgType.CATCH_UP` to `assert_complete`)
+- Modify: `tests/daemon_helpers.py` (add `FakeSummarizer`; `make_daemon(..., summarizer=None)`)
+- Test: `tests/test_catchup_press.py` (new)
+
+**Interfaces:**
+- Consumes: `select_summarizer`/`SummarizeResult` (Task 4), `render_slice`/`build_digest` (Task 3), `MsgType.CATCH_UP`/`CATCHUP_RESULT` (Task 1), `_enqueue(..., voice=)` (Task 5).
+- Produces (daemon state, mutated ONLY on the loop): `host._catchup` — the in-flight bundle `{"id", "target", "folder", "slice_end", "digest", "cancel": threading.Event, "phase": "preparing"|"rendering", "render_id": int|None, "ended": bool}` or `None`; `host._catchup_seq: int`; `host._catchup_inbox: queue.Queue`; `host._summarizer() -> HostSummarizer | None`; `host._drain_catchup_inbox()`. The bundle survives SESSION_END (daemon state, not sessions/history) — so the Task 7 result handler can render `"{folder} ended."` from it.
+- The worker thread closure captures `summarizer`, `slice_text`, `cancel`, `request_id`, `host` as LOCALS and only `host._catchup_inbox.put(...)` + `host._wake.set()` — it reads/writes NO daemon state.
+
+- [ ] **Step 1: Write the failing tests** — `tests/test_catchup_press.py`:
+```python
+from sonari.summarizer import SummarizeResult
+from tests.daemon_helpers import make_daemon, FakeSummarizer
+
+
+def _catch_up(session="fg"):
+    return {"v": 1, "type": "catch_up", "session": session}
+
+
+def test_empty_pile_says_nothing_to_catch_up_and_no_worker():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon.handle_message(_catch_up())
+    daemon._speak_loop_once()
+    assert speaker.spoken[-1] == "Nothing to catch up."
+    assert daemon._catchup is None
+
+
+def test_ack_announces_pile_magnitude_and_folder():
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=FakeSummarizer())
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    for i in range(3):
+        daemon.history.record("fg", "prose", "line {0}.".format(i))
+    daemon.handle_message(_catch_up())
+    daemon._speak_loop_once()
+    assert speaker.spoken[-1] == "Catching up 3 items in myrepo."
+    assert daemon._catchup is not None and daemon._catchup["phase"] == "preparing"
+
+
+def test_singular_item_ack():
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=FakeSummarizer())
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    daemon.history.record("fg", "prose", "only one.")
+    daemon.handle_message(_catch_up())
+    daemon._speak_loop_once()
+    assert speaker.spoken[-1] == "Catching up 1 item in myrepo."
+
+
+def test_aged_out_rider_rides_the_ack():
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=FakeSummarizer())
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    daemon.history.record("fg", "prose", "a.")
+    daemon._stream("fg").frontier = (-1, -1)   # behind the oldest entry -> aged_out
+    daemon.handle_message(_catch_up())
+    daemon._speak_loop_once()
+    assert speaker.spoken[-1] == "Earlier output aged out. Catching up 1 item in myrepo."
+
+
+def test_worker_posts_result_and_press_pins_slice_end():
+    fake = FakeSummarizer(result=SummarizeResult.ok("Done."))
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=fake)
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon.history.record("fg", "prose", "one.")
+    e1 = daemon.history.record("fg", "prose", "two.")
+    daemon.handle_message(_catch_up())
+    posted = daemon._catchup_inbox.get(timeout=2)     # worker thread posted it
+    assert posted["type"] == "catchup_result"
+    assert posted["ok"] is True and posted["text"] == "Done."
+    assert fake.calls and "assistant: two." in fake.calls[0]
+    assert daemon._catchup["slice_end"] == (e1.msg_id, e1.seq)
+
+
+def test_no_summarizer_posts_unavailable_without_a_worker():
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=None)
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon.history.record("fg", "prose", "a.")
+    daemon.handle_message(_catch_up())
+    posted = daemon._catchup_inbox.get(timeout=2)
+    assert posted["ok"] is False and posted["reason"] == "unavailable"
+
+
+def test_press_while_in_flight_cancels_no_new_worker():
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=FakeSummarizer())
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon.history.record("fg", "prose", "a.")
+    daemon.handle_message(_catch_up())
+    cancel_event = daemon._catchup["cancel"]
+    daemon.handle_message(_catch_up())       # second press = pure cancel
+    assert daemon._catchup is None and cancel_event.is_set()
+    daemon._speak_loop_once()
+    assert "Cancelled." in speaker.spoken
+
+
+def test_mailbox_drains_on_speak_loop_tick():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon._catchup_inbox.put({"v": 1, "type": "catchup_result", "request_id": 999,
+                               "ok": False, "text": "", "reason": "error"})
+    daemon._speak_loop_once()
+    assert daemon._catchup_inbox.empty()     # drained (dispatched; no handler yet = no-op)
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+```
+.venv/bin/python -m pytest -q tests/test_catchup_press.py
+```
+Expect: `TypeError: make_daemon() got an unexpected keyword argument 'summarizer'` / `ImportError: cannot import name 'FakeSummarizer'`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+In `src/sonari/daemon/host.py`: add `import queue` at the top; add `summarizer=None` to `SpeechDaemon.__init__`'s signature; inside `__init__` (after the `_last_drain` lines) add:
+```python
+        # SP5 catch-up: the in-flight bundle (mutated only on the daemon loop),
+        # a monotonic request id, and the worker→loop mailbox.
+        self._summarizer_override = summarizer
+        self._catchup = None
+        self._catchup_seq = 0
+        self._catchup_inbox = queue.Queue()
+```
+Add the feature side-effect import beside the others (host.py:22-30): `from sonari.daemon.features import catchup  # noqa: F401`. Add two methods to the class:
+```python
+    def _summarizer(self):
+        if self._summarizer_override is not None:
+            return self._summarizer_override
+        from sonari.summarizer import select_summarizer
+        return select_summarizer(self.config)
+
+    def _drain_catchup_inbox(self) -> None:
+        """Deliver any worker-posted catchup_result on the daemon loop, under the
+        transaction lock (mirrors the socket/hotkey dispatch). Called at the top of
+        _speak_loop_once BEFORE the held-branch return so results land in all states."""
+        while True:
+            try:
+                msg = self._catchup_inbox.get_nowait()
+            except queue.Empty:
+                break
+            with self._state.transaction():
+                self.handle_message(msg)
+```
+Make `self._drain_catchup_inbox()` the FIRST line of `_speak_loop_once` (before `fg0 = ...`).
+
+Create `src/sonari/daemon/features/catchup.py`:
+```python
+from __future__ import annotations
+
+import threading
+
+from sonari.protocol import MsgType, PROTOCOL_VERSION
+from sonari.daemon.registry import handler
+from sonari.catchup import render_slice, build_digest
+
+
+def _result_msg(request_id, result):
+    return {"v": PROTOCOL_VERSION, "type": MsgType.CATCHUP_RESULT,
+            "request_id": request_id, "ok": result.is_ok,
+            "text": result.text, "reason": result.reason}
+
+
+def _cue_dest(sessions, target):
+    # Route audible cues to the SPEAKER when it diverges from the caught-up target
+    # (the SP4 skip-cue lesson: a diverged target's stream isn't heard). Else target.
+    spk = sessions.speaker()
+    return spk if (spk is not None and spk != target) else target
+
+
+@handler(MsgType.CATCH_UP)
+def on_catch_up(ctx, msg):
+    host = ctx.host
+    sessions = host.sessions
+    if host._catchup is not None:            # in flight -> pure cancel (§2.9)
+        _cancel_catchup(host)
+        return None
+    target = sessions.workspace()
+    if target is None:
+        host.speaker.earcon("error")
+        return None
+    st = host._stream(target)
+    entries, aged_out = host.history.unheard_from_frontier(target, st.frontier)
+    folder = sessions.folder(target)
+    dest = _cue_dest(sessions, target)
+    if not entries:
+        host._enqueue(dest, "prose", "Nothing to catch up.", False,
+                      mute_exempt=True, pause_exempt=True, at_front=True)
+        return None
+    n = len(entries)
+    where = "in {0}".format(folder) if folder else "in another session"
+    ack = "Catching up {0} {1} {2}.".format(n, "item" if n == 1 else "items", where)
+    if aged_out:
+        ack = "Earlier output aged out. " + ack
+    host._enqueue(dest, "prose", ack, False,
+                  mute_exempt=True, pause_exempt=True, at_front=True)
+    last = entries[-1]
+    slice_text = render_slice(entries, folder)      # pinned + rendered AT PRESS
+    host._catchup_seq += 1
+    request_id = host._catchup_seq
+    cancel = threading.Event()
+    host._catchup = {"id": request_id, "target": target, "folder": folder,
+                     "slice_end": (last.msg_id, last.seq),
+                     "digest": build_digest(entries), "cancel": cancel,
+                     "phase": "preparing", "render_id": None, "ended": False}
+    summarizer = host._summarizer()
+    if summarizer is None:                          # no adapter -> straight to the floor
+        from sonari.summarizer import SummarizeResult
+        host._catchup_inbox.put(_result_msg(request_id, SummarizeResult.failed("unavailable")))
+        host._wake.set()
+        return None
+
+    def _run():                                     # worker: touches NO daemon state
+        result = summarizer.summarize(slice_text, timeout_s=30.0, cancel=cancel)
+        host._catchup_inbox.put(_result_msg(request_id, result))
+        host._wake.set()
+    threading.Thread(target=_run, daemon=True).start()
+    return None
+
+
+def _cancel_catchup(host):
+    cu = host._catchup
+    if cu is None:
+        return
+    cu["cancel"].set()                       # kill an in-flight child if still preparing
+    host._catchup = None                     # Task 8 extends this to cut a SPEAKING render
+    dest = _cue_dest(host.sessions, cu["target"])
+    if dest is not None:
+        host._enqueue(dest, "prose", "Cancelled.", False,
+                      mute_exempt=True, pause_exempt=True, at_front=True)
+```
+In `src/sonari/daemon/__init__.py`, add `MsgType.CATCH_UP,` to the `assert_complete([...])` list (its handler now exists; do NOT add `CATCHUP_RESULT` yet — Task 7).
+In `tests/daemon_helpers.py`, add the fake summarizer and the `make_daemon` seam:
+```python
+class FakeSummarizer:
+    """Records the slice text; returns a scripted SummarizeResult (default: ok)."""
+    def __init__(self, result=None):
+        self.result = result
+        self.calls: list = []
+
+    def summarize(self, slice_text, timeout_s=30.0, cancel=None):
+        self.calls.append(slice_text)
+        if self.result is not None:
+            return self.result
+        from sonari.summarizer import SummarizeResult
+        return SummarizeResult.ok("Fake summary.")
+```
+and change `make_daemon` to `def make_daemon(verbosity="everything", foreground="fg", summarizer=None):`, add `config["summarizer"] = "off"` after the verbosity line (so no test ever reaches a real `claude`), and pass `summarizer=summarizer` into `SpeechDaemon(...)`.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+```
+.venv/bin/python -m pytest -q tests/test_catchup_press.py tests/test_protocol.py
+```
+Expect: the 8 press tests pass; the import-time `assert_complete` guard passes (CATCH_UP has a handler).
+
+- [ ] **Step 5: Commit**
+```
+git add src/sonari/daemon/features/catchup.py src/sonari/daemon/host.py src/sonari/daemon/__init__.py tests/daemon_helpers.py tests/test_catchup_press.py
+git commit -m "feat(sp5): catch-up press handler, worker thread, and result mailbox"
+```
 
 ### Task 7: `catchup_result` render + landing
 
