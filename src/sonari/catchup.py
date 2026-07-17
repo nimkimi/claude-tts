@@ -91,3 +91,16 @@ def build_digest(entries) -> str:
     if not last.endswith((".", "!", "?")):
         last += "."
     return "Summary unavailable. Last: {0}".format(last)
+
+
+def resolve_summary_voice(cfg_value, main_voice, voices):
+    """The body voice. A concrete configured name wins. 'auto' picks the first
+    installed voice distinct from the main voice, falling back to the main voice
+    (the frame word still marks the synthetic channel). 'off'/None -> main voice."""
+    if isinstance(cfg_value, str) and cfg_value not in ("auto", "off", ""):
+        return cfg_value
+    if cfg_value == "auto":
+        for v in (voices or []):
+            if v != main_voice:
+                return v
+    return main_voice

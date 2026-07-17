@@ -106,6 +106,7 @@ def make_daemon(verbosity: str = "everything", foreground: "str | None" = "fg",
     config["summarizer"] = "off"      # SP5: no test may ever reach a real `claude`
     daemon = SpeechDaemon(speaker, sessions, config, spearcons=FakeSpearconCache(),
                           summarizer=summarizer)
+    daemon._voices_provider = lambda: []      # SP5: hermetic renders — no `say -v ?`
     queue = daemon._stream(foreground).queue if foreground is not None else SpeechQueue()
     return daemon, queue, speaker, sessions, config
 

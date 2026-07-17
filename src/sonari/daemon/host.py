@@ -113,6 +113,10 @@ class SpeechDaemon:
         self._catchup = None
         self._catchup_seq = 0
         self._catchup_inbox = queue.Queue()
+        # SP5 catch-up render: the say voice list, MEMOIZED (see _installed_voices).
+        # _voices_provider overrides it for tests (hermetic — no `say -v ?`).
+        self._voices_provider = None
+        self._voices_cache = None
 
     # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
     # (speak loop + kernel ops) goes through self._state._X directly; these
@@ -240,7 +244,8 @@ class SpeechDaemon:
                  entry=None, mute_exempt: bool = False,
                  pause_exempt: bool = False, at_front: bool = False,
                  names_session: bool = False, audio_path=None,
-                 forward: bool = False, voice=None) -> int:
+                 forward: bool = False, voice=None, render_id=None,
+                 catchup_burn: bool = False, after_id=None) -> int:
         """Returns the new item's id (W7: on_permission_request tracks its queued
         ask); all other callers ignore it."""
         item = SpeechItem(
@@ -255,11 +260,15 @@ class SpeechDaemon:
             audio_path=audio_path,
             forward=forward,
             voice=voice,
+            render_id=render_id,
+            catchup_burn=catchup_burn,
         )
         st = self._stream(session)
         if entry is not None:
             self._state._pending_heard[item.id] = entry
-        if at_front:
+        if after_id is not None and st.queue.insert_after(after_id, [item]):
+            pass                                     # landed right after the anchor (the ack)
+        elif at_front:
             st.queue.enqueue_front(item)
         else:
             evicted = st.queue.enqueue(item)
@@ -401,6 +410,21 @@ class SpeechDaemon:
             return self._summarizer_override
         from sonari.summarizer import select_summarizer
         return select_summarizer(self.config)
+
+    def _installed_voices(self) -> list:
+        """The say voices, best-effort. Overridable via _voices_provider so tests
+        stay hermetic (no `say -v ?`), and MEMOIZED so the one `say -v ?` a catch-up
+        render can trigger runs at most once per daemon (it can run under the loop
+        lock, and voices don't change within a session)."""
+        if self._voices_provider is not None:
+            return self._voices_provider()
+        if self._voices_cache is None:
+            try:
+                from sonari.platform import get_platform
+                self._voices_cache = list(get_platform().tts.list_voices())
+            except Exception:  # noqa: BLE001 - a voice-list failure falls to the main voice
+                self._voices_cache = []
+        return self._voices_cache
 
     def _drain_catchup_inbox(self) -> None:
         """Deliver any worker-posted catchup_result on the daemon loop, under the

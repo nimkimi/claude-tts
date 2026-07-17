@@ -46,6 +46,7 @@ assert_complete([
     MsgType.REPEAT_LAST,
     MsgType.SKIP_PILE,     # close the pre-existing SP4 omission (handler at playback.py:31)
     MsgType.CATCH_UP,
+    MsgType.CATCHUP_RESULT,
 ])
 
 __all__ = ["SpeechDaemon", "main", "ensure_running"]

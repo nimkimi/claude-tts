@@ -22,7 +22,13 @@ def test_ack_announces_pile_magnitude_and_folder():
     daemon.handle_message(_catch_up())
     daemon._speak_loop_once()
     assert speaker.spoken[-1] == "Catching up 3 items in myrepo."
-    assert daemon._catchup is not None and daemon._catchup["phase"] == "preparing"
+    # phase is NOT asserted: with the CATCHUP_RESULT handler registered (T7), the
+    # worker may or may not have posted before this tick's drain, so phase after
+    # one tick is timing-dependent ("preparing" vs "rendering"). The race-free
+    # post-press invariant is only that the press created an in-flight bundle;
+    # in-flight phase transitions are covered by
+    # test_worker_posts_result_and_press_pins_slice_end and the render tests.
+    assert daemon._catchup is not None
 
 
 def test_singular_item_ack():
@@ -85,3 +91,36 @@ def test_mailbox_drains_on_speak_loop_tick():
                                "ok": False, "text": "", "reason": "error"})
     daemon._speak_loop_once()
     assert daemon._catchup_inbox.empty()     # drained (dispatched; no handler yet = no-op)
+
+
+def test_render_never_precedes_its_ack_default_digest():
+    # No adapter (make_daemon's default summarizer=None): the failure result is
+    # mailed SYNCHRONOUSLY at press, so the digest render is drainable on the very
+    # next loop tick. It MUST still land AFTER the ack, never ahead of it — the
+    # ground-truth magnitude always speaks first (the ack->summary contract).
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=None)
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon.history.record("fg", "prose", "a.")
+    daemon.handle_message(_catch_up())
+    for _ in range(4):
+        daemon._speak_loop_once()
+    ack = "Catching up 1 item in r."
+    digest = "Summary unavailable. Last: a."
+    assert ack in speaker.spoken and digest in speaker.spoken
+    assert speaker.spoken.index(ack) < speaker.spoken.index(digest)
+
+
+def test_render_lands_after_ack_when_ack_queued_behind_a_busy_item():
+    # A busy utterance is already queued; the ack is enqueued at_front (ahead of
+    # it), then the digest result arrives while the ack is still queued ->
+    # insert_after keeps the render immediately behind the ack, never ahead of it.
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=None)
+    sessions.set_foreground("fg", cwd="/x/r")
+    daemon.history.record("fg", "prose", "a.")
+    daemon._enqueue("fg", "prose", "Busy line.", False)   # already queued ahead
+    daemon.handle_message(_catch_up())
+    for _ in range(5):
+        daemon._speak_loop_once()
+    ack = "Catching up 1 item in r."
+    digest = "Summary unavailable. Last: a."
+    assert speaker.spoken.index(ack) < speaker.spoken.index(digest)

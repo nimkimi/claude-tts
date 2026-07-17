@@ -206,3 +206,18 @@ def test_remove_by_id_unknown_returns_none_and_leaves_queue():
     assert q.remove_by_id(42) is None
     assert len(q) == 1
 
+
+def test_insert_after_lands_items_right_behind_the_anchor():
+    q = SpeechQueue()
+    q.enqueue(_item(1, text="ack"))
+    q.enqueue(_item(2, text="tail"))
+    assert q.insert_after(1, [_item(3, text="render")]) is True
+    assert [q.pop_next().text for _ in range(3)] == ["ack", "render", "tail"]
+
+
+def test_insert_after_returns_false_when_anchor_absent():
+    q = SpeechQueue()
+    q.enqueue(_item(1, text="only"))
+    assert q.insert_after(999, [_item(2, text="render")]) is False
+    assert len(q) == 1 and q.pop_next().text == "only"   # nothing inserted
+

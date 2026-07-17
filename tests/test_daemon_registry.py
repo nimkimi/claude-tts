@@ -122,6 +122,7 @@ ALL_TYPES = [
     _MsgType.REPEAT_LAST,
     _MsgType.SKIP_PILE,
     _MsgType.CATCH_UP,
+    _MsgType.CATCHUP_RESULT,
 ]
 
 

@@ -19,6 +19,8 @@ class SpeechItem:
                            # tool-announce readout). Browse-replay + control cues stay False so a review
                            # gesture never advances the frontier (B1). Read only by note_spoken's advance.
     voice: "str | None" = None  # SP5: per-utterance say voice override (the summary body); None == main voice
+    render_id: "int | None" = None  # SP5: groups a catch-up render's frame/body/tail items
+    catchup_burn: bool = False  # SP5: True on the render's LAST item; note_spoken burns on its completion
 
 
 class SpeechQueue:
@@ -108,3 +110,15 @@ class SpeechQueue:
                 del self._items[i]
                 return item
         return None
+
+    def insert_after(self, item_id, items) -> bool:
+        """Insert *items* (in order) immediately after the queued item with id
+        *item_id*. Returns False when that item is no longer queued (already
+        spoken/dropped) so the caller can fall back to at_front. The catch-up
+        render lands after its still-queued ack this way. Caller holds the lock."""
+        for i, it in enumerate(self._items):
+            if it.id == item_id:
+                for offset, new in enumerate(items, start=1):
+                    self._items.insert(i + offset, new)
+                return True
+        return False

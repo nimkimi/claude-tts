@@ -4,7 +4,8 @@ import threading
 
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 from sonari.daemon.registry import handler
-from sonari.catchup import render_slice, build_digest
+from sonari.catchup import render_slice, build_digest, sanitize_summary, resolve_summary_voice
+from sonari.daemon.features.control import _has_decision
 
 
 def _result_msg(request_id, result):
@@ -86,3 +87,49 @@ def _cancel_catchup(host):
     if dest is not None:
         host._enqueue(dest, "prose", "Cancelled.", False,
                       mute_exempt=True, pause_exempt=True, at_front=True)
+
+
+@handler(MsgType.CATCHUP_RESULT)
+def on_catchup_result(ctx, msg):
+    host = ctx.host
+    cu = host._catchup
+    if cu is None or cu.get("id") != msg.get("request_id"):
+        return None                                  # stale (cancelled/superseded) -> drop
+    sessions = host.sessions
+    target = cu["target"]
+    ended = target not in sessions.session_ids()     # SESSION_END destroyed its live state
+    cfg_voice = host.config.get("summary_voice")     # only 'auto' consults the voice list
+    voices = host._installed_voices() if cfg_voice == "auto" else []
+    body_voice = resolve_summary_voice(cfg_voice, host.config.get("voice"), voices)
+    segments = []                                    # ordered (text, voice)
+    if ended:
+        folder = cu["folder"]
+        segments.append(("{0} ended.".format(folder) if folder else "The session ended.", None))
+    body = sanitize_summary(msg.get("text", "")) if msg.get("ok") else ""
+    if body:
+        segments.append(("Summary:", None))          # frame -> main voice
+        segments.append((body, body_voice))          # body -> distinct voice
+    else:
+        segments.append((cu["digest"], None))        # digest replaces frame+body, main voice
+    if not ended and _has_decision(host, target):
+        segments.append(("Decision waiting.", None))
+    render_id = cu["id"]
+    cu["render_id"] = render_id
+    cu["phase"] = "rendering"
+    cu["ended"] = ended
+    dest = _cue_dest(sessions, target)
+    if dest is None:
+        host._catchup = None                         # nowhere audible (last session gone)
+        return None
+    cu["dest"] = dest                                # the stream the render items live on (for cancel/cut)
+    last = len(segments) - 1
+    ack_id = cu.get("ack_id")                        # land the render AFTER the still-queued ack
+    for i in range(last, -1, -1):                    # reverse -> preserved play order (after the ack, else at_front)
+        text, voice = segments[i]
+        # The last item is the render-DONE marker (always) — it clears self._catchup
+        # on completion; whether it also BURNS is gated on `not ended` in Task 8, so
+        # an ended render still clears the bundle (no spurious "Cancelled." next press).
+        host._enqueue(dest, "prose", text, False, mute_exempt=True, pause_exempt=True,
+                      at_front=True, voice=voice, render_id=render_id,
+                      catchup_burn=(i == last), after_id=ack_id)
+    return None
