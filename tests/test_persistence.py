@@ -326,3 +326,38 @@ def test_restore_drops_a_stale_pile_and_keeps_a_fresh_one():
     assert "fresh" in daemon.sessions.session_ids()            # kept
     assert daemon.history.unheard("old") == []
     assert [e.text for e in daemon.history.unheard("fresh")] == ["y"]
+
+
+def test_restore_fails_open_to_empty_on_malformed_inner_shape():
+    """StateStore.load() validates ONLY the top level (dict + version); it
+    passes through a version-valid file whose INNER shape is malformed. The
+    apply phase must fail open to EMPTY, never PARTIAL: "good"'s history entry
+    is well-formed and (under an in-place, apply-as-you-go restore) would
+    commit successfully before "bad"'s entry -- missing "text" -- raises and
+    aborts the rest. A partial boot (history restored, roster/streams empty)
+    would violate the fail-open-to-EMPTY contract (§8) just as much as a raise
+    would."""
+    from tests.daemon_helpers import make_daemon
+    daemon, _q, speaker, sessions, _c = make_daemon(foreground=None)
+    saved = 1_000_000.0
+    payload = {
+        "version": STATE_VERSION, "saved_wall": saved, "next_id": 9,
+        "sessions": {"good": {"folder": "good", "number": 1},
+                     "bad": {"folder": "bad", "number": 2}},
+        "streams": {},
+        "history": {
+            "good": {"msg_id": 0, "group_seq": 1, "turn_id": 0, "entries": [
+                {"text": "leaked", "kind": "prose", "msg_id": 0, "seq": 0,
+                 "turn_id": 0, "heard": False, "wall_stamp": saved - 10}]},
+            "bad": {"msg_id": 0, "group_seq": 1, "turn_id": 0, "entries": [
+                {"kind": "prose", "msg_id": 0, "seq": 0,          # missing "text"
+                 "turn_id": 0, "heard": False, "wall_stamp": saved - 10}]},
+        },
+    }
+    daemon._store.save(payload)
+    daemon._restore_state()                       # must NOT raise
+    assert sessions.session_ids() == []            # booted EMPTY, not partial
+    assert dict(daemon._streams) == {}
+    assert daemon.history.unheard("good") == []    # NOT leaked from a partial apply
+    assert daemon.history.unheard("bad") == []
+    assert speaker.spoken == [] and speaker.earcons == []

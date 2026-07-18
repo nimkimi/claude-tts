@@ -767,10 +767,23 @@ class SpeechDaemon:
 
     def _restore_state(self) -> None:
         """Re-hydrate history / streams / roster from self._store, single-threaded
-        at boot BEFORE any other actor exists (§8). Fail-OPEN: a missing / corrupt
-        / version-mismatched file (load() -> None) or ANY exception leaves the
-        daemon empty. NEVER touches self.speaker, so it can neither swallow nor
-        duplicate BOOT_CUE (emitted separately in bootstrap.main())."""
+        at boot BEFORE any other actor exists (§8). Fail-OPEN to EMPTY: a missing
+        / corrupt / version-mismatched file (load() -> None) or ANY exception
+        leaves the daemon empty — NEVER partial. StateStore.load() validates only
+        the TOP-level shape (dict + version); an inner malformed sub-dict (a
+        history entry missing a field, a stream/session value that isn't a dict,
+        a non-int next_id) still has to fail open to empty, not apply part of the
+        file and silently drop the rest.
+
+        Build-then-commit, in two phases:
+          PHASE 1 builds every restored piece into LOCAL objects (a temp
+          SessionHistory, a local dict of freshly-built SessionStreams, a
+          pre-validated roster + next_id) — every parse/subscript that can raise
+          happens here, before any self.* attribute is touched.
+          PHASE 2 (reached only once Phase 1 fully validated) commits via pure
+          assignment / dict-update that cannot itself raise.
+        NEVER touches self.speaker, so it can neither swallow nor duplicate
+        BOOT_CUE (emitted separately in bootstrap.main())."""
         try:
             data = self._store.load()
             if data is None:
@@ -796,19 +809,38 @@ class SpeechDaemon:
                     hist.pop(sid, None)
                     streams.pop(sid, None)
                     roster.pop(sid, None)
-            # History rebuilt at the LIVE cap; clock/now default to this history's
-            # own monotonic clock + time.time (production normalization, §5).
-            self.history.load_state(hist)
-            # One SessionStream per restored frontier, set directly on the ledger.
+
+            # ---- PHASE 1: build + validate into LOCAL objects. Anything below
+            # may raise; nothing below may mutate self.* (a raise here must leave
+            # the daemon exactly as constructed — empty). ----
+            from sonari.history import SessionHistory
+            new_history = SessionHistory(cap=self.history._cap)
+            new_history.load_state(hist)              # may raise: malformed entry
+
+            new_streams = {}
             for sid, sd in streams.items():
                 st = SessionStream(queue_cap=self._backlog_cap)
-                st.load_state(sd)
-                self._state._streams[sid] = st
-            # Roster (folder + number), seeding the provisional quarantine (§4.4).
-            self.sessions.load_state(roster)
-            # SpeechItem id continuity nicety (§4.1); fail-open to 0.
-            self._state._next_id = data.get("next_id", 0)
-        except Exception:  # noqa: BLE001 - fail-open to empty state (§8)
+                st.load_state(sd)                      # may raise: sd isn't a dict
+                new_streams[sid] = st
+
+            for sid, sd in roster.items():
+                if not isinstance(sd, dict):
+                    # sessions.load_state() does sd.get(...); pre-validate here so
+                    # Phase 2's call is guaranteed throw-free.
+                    raise ValueError(
+                        "restore: non-dict roster entry for {0!r}".format(sid))
+
+            next_id = data.get("next_id", 0)
+            if not isinstance(next_id, int):
+                raise ValueError("restore: next_id is not an int")
+
+            # ---- PHASE 2: commit. Pure assignment / dict-update only — nothing
+            # below this line may raise (Phase 1 already validated everything). ----
+            self.history = new_history
+            self._state._streams.update(new_streams)
+            self.sessions.load_state(roster)           # pre-validated: can't raise
+            self._state._next_id = next_id
+        except Exception:  # noqa: BLE001 - fail-open to EMPTY (§8), never partial
             pass
 
     def run(self) -> None:
