@@ -17,6 +17,7 @@ def test_defaults_has_documented_top_level_keys():
         "summarizer",
         "summary_voice",
         "summary_model",
+        "restore_max_age_hours",
     }
 
 

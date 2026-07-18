@@ -246,3 +246,83 @@ def test_writer_stop_joins_a_started_thread():
     writer.mark_dirty()
     writer.stop()                                # unblocks the wait + joins
     assert writer._thread is None
+
+
+def test_snapshot_restore_round_trip_and_behavior_decisions():
+    from tests.daemon_helpers import make_daemon
+    # Source daemon: a real pile, a partway frontier, a bumped id counter, and
+    # TRANSIENT state (a held stop + a global voice-state) that must NOT survive.
+    src, *_ = make_daemon(foreground=None)
+    src.sessions.register("s1", cwd="/x/repo")
+    src.history.record("s1", "prose", "one"); src.history.end_message("s1")
+    src.history.record("s1", "prose", "two")
+    src._stream("s1").advance_frontier((0, 0))
+    src._stream("s1").stopped = True             # D1: a held stop
+    src.voice_state = "stopped-all"              # D1: a global hold
+    src._state._next_id = 41
+    with src._lock:
+        data = src._snapshot_state()
+    src._store.save(data)
+
+    # Fresh daemon restores from the same (isolated) SONARI_DIR/state.json.
+    dst, _q, speaker, sessions, _c = make_daemon(foreground=None)
+    dst._restore_state()
+
+    assert [e.text for e in dst.history.unheard("s1")] == ["one", "two"]
+    assert dst._streams["s1"].frontier == (0, 0)
+    assert dst._state._next_id == 41
+    assert sessions.folder("s1") == "repo" and sessions.number("s1") == 1
+    # D1: a held stop does NOT survive restart.
+    assert dst.voice_state == "flowing"
+    assert dst._streams["s1"].stopped is False
+    # D2 + §4.4: identity NOT restored; the session is provisional.
+    assert sessions.identity("s1") is None
+    assert sessions.is_provisional("s1") is True
+    # BOOT_CUE safety: restore never touched the speaker (can't swallow/dup the cue).
+    assert speaker.spoken == [] and speaker.earcons == [] and speaker.cancels == 0
+
+
+def test_restore_fail_open_on_corrupt_and_version_mismatch():
+    from tests.daemon_helpers import make_daemon
+    for content in ("{ not json", json.dumps({"version": 999, "sessions": {}})):
+        daemon, _q, speaker, sessions, _c = make_daemon(foreground=None)
+        os.makedirs(os.path.dirname(daemon._store._path), exist_ok=True)
+        with open(daemon._store._path, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        daemon._restore_state()                  # must NOT raise
+        assert sessions.session_ids() == []      # booted empty
+        assert dict(daemon._streams) == {}
+        assert speaker.spoken == [] and speaker.earcons == []
+
+
+def test_restore_missing_file_is_a_noop():
+    from tests.daemon_helpers import make_daemon
+    daemon, _q, _sp, sessions, _c = make_daemon(foreground=None)
+    daemon._restore_state()                      # no state.json exists
+    assert sessions.session_ids() == []
+
+
+def test_restore_drops_a_stale_pile_and_keeps_a_fresh_one():
+    from tests.daemon_helpers import make_daemon
+    daemon, *_ = make_daemon(foreground=None)
+    saved = 1_000_000.0
+    stale = {
+        "version": STATE_VERSION, "saved_wall": saved, "next_id": 3,
+        "sessions": {"old": {"folder": "old", "number": 1},
+                     "fresh": {"folder": "fresh", "number": 2}},
+        "streams": {},
+        "history": {
+            "old": {"msg_id": 0, "group_seq": 1, "turn_id": 0, "entries": [
+                {"text": "x", "kind": "prose", "msg_id": 0, "seq": 0, "turn_id": 0,
+                 "heard": False, "wall_stamp": saved - 25 * 3600}]},   # 25h > 24h
+            "fresh": {"msg_id": 0, "group_seq": 1, "turn_id": 0, "entries": [
+                {"text": "y", "kind": "prose", "msg_id": 0, "seq": 0, "turn_id": 0,
+                 "heard": False, "wall_stamp": saved - 1 * 3600}]},     # 1h < 24h
+        },
+    }
+    daemon._store.save(stale)
+    daemon._restore_state()
+    assert "old" not in daemon.sessions.session_ids()          # dropped
+    assert "fresh" in daemon.sessions.session_ids()            # kept
+    assert daemon.history.unheard("old") == []
+    assert [e.text for e in daemon.history.unheard("fresh")] == ["y"]

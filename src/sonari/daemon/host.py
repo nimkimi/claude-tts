@@ -16,6 +16,7 @@ from sonari.daemon.context import Ctx
 from sonari.daemon.registry import handler, dispatch
 from sonari.daemon.server import Server
 from sonari.daemon.limits import RATE_MIN, RATE_MAX, MINQUEUE_MIN, MINQUEUE_MAX
+from sonari.daemon.persistence import StateStore, STATE_VERSION
 
 PERMISSION_WAIT_TIMEOUT = 120.0   # daemon's own wait; MUST be < the hook's client send timeout (130s)
 # Side-effect imports: importing each feature module runs its @handler
@@ -117,6 +118,11 @@ class SpeechDaemon:
         # _voices_provider overrides it for tests (hermetic — no `say -v ?`).
         self._voices_provider = None
         self._voices_cache = None
+        # SP6 persistence store: the durable-state file. Path read LIVE (import
+        # SONARI_DIR here, not at module top) so conftest's per-test redirect and
+        # any SONARI_DIR override take effect — matches _arm_faulthandler's pattern.
+        from sonari.paths import SONARI_DIR
+        self._store = StateStore(SONARI_DIR / "state.json")
 
     # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
     # (speak loop + kernel ops) goes through self._state._X directly; these
@@ -739,6 +745,71 @@ class SpeechDaemon:
                 traceback.print_exc(file=sys.stderr)
                 return {"decision": None}   # fail-closed: fall through to terminal
         return result
+
+    def _snapshot_state(self) -> dict:
+        """Build the JSON-shaped durable-state dict for persistence. The CALLER
+        HOLDS self._lock (the PersistenceWriter loop / flush() wraps this call),
+        so every HistoryEntry field is read under the lock and a concurrent
+        heard-flip can't tear the read (§7). Does NO I/O and acquires NO lock
+        itself. Only streams with a live frontier are serialized (the frontier is
+        a stream's sole durable field)."""
+        streams = {sid: st.to_state()
+                   for sid, st in self._state._streams.items()
+                   if st.frontier is not None}
+        return {
+            "version": STATE_VERSION,
+            "saved_wall": time.time(),         # bounded-staleness reference (§4.4)
+            "next_id": self._state._next_id,   # continuity nicety (§4.1)
+            "sessions": self.sessions.to_state(),
+            "streams": streams,
+            "history": self.history.to_state(),
+        }
+
+    def _restore_state(self) -> None:
+        """Re-hydrate history / streams / roster from self._store, single-threaded
+        at boot BEFORE any other actor exists (§8). Fail-OPEN: a missing / corrupt
+        / version-mismatched file (load() -> None) or ANY exception leaves the
+        daemon empty. NEVER touches self.speaker, so it can neither swallow nor
+        duplicate BOOT_CUE (emitted separately in bootstrap.main())."""
+        try:
+            data = self._store.load()
+            if data is None:
+                return
+            hist = dict(data.get("history", {}))
+            streams = dict(data.get("streams", {}))
+            roster = dict(data.get("sessions", {}))
+            # Bounded-staleness drop-on-load (§4.4): a pile whose newest entry was
+            # older than restore_max_age_hours AT THE LAST SAVE (saved_wall
+            # advances every save, so a pile untouched across restarts eventually
+            # trips this) is a long-dead ghost — drop it from every map so it
+            # never resurrects and never inflates the provisional set / numbers.
+            saved_wall = data.get("saved_wall")
+            max_age_s = float(self.config.get("restore_max_age_hours", 24)) * 3600.0
+            if saved_wall is not None:
+                stale = set()
+                for sid, sd in hist.items():
+                    ents = sd.get("entries") or []
+                    newest = ents[-1].get("wall_stamp", saved_wall) if ents else saved_wall
+                    if (saved_wall - newest) > max_age_s:
+                        stale.add(sid)
+                for sid in stale:
+                    hist.pop(sid, None)
+                    streams.pop(sid, None)
+                    roster.pop(sid, None)
+            # History rebuilt at the LIVE cap; clock/now default to this history's
+            # own monotonic clock + time.time (production normalization, §5).
+            self.history.load_state(hist)
+            # One SessionStream per restored frontier, set directly on the ledger.
+            for sid, sd in streams.items():
+                st = SessionStream(queue_cap=self._backlog_cap)
+                st.load_state(sd)
+                self._state._streams[sid] = st
+            # Roster (folder + number), seeding the provisional quarantine (§4.4).
+            self.sessions.load_state(roster)
+            # SpeechItem id continuity nicety (§4.1); fail-open to 0.
+            self._state._next_id = data.get("next_id", 0)
+        except Exception:  # noqa: BLE001 - fail-open to empty state (§8)
+            pass
 
     def run(self) -> None:
         ensure_sonari_dir()
