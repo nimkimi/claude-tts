@@ -1,6 +1,6 @@
 # Sonari — Privacy Policy
 
-_Last updated: 2026-06-05_
+_Last updated: 2026-07-18_
 
 Sonari is a macOS accessibility plugin for [Claude Code](https://claude.ai/code) that reads
 Claude Code's output aloud so you can work eyes-free. This policy explains exactly what it
@@ -20,7 +20,9 @@ permission-prompt actions. That text is:
 
 - processed **in memory** on your machine,
 - handed to the built-in macOS `say` command to be spoken, and
-- **not stored and not sent anywhere.**
+- stored **only on your machine**: since the persistence update, Sonari keeps
+  session text in `~/.sonari/state.json` so unheard speech survives daemon
+  restarts. It is never transmitted.
 
 Sonari's components talk to each other only over a **local socket** on your machine. Nothing
 Sonari handles ever leaves your computer.
@@ -33,6 +35,8 @@ Sonari keeps a few small local files under `~/.sonari/` (and LaunchAgent files u
 - `config.json` — your preferences (voice, speech rate, verbosity).
 - `keymap.json` and `hotkeyd.resolved.json` — your global-hotkey bindings.
 - `install.json` — local file paths and the install timestamp.
+- `state.json` — **session content**: the text of what Sonari has spoken or has
+  yet to speak, kept so your unheard backlog survives restarts. Local only.
 - `*.log` — operational/diagnostic output (startup and errors). Sonari is **not designed to
   record your session content** in these logs.
 
@@ -54,8 +58,10 @@ profile or track usage, and contains no analytics or third-party data processors
 
 ## Removing your data
 
-Run `sonari uninstall` and delete the `~/.sonari/` folder to remove all of Sonari's local
-files.
+Run `sonari uninstall`, then delete the `~/.sonari/` folder. Uninstall alone
+preserves `config.json`, `keymap.json`, and `state.json` (your session text) so
+settings and unheard speech survive a reinstall — deleting `~/.sonari/` removes
+everything, including that stored session content.
 
 ## Changes to this policy
 
