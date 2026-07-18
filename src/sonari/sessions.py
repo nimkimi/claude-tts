@@ -70,6 +70,11 @@ class SessionManager:
         # touches it — keep-going voice drift is not presence (R12 discipline).
         # In-memory, like the roster.
         self._mru: "list[str]" = []
+        # SP6 (§4.4): sessions restored from disk are QUARANTINED until they
+        # re-capture a real identity this lifetime. Seeded by load_state, cleared
+        # by set_identity. Empty for every normally-registered session, so the
+        # is_live fail-close and the ⌃⌘W/chooser exclusions are no-ops off-restore.
+        self._provisional: "set[str]" = set()
 
     def _record(self, session: str, cwd) -> None:
         folder = _basename(cwd)
@@ -183,6 +188,11 @@ class SessionManager:
         and each non-empty field updates it. A real terminal switch (all fields
         non-empty) still fully updates; only empties are ignored. First set on an
         absent session stores it as-is."""
+        # SP6 (§4.4): re-capturing a real identity this lifetime lifts the
+        # provisional quarantine — UNCONDITIONAL (even an all-empty best-effort
+        # identity counts as "this session is back this lifetime"), so quarantine
+        # ends exactly when the next prompt makes the pile reachable (§2).
+        self._provisional.discard(session)
         if identity.tty:
             # Exclusive-tty invariant: a tty device node has exactly ONE live
             # claimant. A non-empty capture is positive evidence this session owns
@@ -234,6 +244,12 @@ class SessionManager:
         """True if *session*'s terminal is still open (its captured tty device node
         exists). Fail-open: an unknown identity or empty tty -> live (never hide a
         live session). Pure read over _identities; writes nothing."""
+        if session in self._provisional:
+            # SP6 (§4.4): fail-CLOSED while provisional — narrowly here, so a
+            # terminal that closed during downtime is never a ghost the chooser or
+            # ⌃⌘W could raise. The fail-OPEN below (normally-registered, no
+            # identity yet) is unchanged.
+            return False
         if session in self._tty_evicted:
             # Positive steal evidence beats fail-open: its recorded terminal is
             # someone else's now, and it has not re-asserted one of its own.
@@ -298,4 +314,28 @@ class SessionManager:
         Returns None when focus is unknown/unmapped — callers fall back to foreground()."""
         s = self._os_focused_session
         return s if (s is not None and s in self._sessions) else None
+
+    def to_state(self) -> dict:
+        """Serialize the durable roster: folder label + stable number per
+        session. Live pointers, identities, MRU, eviction are all transient
+        (§4.2). PURE."""
+        return {s: {"folder": self._sessions.get(s), "number": self._numbers.get(s)}
+                for s in self._sessions}
+
+    def load_state(self, data) -> None:
+        """Rehydrate the roster and seed _provisional with every restored id
+        (§4.4). Numbers are restored so digit teleports stay stable across the
+        restart; a missing number is left unassigned (re-minted on demand). PURE."""
+        for s, sd in data.items():
+            self._sessions[s] = sd.get("folder")
+            num = sd.get("number")
+            if num is not None:
+                self._numbers[s] = num
+            self._provisional.add(s)
+
+    def is_provisional(self, session: str) -> bool:
+        """True for a restored-but-not-yet-reconfirmed session (§4.4). False for
+        every session that has re-captured an identity, and for every session that
+        was never restored."""
+        return session in self._provisional
 

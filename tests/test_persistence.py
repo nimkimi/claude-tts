@@ -122,3 +122,33 @@ def test_session_stream_none_frontier_round_trip():
     st = SessionStream()                                 # frontier None
     st2 = SessionStream(); st2.load_state(st.to_state())
     assert st2.frontier is None
+
+
+def test_sessions_state_round_trip_and_provisional_seed():
+    from sonari.sessions import SessionManager
+    sm = SessionManager()
+    sm.register("s1", cwd="/x/repo"); sm.register("s2", cwd="/x/other")
+    state = json.loads(json.dumps(sm.to_state()))
+    sm2 = SessionManager()
+    sm2.load_state(state)
+    assert sm2.folder("s1") == "repo" and sm2.number("s1") == sm.number("s1")
+    assert sm2.folder("s2") == "other" and sm2.number("s2") == sm.number("s2")
+    assert sm2.is_provisional("s1") and sm2.is_provisional("s2")
+    assert sm2.identity("s1") is None                    # D2: identity NOT restored
+
+
+def test_provisional_session_is_not_live():
+    from sonari.sessions import SessionManager
+    sm = SessionManager()
+    sm.load_state({"s1": {"folder": "repo", "number": 1}})
+    assert sm.is_live("s1") is False                     # fail-CLOSED while provisional
+
+
+def test_set_identity_clears_provisional_and_restores_liveness():
+    from sonari.sessions import SessionManager, Identity
+    sm = SessionManager()
+    sm.load_state({"s1": {"folder": "repo", "number": 1}})
+    assert sm.is_live("s1") is False
+    sm.set_identity("s1", Identity())                    # empty identity still clears it
+    assert sm.is_provisional("s1") is False
+    assert sm.is_live("s1") is True                      # empty tty -> fail-OPEN again
