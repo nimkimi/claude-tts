@@ -38,11 +38,18 @@ HINTS = {
 
 
 def maybe_hint(host, key, session) -> None:
-    """First-encounter hint: once per daemon run, 'everything' verbosity only."""
+    """First-encounter hint: once per daemon run, 'everything' verbosity only.
+
+    Marks the key consumed ONLY when there is a session to actually speak it
+    into. A moment that has nothing playable (e.g. the chooser's first preview
+    landing on no live speaker AND a muted workspace) must not permanently
+    burn the one-shot with nothing ever heard -- leave the key open so the
+    next real encounter this daemon run still teaches it."""
     if key in host._hinted:
         return
     if host.config.get("verbosity", "everything") != "everything":
         return
+    if session is None:
+        return
     host._hinted.add(key)
-    if session is not None:
-        host._enqueue(session, "prose", HINTS[key], False)
+    host._enqueue(session, "prose", HINTS[key], False)

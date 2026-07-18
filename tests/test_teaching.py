@@ -166,6 +166,41 @@ def test_chooser_hint_fires_on_first_open():
     assert len(hints) == 1
 
 
+def test_chooser_hint_survives_a_first_open_with_no_playable_preview():
+    # The very first chooser open can land on a step whose preview has nowhere
+    # to speak (no live speaker AND the workspace stream is muted) -- that must
+    # not permanently burn the "chooser" key. The hint should still fire the
+    # next time an open actually delivers a preview somewhere.
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.register("B", cwd="/x/B")
+    daemon._stream("A").stopped = True                     # workspace muted
+    sessions.set_speaker(None)                              # nowhere to speak
+    daemon.handle_message({"type": "chooser_step", "session": "", "direction": "next"})
+    assert speaker.earcons[-1] == "error"                   # the failed preview, confirmed
+    hints = [it for it in queue._items if it.text == teaching.HINTS["chooser"]]
+    assert hints == []                                      # nothing spoken: not burned yet
+    daemon.handle_message({"type": "chooser_cancel", "session": ""})
+    assert daemon._chooser is None
+    daemon._stream("A").stopped = False                     # workspace playable again
+    sessions.set_speaker("A")
+    daemon.handle_message({"type": "chooser_step", "session": "", "direction": "next"})
+    hints = [it for it in queue._items if it.text == teaching.HINTS["chooser"]]
+    assert len(hints) == 1                                  # the retried open still teaches it
+
+
+def test_maybe_hint_does_not_consume_the_key_on_a_null_session():
+    # Unit-level lock on the ordering fix: a moment with nothing to speak into
+    # must leave the key available for the NEXT call, not silently and
+    # permanently consume it (teaching.maybe_hint, the mark-before-check bug).
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    teaching.maybe_hint(daemon, "chooser", None)
+    assert "chooser" not in daemon._hinted
+    teaching.maybe_hint(daemon, "chooser", "A")
+    assert "chooser" in daemon._hinted
+    hints = [it for it in queue._items if it.text == teaching.HINTS["chooser"]]
+    assert len(hints) == 1
+
+
 def test_catch_up_done_hint_fires_on_successful_summary():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     sessions.set_foreground("fg", cwd="/x/myrepo")
