@@ -3,9 +3,11 @@ whether from a hotkey (keymap.ACTION_MESSAGES) or the CLI. Feeding each command
 straight into handle_message must produce the intended effect, proving the bytes
 the hotkeyd / CLI send are real protocol commands.
 
-Note: stop/skip/cycle_verbosity/reread_options are no longer hotkey actions (removed
-from ACTION_MESSAGES), but the daemon still handles those protocol commands (stop/skip
-ship via the CLI), so they are exercised here with literal messages."""
+Note: stop/skip are deliberately NOT hotkey actions (never registered in
+ACTION_MESSAGES; they ship via the CLI only), but the daemon still handles
+those protocol commands, so they are exercised here with literal messages.
+reread_options and cycle_verbosity ARE hotkey actions (Task 9) — exercised
+via keymap.ACTION_MESSAGES like faster/slower below."""
 
 from sonari import keymap
 from sonari.protocol import MsgType
@@ -59,14 +61,14 @@ def test_slower_message_drops_rate_by_25():
 
 def test_cycle_verbosity_message_advances():
     daemon, queue, speaker, sessions, config = make_daemon(verbosity="everything", foreground="fg")
-    daemon.handle_message(_msg({"type": "cycle_verbosity"}))
+    daemon.handle_message(_msg(keymap.ACTION_MESSAGES["cycle_verbosity"]))
     assert config["verbosity"] == "medium"
 
 
 def test_reread_options_message_works():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     daemon._stream("fg").options = "Option 1: A."
-    daemon.handle_message(_msg({"type": "reread_options"}))
+    daemon.handle_message(_msg(keymap.ACTION_MESSAGES["reread_options"]))
     assert queue.pop_next().text == "Option 1: A."
 
 

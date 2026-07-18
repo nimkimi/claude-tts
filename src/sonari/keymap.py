@@ -154,6 +154,22 @@ ACTIONS = {
         "doc": "Speak slower",
         "proposed": None,
     },
+    "reread_options": {
+        "message": {"type": "reread_options"},
+        "label": "Re-read the options",
+        # wording provisional, pending owner ear-pass
+        "teach": "Re-read the options. Speaks the pending question's choices again.",
+        "doc": "Re-speak the pending question's options",
+        "proposed": None,
+    },
+    "cycle_verbosity": {
+        "message": {"type": "cycle_verbosity"},
+        "label": "Cycle verbosity",
+        # wording provisional, pending owner ear-pass
+        "teach": "Cycle verbosity. Steps between everything, medium, and quiet.",
+        "doc": "Cycle verbosity: everything / medium / quiet",
+        "proposed": None,
+    },
     "skip_pile": {
         "message": {"type": "skip_pile"},
         "label": "Skip the pile",
@@ -226,6 +242,7 @@ _DEFAULT_KEYS = {
     "jump_decision": "d", "where_am_i": "w", "repeat_last": "r",
     "approve": "return", "deny": "escape",
     "faster": "equal", "slower": "minus",
+    "reread_options": "o", "cycle_verbosity": "v",
 }
 
 

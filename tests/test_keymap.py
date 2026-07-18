@@ -56,6 +56,7 @@ def test_default_keymap_macos_uses_ctrl_cmd(mac):
         "nav_prev_response", "nav_next_response",
         "chooser_step_next", "chooser_step_prev",
         "approve", "deny", "repeat_last",
+        "reread_options", "cycle_verbosity",
     }
     assert d["nav_next"]["key"] == "right" and d["nav_next"]["mods"] == ["ctrl", "cmd"]
     assert d["stop_session"]["key"] == "s" and d["stop_all"]["key"] == "m"
@@ -389,3 +390,11 @@ def test_action_for_message_roundtrip():
     for name, meta in keymap.ACTIONS.items():
         assert keymap.action_for_message(dict(meta["message"])) == name
     assert keymap.action_for_message({"type": "no_such"}) is None
+
+
+# --- Task 9: reread_options + cycle_verbosity are bound default actions -----
+
+def test_reread_and_cycle_are_bound_defaults(mac):
+    by = {r["action"]: r for r in keymap.hotkey_rows()}
+    assert by["reread_options"]["combo"] == "Ctrl+Cmd+O"
+    assert by["cycle_verbosity"]["combo"] == "Ctrl+Cmd+V"

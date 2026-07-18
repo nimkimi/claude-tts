@@ -125,6 +125,8 @@ permission is needed.
 | Ctrl+Cmd+Esc | Deny the pending permission request |
 | Ctrl+Cmd+= | Speak faster |
 | Ctrl+Cmd+- | Speak slower |
+| Ctrl+Cmd+O | Re-speak the pending question's options |
+| Ctrl+Cmd+V | Cycle verbosity: everything / medium / quiet |
 
 Available but **unbound by default** (bind via `~/.sonari/keymap.json`):
 

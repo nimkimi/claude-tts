@@ -52,3 +52,21 @@ def test_confirmation_lands_on_the_workspace_not_the_drifted_speaker(monkeypatch
     daemon.handle_message(_msg("set_verbosity", "fg", verbosity="medium"))
     assert [it.text for it in queue._items] == ["Verbosity medium."]
     assert len(stream_queue(daemon, "b")._items) == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 9: CYCLE_VERBOSITY's confirmation aligned to the same live path.
+# ---------------------------------------------------------------------------
+
+def test_cycle_verbosity_speaks_on_workspace_with_exempt_flags(monkeypatch):
+    _nosave(monkeypatch)
+    daemon, queue, speaker, sessions, config = make_daemon(verbosity="everything")
+    sessions.register("b", cwd="/x/b")
+    sessions.set_speaker("b")                      # keep-going drifted the voice
+    daemon.handle_message(_msg("cycle_verbosity", "fg"))
+    assert config["verbosity"] == "medium"
+    assert [it.text for it in queue._items] == ["Verbosity medium."]
+    item = queue._items[0]
+    assert item.mute_exempt is True
+    assert item.pause_exempt is True
+    assert len(stream_queue(daemon, "b")._items) == 0

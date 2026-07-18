@@ -219,9 +219,14 @@ def on_cycle_verbosity(ctx, msg):
         nxt = order[0]
     ctx.host.config["verbosity"] = nxt
     save_config(ctx.host.config)
-    fg = ctx.host.sessions.foreground()
-    if fg is not None:
-        ctx.host._enqueue(fg, "prose", "Verbosity {0}.".format(nxt), False)
+    # Aligned with the live SET_VERBOSITY confirmation (on_set_verbosity, W3):
+    # targets workspace() (W11's collapsed pointer — the terminal you're at
+    # hears its own confirmation), mute_exempt+pause_exempt so the readback
+    # can never be silently swallowed while the voice is held.
+    ws = ctx.host.sessions.workspace()
+    if ws is not None:
+        ctx.host._enqueue(ws, "prose", "Verbosity {0}.".format(nxt), False,
+                          mute_exempt=True, pause_exempt=True)
     return None
 
 
