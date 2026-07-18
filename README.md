@@ -139,14 +139,14 @@ they apply.
 | Slash command | CLI | Effect |
 |---|---|---|
 | `/sonari:doctor` | `sonari doctor` | Run Sonari health checks (TTS, voice, daemon, hooks, hotkeys) |
-| — | `sonari install` | install the LaunchAgent + SONARI_DIR |
+| `/sonari:install` | `sonari install` | One-time Sonari setup — autostart, global hotkeys, control CLI |
 | `/sonari:keymap` | `sonari keymap` | List Sonari hotkey bindings (incl. unbound); '<action> clear' to unbind |
 | `/sonari:minqueue` | `sonari minqueue` | Set how many items Sonari batches before reading (1 = read immediately) |
 | `/sonari:rate` | `sonari rate` | Set Sonari speech rate in words per minute |
 | — | `sonari skip` | skip the current item |
 | `/sonari:status` | `sonari status` | Show Sonari speech daemon status (verbosity, rate, voice, queue) |
 | — | `sonari stop` | stop all speech and clear the queue |
-| — | `sonari uninstall` | remove Sonari (LaunchAgents, launcher, runtime files) |
+| `/sonari:uninstall` | `sonari uninstall` | Remove Sonari's autostart, hotkey helper, launcher, and app copy |
 | `/sonari:verbosity` | `sonari verbosity` | Set Sonari verbosity (everything \| medium \| quiet) |
 | `/sonari:voice` | `sonari voice` | Set the Sonari say voice (omit the name to list installed voices) |
 | `/sonari:voices` | `sonari voices` | Install or remove Sonari neural (Kokoro) voices |
