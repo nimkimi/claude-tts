@@ -134,14 +134,12 @@ def _cmd_keymap(args) -> int:
         print(f"Unbound {action}.")
         return 0
     # No args: list EVERY action — bound ones with their combo, the rest "(unbound)".
-    try:
-        resolved = keymap.resolve_keymap(keymap.load_keymap())
-    except ValueError as exc:
-        print(f"sonari: invalid keymap: {exc}", file=sys.stderr)
-        return 1
-    combo_by_action = {
-        e["action"]: _combo_label(e["modifiers"], e["keyCode"]) for e in resolved
-    }
-    for name in keymap.ACTION_MESSAGES:
-        print("{0:<16} {1}".format(name, combo_by_action.get(name, "(unbound)")))
+    for row in keymap.hotkey_rows():
+        if row["combo"]:
+            where = row["combo"]
+        elif row["proposed"]:
+            where = "unbound (suggested {0})".format(row["proposed"])
+        else:
+            where = "unbound"
+        print("{0} — {1}   [{2}]".format(row["label"], where, row["action"]))
     return 0

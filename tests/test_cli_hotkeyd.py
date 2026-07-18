@@ -98,7 +98,7 @@ def test_keymap_subcommand_prints_the_default_bindings(capsys, tmp_path, monkeyp
             assert action in out
         # faster/slower are listed too, marked unbound (the keymap lists every action)
         assert "faster" in out and "slower" in out
-        assert "(unbound)" in out
+        assert "unbound" in out
         assert "Ctrl" in out and "Cmd" in out
     finally:
         platform._CACHE = None

@@ -3,6 +3,7 @@ from unittest import mock
 import pytest
 
 from sonari import cli
+from sonari.cli import control
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 
 
@@ -285,3 +286,18 @@ def test_skip_subcommand_sends_skip():
     msg, _, _ = _sent(send)
     assert rc == 0
     assert msg == {"v": PROTOCOL_VERSION, "type": MsgType.SKIP}
+
+
+def test_keymap_listing_is_human(capsys):
+    """Keymap listing shows human-readable labels, combos, action names,
+    and surfaces unbound actions and proposed bindings."""
+    class _Args:
+        def __init__(self, action=None, value=None):
+            self.action = action
+            self.value = value
+
+    control._cmd_keymap(_Args(action=None, value=None))
+    out = capsys.readouterr().out
+    assert "Where am I?" in out and "Ctrl+Cmd+W" in out and "where_am_i" in out
+    assert "unbound" in out          # catch_up/skip_pile/learn_mode/query_actions
+    assert "Ctrl+Cmd+L" in out       # proposed chord surfaces
