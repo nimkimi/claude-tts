@@ -27,7 +27,9 @@ def test_timeout_plays_the_expiry_earcon_and_cleans_the_queue():
     daemon, queue, speaker, sessions, config = make_daemon()
     _request(daemon)
     item_id = daemon._pending_decisions["fg"]["item_id"]
-    assert item_id == queue._items[-1].id          # the queued ask is tracked
+    # Task 11: the decision hint is enqueued right after the ask, so the ask is
+    # no longer necessarily the LAST item -- assert it is tracked by id instead.
+    assert any(it.id == item_id for it in queue._items)   # the queued ask is tracked
     r = daemon._await_permission_decision("fg", timeout=0.01)
     assert r == {"decision": None}                 # fail-closed, unchanged
     assert speaker.earcons[-1] == "permission_expired"
@@ -45,7 +47,10 @@ def test_answered_ask_gets_no_expiry_and_no_cleanup():
     r = daemon._await_permission_decision("fg", timeout=1.0)
     assert r == {"decision": "allow"}
     assert "permission_expired" not in speaker.earcons
-    assert len(queue._items) == 1                  # the ask still queued (spoken later)
+    # Task 11: the decision hint also lands in this queue -- filter to the ask
+    # itself, which is what "still queued, no cleanup" is actually about.
+    asks = [it for it in queue._items if it.kind == "permission"]
+    assert len(asks) == 1                           # the ask still queued (spoken later)
 
 
 def test_superseded_ask_gets_no_expiry_and_the_newer_owns_the_slot():

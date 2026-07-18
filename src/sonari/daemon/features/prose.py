@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
+from sonari.daemon.features import teaching
 
 
 @handler(MsgType.PROSE)
@@ -76,6 +77,7 @@ def on_earcon(ctx, msg):
         # Rare (the finishing speaker usually still holds backlog) and self-limiting.
         if not (session == host.sessions.speaker() and host.voice_state == "flowing"):
             host.speaker.earcon(kind)
+            teaching.maybe_hint(host, "background_turn", session)
         # End-of-turn boundary: flush any sub-threshold buffered prose UNCONDITIONALLY
         # (a message below the minqueue threshold must still be read) — the flush
         # survives the earcon suppression above.

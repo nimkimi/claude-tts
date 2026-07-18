@@ -104,7 +104,9 @@ def test_real_blocking_permission_marks_decision_and_leads():
                                summary="rm -rf build"))
     out = _where(daemon, speaker, "fg")
     also = out.split("Also: ", 1)[1]
-    assert also.startswith("2 b, decision, 1 waiting")    # queued ask -> waiting kept
+    # Task 11: the first-encounter decision hint also lands in b's queue right
+    # after the ask, so its own genuinely-unheard count is now 2 (ask + hint).
+    assert also.startswith("2 b, decision, 2 waiting")    # queued ask -> waiting kept
     assert "3 c, 1 unheard" in also                       # pile follows the decision
 
 

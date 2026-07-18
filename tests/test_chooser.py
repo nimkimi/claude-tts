@@ -6,7 +6,7 @@ import sonari.ttyutil as ttyutil
 from sonari.protocol import MsgType
 from sonari.queue import SpeechItem
 from sonari.sessions import Identity
-from sonari.daemon.features import chooser
+from sonari.daemon.features import chooser, teaching
 from tests.daemon_helpers import make_daemon
 from tests.test_daemon_focus_follow import RecordingRaiseService
 
@@ -90,7 +90,11 @@ def test_each_step_swaps_the_previous_queued_preview():
     sessions.register("B", cwd="/x/bravo")
     sessions.register("C", cwd="/x/charlie")
     _step(daemon); _step(daemon)                   # B then C, no loop turn between
-    texts = [it.text for it in daemon._stream("A").queue._items]
+    # Task 11: the first step also fires the one-shot chooser hint (untouched by
+    # preview swapping, unlike the preview items themselves) -- filter it out,
+    # it is orthogonal to what this test proves.
+    texts = [it.text for it in daemon._stream("A").queue._items
+             if it.text != teaching.HINTS["chooser"]]
     assert texts == ["3, charlie."]                # B's preview swapped out, not stacked
     assert speaker.cancels >= 2                    # each preview barge-ins the last
 

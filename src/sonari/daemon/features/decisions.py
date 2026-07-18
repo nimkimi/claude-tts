@@ -4,6 +4,7 @@ import threading
 
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
+from sonari.daemon.features import teaching
 
 
 def _choice_text(msg) -> str:
@@ -170,6 +171,7 @@ def on_permission_request(ctx, msg):
     host.history.end_message(session)
     host._flush_prose_buffer(session)        # prose before the permission ask
     item_id = host._enqueue(session, "permission", text, True, entry=entry, forward=True)
+    teaching.maybe_hint(host, "decision", session)
     # We are under the daemon lock here, so mutate the store directly.
     prev = host._pending_decisions.get(session)
     if prev is not None:

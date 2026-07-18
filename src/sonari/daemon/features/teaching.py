@@ -23,3 +23,26 @@ def on_learn_mode(ctx, msg):
         host._enqueue(ws, "prose", LEARN_ON if entering else LEARN_OFF, False,
                       mute_exempt=True, pause_exempt=True)
     return None
+
+
+# wording provisional, pending owner ear-pass
+HINTS = {
+    "decision": ("Press Control Command Return to approve, Escape to deny, "
+                 "or Control Command O to hear the options again."),
+    "background_turn": ("A background session finished. "
+                        "Control Command J jumps the voice to it."),
+    "chooser": ("Hold the chord and tap Tab to browse. Release to switch. "
+                "Digits teleport."),
+    "catch_up_done": "That was a summary. Control Command R repeats it.",
+}
+
+
+def maybe_hint(host, key, session) -> None:
+    """First-encounter hint: once per daemon run, 'everything' verbosity only."""
+    if key in host._hinted:
+        return
+    if host.config.get("verbosity", "everything") != "everything":
+        return
+    host._hinted.add(key)
+    if session is not None:
+        host._enqueue(session, "prose", HINTS[key], False)

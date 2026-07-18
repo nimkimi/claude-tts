@@ -7,6 +7,7 @@ from sonari.protocol import MsgType, PROTOCOL_VERSION
 from sonari.daemon.registry import handler
 from sonari.catchup import render_slice, build_digest, sanitize_summary, resolve_summary_voice
 from sonari.daemon.features.control import _has_decision
+from sonari.daemon.features import teaching
 
 
 def _result_msg(request_id, result):
@@ -156,4 +157,6 @@ def on_catchup_result(ctx, msg):
         host._enqueue(dest, "prose", text, False, mute_exempt=True, pause_exempt=True,
                       at_front=True, voice=voice, render_id=render_id,
                       catchup_burn=(i == last), after_id=ack_id)
+    if body:                                          # a real summary, not the digest fallback
+        teaching.maybe_hint(host, "catch_up_done", dest)
     return None

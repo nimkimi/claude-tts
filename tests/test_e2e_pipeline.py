@@ -13,7 +13,7 @@ from sonari.hooks_entry import handle_event
 from sonari.protocol import PROTOCOL_VERSION, MsgType
 from sonari.sessions import SessionManager
 from sonari.daemon import SpeechDaemon
-from sonari.daemon.features import lifecycle
+from sonari.daemon.features import lifecycle, teaching
 from sonari.config import DEFAULTS
 
 
@@ -242,7 +242,11 @@ def test_background_reinvocation_does_not_hijack_foreground_voice():
         "Third part.",
     ]
     # B's completion accumulated in B's OWN stream (a waiting target), not lost.
-    assert [i.text for i in daemon._stream("B").queue._items] == [
+    # Task 11: the turn_done landed-ding also fires the one-shot background_turn
+    # hint into B's stream, right after -- filter it out, orthogonal to this test.
+    b_texts = [i.text for i in daemon._stream("B").queue._items
+              if i.text != teaching.HINTS["background_turn"]]
+    assert b_texts == [
         "Background result is ready.",
     ]
 

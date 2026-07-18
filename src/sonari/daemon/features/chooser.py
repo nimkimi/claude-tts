@@ -15,6 +15,7 @@ import time
 
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
+from sonari.daemon.features import teaching
 
 # Injectable clock: tests monkeypatch chooser._now to drive the stale window.
 _now = time.monotonic
@@ -218,6 +219,7 @@ def _commit(host, st, target):
 def on_chooser_step(ctx, msg):
     host = ctx.host
     st = _state_or_none(host)
+    opened = st is None
     if st is None:
         st = _open(host)
         if st is None:
@@ -227,6 +229,8 @@ def on_chooser_step(ctx, msg):
     # on index 1 — a quick tap-and-release IS the previous-session toggle.
     st.index = (st.index + step) % len(st.candidates)
     _deliver_preview(host, st)
+    if opened:
+        teaching.maybe_hint(host, "chooser", st.preview_session)
     return None
 
 

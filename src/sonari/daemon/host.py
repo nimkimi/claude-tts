@@ -108,6 +108,11 @@ class SpeechDaemon:
         # toggle can't trap the cockpit.
         self._learn_mode = False
         self._learn_timer = None
+        # First-encounter hints (teaching.maybe_hint): fired at most once per
+        # daemon run, keyed by moment. Daemon-lifetime scope (unlike
+        # SessionStream's per-stream 'guided' flag), so a host-level set rather
+        # than a stream flag.
+        self._hinted: set = set()
         # Diagnostics: wall-clock start time and monotonic drain heartbeat.
         # _last_drain is None until the first item drains; updated as a bare
         # assignment in note_spoken (no lock — a float write is atomic in CPython,

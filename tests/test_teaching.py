@@ -2,12 +2,17 @@
 'teach' sentence instead of acting, with a 120s idle auto-exit. The interception
 lives in SpeechDaemon._dispatch_hotkey (the raw hotkey path), so a socket message
 is never intercepted; the LEARN_MODE handler in features/teaching.py owns only
-the toggle."""
+the toggle.
+
+Task 11: first-encounter hints (teaching.maybe_hint) — one-shot spoken cues fired
+the first time each of four moments happens in a daemon run, 'everything'
+verbosity only."""
 import threading
 
 import pytest
 
 from sonari import keymap
+from sonari.daemon.features import teaching
 from tests.daemon_helpers import make_daemon
 
 
@@ -98,3 +103,68 @@ def test_auto_exit_timer_rearms_and_fires(timers):
     timers[-1].fn()                                        # the idle timer fires
     assert daemon._learn_mode is False
     assert queue._items[-1].text == "Learn mode off."
+
+
+# --- Task 11: first-encounter hints -------------------------------------------
+
+def test_hint_keys_all_have_sentences():
+    assert set(teaching.HINTS) == {"decision", "background_turn", "chooser",
+                                   "catch_up_done"}
+
+
+def test_hint_fires_once_per_daemon_run():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    for i in range(2):                                     # trigger the decision moment twice
+        with daemon._state.transaction():
+            daemon.handle_message(
+                {"type": "permission_request", "session": "fg",
+                 "tool": "Bash", "summary": "cmd{0}".format(i)})
+    hints = [it for it in queue._items if it.text == teaching.HINTS["decision"]]
+    assert len(hints) == 1                                 # enqueued exactly once
+
+
+def test_hint_respects_verbosity():
+    daemon, queue, speaker, sessions, config = make_daemon(
+        foreground="fg", verbosity="medium")
+    with daemon._state.transaction():
+        daemon.handle_message(
+            {"type": "permission_request", "session": "fg",
+             "tool": "Bash", "summary": "cmd"})
+    hints = [it for it in queue._items if it.text == teaching.HINTS["decision"]]
+    assert hints == []                                     # medium -> no hint
+
+
+def test_background_turn_hint_fires_on_the_landed_ding():
+    # The hint fires only on the branch that actually dings (a session that is
+    # NOT the live speaker finishing) -- matches "A background session finished."
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    sessions.register("B", cwd="/x/B")
+    sessions.set_speaker("B")                              # voice=B, workspace=A
+    daemon.handle_message({"type": "earcon", "session": "A", "kind": "turn_done"})
+    hints = [it for it in queue._items if it.text == teaching.HINTS["background_turn"]]
+    assert len(hints) == 1
+
+
+def test_chooser_hint_fires_on_first_open():
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.register("B", cwd="/x/B")
+    daemon.handle_message({"type": "chooser_step", "session": "", "direction": "next"})
+    hints = [it for it in queue._items if it.text == teaching.HINTS["chooser"]]
+    assert len(hints) == 1
+    # a second step (still the same open gesture) must not fire it again
+    daemon.handle_message({"type": "chooser_step", "session": "", "direction": "next"})
+    hints = [it for it in queue._items if it.text == teaching.HINTS["chooser"]]
+    assert len(hints) == 1
+
+
+def test_catch_up_done_hint_fires_on_successful_summary():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    daemon._catchup = {"id": 1, "target": "fg", "folder": "myrepo",
+                       "slice_end": (0, 0), "digest": "Summary unavailable.",
+                       "cancel": threading.Event(), "phase": "preparing",
+                       "render_id": None, "ended": False, "ack_id": None}
+    daemon.handle_message({"type": "catchup_result", "request_id": 1,
+                           "ok": True, "text": "The build is green.", "reason": ""})
+    hints = [it for it in queue._items if it.text == teaching.HINTS["catch_up_done"]]
+    assert len(hints) == 1
