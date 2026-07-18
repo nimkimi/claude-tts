@@ -95,17 +95,33 @@ Default modifier is **Ctrl+Cmd** (rebindable via `~/.sonari/keymap.json`). A tin
 helper registers these with Carbon `RegisterEventHotKey`, so no macOS accessibility
 permission is needed.
 
+<!-- sonari:generated:hotkeys:begin -->
 | Hotkey | Effect |
 |---|---|
-| Ctrl+Cmd+S | Stop now and clear the queue |
-| Ctrl+Cmd+R | Re-speak the entire last message |
-| Ctrl+Cmd+. | Skip the current item |
+| Ctrl+Cmd+→ | Step forward one item in the current turn |
+| Ctrl+Cmd+← | Step back one item in the current turn |
+| Ctrl+Cmd+↑ | Jump back one whole reply |
+| Ctrl+Cmd+↓ | Jump forward one whole reply |
+| Ctrl+Cmd+S | Stop/resume the current session's voice |
+| Ctrl+Cmd+M | Stop every session's voice |
+| Ctrl+Cmd+J | Move the voice to a background session that is waiting |
 | Ctrl+Cmd+D | Jump to the pending decision |
-| Ctrl+Cmd+L | Replay everything you haven't heard (after stop, or from a session you left), then mark it heard |
-| Ctrl+Cmd+] | Speak faster |
-| Ctrl+Cmd+[ | Speak slower |
-| Ctrl+Cmd+V | Cycle verbosity (everything / medium / quiet) |
-| Ctrl+Cmd+O | Re-read the current prompt's options (numbers, descriptions, multi-select announce) |
+| Ctrl+Cmd+R | Re-speak the last utterance |
+| Ctrl+Cmd+Tab | Browse sessions forward (hold chord, tap Tab) |
+| Ctrl+Cmd+Shift+Tab | Browse sessions backward |
+| Ctrl+Cmd+W | Speak a terse status of all sessions |
+| Ctrl+Cmd+Return | Approve the pending permission request |
+| Ctrl+Cmd+Esc | Deny the pending permission request |
+| Ctrl+Cmd+= | Speak faster |
+| Ctrl+Cmd+- | Speak slower |
+
+Available but **unbound by default** (bind via `~/.sonari/keymap.json`):
+
+| Action | Effect | Suggested binding |
+|---|---|---|
+| `skip_pile` | Settle the unheard backlog without hearing it | Ctrl+Cmd+Shift+↓ |
+| `catch_up` | Hear a summary of the unheard backlog | Ctrl+Cmd+L |
+<!-- sonari:generated:hotkeys:end -->
 
 ### Selecting options
 
