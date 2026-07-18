@@ -20,7 +20,7 @@ Sessions do **not** re-register at the instant of restart — only on their next
 
 ## 3. Approach
 
-**Single atomic JSON snapshot** at `SONARI_DIR / "state.json"`, written via `atomicio.atomic_write_json` (temp + `fsync` + `os.replace`). The durable state is small and bounded (≤ `history_cap` × sessions).
+**Single atomic JSON snapshot** at `SONARI_DIR / "state.json"`, written atomically via a **unique** temp (`tempfile.mkstemp`) + `fsync` + `os.replace` under an internal lock — see §7's concurrent-save safety for why this does **not** reuse `atomicio.atomic_write_json` (whose fixed `path + ".tmp"` would let concurrent saves collide). The durable state is small and bounded (≤ `history_cap` × sessions).
 
 - **Rejected — SQLite:** schema + migration weight disproportionate to a small bounded blob; still needs the same off-lock discipline; no payoff.
 - **Rejected — append-only log:** reintroduces the per-mutation hot-path I/O the campaign forbids, plus compaction.
