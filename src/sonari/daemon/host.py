@@ -31,6 +31,7 @@ from sonari.daemon.features import prose  # noqa: F401
 from sonari.daemon.features import hotkeys  # noqa: F401
 from sonari.daemon.features import chooser  # noqa: F401
 from sonari.daemon.features import catchup  # noqa: F401
+from sonari.daemon.features import teaching  # noqa: F401
 
 
 def _stream_quiescent(st) -> bool:
@@ -102,6 +103,11 @@ class SpeechDaemon:
         # None. Mutated ONLY under self._lock (all chooser handlers run inside
         # _state.transaction()); the speak loop never reads it.
         self._chooser = None
+        # Learn mode (teaching): while on, hotkey messages speak their teach
+        # sentence instead of dispatching. 120s idle auto-exit so a forgotten
+        # toggle can't trap the cockpit.
+        self._learn_mode = False
+        self._learn_timer = None
         # Diagnostics: wall-clock start time and monotonic drain heartbeat.
         # _last_drain is None until the first item drains; updated as a bare
         # assignment in note_spoken (no lock — a float write is atomic in CPython,
@@ -452,6 +458,41 @@ class SpeechDaemon:
         if removed is not None:
             self._state._pending_heard.pop(item_id, None)
 
+    LEARN_MODE_IDLE_S = 120     # ear-adjustable
+
+    def _set_learn_mode(self, on: bool) -> None:
+        if self._learn_timer is not None:
+            self._learn_timer.cancel()
+            self._learn_timer = None
+        self._learn_mode = on
+        if on:
+            self._arm_learn_timer()
+
+    def _arm_learn_timer(self) -> None:
+        import threading
+        if self._learn_timer is not None:
+            self._learn_timer.cancel()
+        self._learn_timer = threading.Timer(self.LEARN_MODE_IDLE_S,
+                                            self._learn_mode_expired)
+        self._learn_timer.daemon = True
+        self._learn_timer.start()
+
+    def _learn_mode_expired(self) -> None:
+        # The idle timer fired on its own thread: take the transaction (the lock)
+        # and re-check the flag before acting, mirroring _expire_permission's
+        # "still ours" discipline — a manual exit that already flipped the flag
+        # (and cancelled us a beat too late) must be a no-op here.
+        with self._state.transaction():
+            if not self._learn_mode:
+                return
+            self._learn_mode = False
+            self._learn_timer = None
+            ws = self.sessions.workspace()
+            if ws is not None:
+                from sonari.daemon.features.teaching import LEARN_OFF
+                self._enqueue(ws, "prose", LEARN_OFF, False,
+                              mute_exempt=True, pause_exempt=True)
+
     def handle_message(self, msg):
         self._ctx.bind(msg)
         try:
@@ -547,7 +588,9 @@ class SpeechDaemon:
                 pass
 
     def _dispatch_hotkey(self, message: dict) -> None:
-        """A hotkey fire is handled exactly like an inbound socket message.
+        """A hotkey fire is handled like an inbound socket message, EXCEPT that
+        learn mode intercepts it here (before dispatch) to speak the pressed key's
+        teach line instead of acting — the socket path is deliberately never taught.
 
         MUST hold self._lock around handle_message, identical to the socket path
         (_handle_conn): the hotkey thread mutates shared state (queue, history,
@@ -559,6 +602,17 @@ class SpeechDaemon:
         """
         try:
             with self._state.transaction():
+                if self._learn_mode and message.get("type") != "learn_mode":
+                    from sonari import keymap
+                    action = keymap.action_for_message(message)
+                    if action is not None:
+                        self._arm_learn_timer()
+                        ws = self.sessions.workspace()
+                        if ws is not None:
+                            self._enqueue(ws, "prose",
+                                          keymap.ACTIONS[action]["teach"], False,
+                                          mute_exempt=True, pause_exempt=True)
+                        return
                 self.handle_message(message)
         except Exception:  # noqa: BLE001 - one bad hotkey must not kill the pump
             pass

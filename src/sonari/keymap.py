@@ -186,6 +186,14 @@ ACTIONS = {
         "doc": "Hear a summary of the unheard backlog",
         "proposed": {"key": "l", "mods": ["ctrl", "cmd"]},
     },
+    "learn_mode": {
+        "message": {"type": "learn_mode"},
+        "label": "Learn mode",
+        # wording provisional, pending owner ear-pass
+        "teach": "Learn mode. Keys describe themselves instead of acting.",
+        "doc": "Toggle learn mode: keys speak what they do instead of doing it",
+        "proposed": None,   # chord chosen at ear-batch #1
+    },
 }
 
 ACTION_MESSAGES = {name: meta["message"] for name, meta in ACTIONS.items()}

@@ -45,6 +45,7 @@ class MsgType:
     SKIP_PILE = "skip_pile"             # deliberate pile-skip: advance the frontier past the pile (SP4)
     CATCH_UP = "catch_up"               # SP5: spoken host-LLM summary of the pile (ships unbound; ⌃⌘L proposed)
     CATCHUP_RESULT = "catchup_result"   # SP5 internal: worker→daemon-loop delivery of a prepared summary
+    LEARN_MODE = "learn_mode"           # SP-D1: toggle learn mode (keys speak their teach line instead of acting)
 
 
 def encode(msg: dict) -> bytes:

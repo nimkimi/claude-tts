@@ -47,6 +47,7 @@ assert_complete([
     MsgType.SKIP_PILE,     # close the pre-existing SP4 omission (handler at playback.py:31)
     MsgType.CATCH_UP,
     MsgType.CATCHUP_RESULT,
+    MsgType.LEARN_MODE,    # SP-D1 teaching handler at features/teaching.py
 ])
 
 __all__ = ["SpeechDaemon", "main", "ensure_running"]

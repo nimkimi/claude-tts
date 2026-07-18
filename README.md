@@ -134,6 +134,7 @@ Available but **unbound by default** (bind via `~/.sonari/keymap.json`):
 |---|---|---|
 | `skip_pile` | Settle the unheard backlog without hearing it | Ctrl+Cmd+Shift+↓ |
 | `catch_up` | Hear a summary of the unheard backlog | Ctrl+Cmd+L |
+| `learn_mode` | Toggle learn mode: keys speak what they do instead of doing it | — |
 <!-- sonari:generated:hotkeys:end -->
 
 ### Selecting options

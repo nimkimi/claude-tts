@@ -123,6 +123,7 @@ ALL_TYPES = [
     _MsgType.SKIP_PILE,
     _MsgType.CATCH_UP,
     _MsgType.CATCHUP_RESULT,
+    _MsgType.LEARN_MODE,
 ]
 
 
