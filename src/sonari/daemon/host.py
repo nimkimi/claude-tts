@@ -867,6 +867,26 @@ class SpeechDaemon:
             except Exception:
                 pass
 
+    def _on_shutdown_signal(self, signum, frame) -> None:
+        """A graceful-teardown signal landed (SIGTERM from `launchctl unload`):
+        drop out of run()'s loop so the `finally` runs the stop/join/flush and the
+        last delta is persisted. Signal-safe: only Event ops, no I/O or locks."""
+        self._running.clear()
+        self._wake.set()
+
+    def _install_signal_handlers(self) -> None:
+        """Install the SIGTERM handler so `sonari install` (which `launchctl
+        unload`s the daemon → SIGTERM) exits run() cleanly into the shutdown flush
+        (§7). Without it, Python's default SIGTERM handler kills the process WITHOUT
+        running `finally`, leaving only the debounced periodic writer's last save.
+        Best-effort: signal.signal works only on the main thread, so a non-main
+        caller (some tests) degrades to periodic-only rather than raising."""
+        try:
+            import signal
+            signal.signal(signal.SIGTERM, self._on_shutdown_signal)
+        except (ValueError, OSError):  # noqa: BLE001 - not main thread / unsupported
+            pass
+
     def run(self) -> None:
         ensure_sonari_dir()
         # SP6: restore is single-threaded, BEFORE the daemon is discoverable and
@@ -879,6 +899,7 @@ class SpeechDaemon:
         transport.write_lockfile(
             LOCK_PATH, transport.HOST, port, self._token, os.getpid())
         self._running.set()
+        self._install_signal_handlers()   # SIGTERM -> clean shutdown flush (§7)
         speak_thread = threading.Thread(target=self._speak_loop, daemon=True)
         speak_thread.start()
         self._server.serve()          # accept thread starts after speak (matches original order)

@@ -464,3 +464,24 @@ def test_restore_pile_becomes_catchable_and_provisional_until_reidentified():
 
     # WHERE_AM_I now reflects the restored unheard for the (now non-provisional) session.
     assert "unheard" in control._entry_clauses(dst, "s1")
+
+
+def test_sigterm_handler_requests_clean_shutdown_so_flush_runs():
+    import signal
+    from tests.daemon_helpers import make_daemon
+    # A SIGTERM (what `launchctl unload` sends on `sonari install`) must drop the
+    # daemon out of run()'s loop so the finally's stop->join->flush runs — without
+    # this handler, Python's default SIGTERM kills the process skipping `finally`,
+    # and only the debounced periodic writer's last save survives.
+    daemon, *_ = make_daemon(foreground=None)
+    daemon._running.set()
+    daemon._wake.clear()
+    old = signal.getsignal(signal.SIGTERM)
+    try:
+        daemon._install_signal_handlers()
+        assert signal.getsignal(signal.SIGTERM) == daemon._on_shutdown_signal
+        daemon._on_shutdown_signal(signal.SIGTERM, None)   # simulate the signal
+        assert not daemon._running.is_set()   # loop exits -> finally -> flush
+        assert daemon._wake.is_set()          # speak loop woken for a prompt join
+    finally:
+        signal.signal(signal.SIGTERM, old)    # restore pytest's handler
