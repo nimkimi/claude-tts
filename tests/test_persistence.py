@@ -419,3 +419,48 @@ def test_flush_persists_the_last_delta():
     assert data is not None
     assert data["sessions"]["s1"]["folder"] == "repo"
     assert data["history"]["s1"]["entries"][0]["text"] == "hello"
+
+
+def test_restore_pile_becomes_catchable_and_provisional_until_reidentified():
+    from sonari.protocol import MsgType, PROTOCOL_VERSION
+    from sonari.daemon.features import control
+    from tests.daemon_helpers import make_daemon
+
+    # Source: session s1 with a 4-message pile; frontier dealt-with through msg 1,
+    # so the catch-up tail is msg 2 + msg 3 (2 items), never the whole 4.
+    src, *_ = make_daemon(foreground=None)
+    src.sessions.register("s1", cwd="/x/repo")
+    for i in range(4):
+        src.history.record("s1", "prose", "p{0}".format(i)); src.history.end_message("s1")
+    src._stream("s1").advance_frontier((1, 0))
+    src._state._next_id = 9
+    with src._lock:
+        data = src._snapshot_state()
+    src._store.save(data)
+
+    # Restore into a fresh daemon (same isolated SONARI_DIR/state.json).
+    dst, _q, _sp, sessions, _c = make_daemon(foreground=None)
+    dst._restore_state()
+    assert sessions.is_provisional("s1") is True
+    assert sessions.identity("s1") is None                 # D2
+
+    # Provisional => invisible to the ⌃⌘W Also-map.
+    assert "repo" not in control._also_clause(dst)
+
+    # The session's next prompt: SET_FOREGROUND WITH a tty (the provisional-clear
+    # trigger) — sets the workspace pointer AND re-captures identity.
+    with dst._state.transaction():
+        dst.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.SET_FOREGROUND,
+                            "session": "s1", "cwd": "/x/repo", "tty": "/dev/ttys404"})
+    assert sessions.is_provisional("s1") is False
+    assert sessions.workspace() == "s1"
+
+    # Catch-up reads the FRONTIER'd tail (2 items), not the whole restored pile.
+    with dst._state.transaction():
+        dst.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.CATCH_UP,
+                            "session": "s1"})
+    acks = [it.text for it in dst._stream("s1").queue._items if "Catching up" in it.text]
+    assert acks == ["Catching up 2 items in repo."]
+
+    # WHERE_AM_I now reflects the restored unheard for the (now non-provisional) session.
+    assert "unheard" in control._entry_clauses(dst, "s1")
