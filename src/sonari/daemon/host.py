@@ -16,7 +16,7 @@ from sonari.daemon.context import Ctx
 from sonari.daemon.registry import handler, dispatch
 from sonari.daemon.server import Server
 from sonari.daemon.limits import RATE_MIN, RATE_MAX, MINQUEUE_MIN, MINQUEUE_MAX
-from sonari.daemon.persistence import StateStore, STATE_VERSION
+from sonari.daemon.persistence import StateStore, PersistenceWriter, STATE_VERSION
 
 PERMISSION_WAIT_TIMEOUT = 120.0   # daemon's own wait; MUST be < the hook's client send timeout (130s)
 # Side-effect imports: importing each feature module runs its @handler
@@ -123,6 +123,10 @@ class SpeechDaemon:
         # any SONARI_DIR override take effect — matches _arm_faulthandler's pattern.
         from sonari.paths import SONARI_DIR
         self._store = StateStore(SONARI_DIR / "state.json")
+        # SP6 off-lock writer: snapshots under self._lock, writes outside it. The
+        # thread is NOT started here — run() starts it AFTER restore (§8).
+        self._persistence = PersistenceWriter(
+            self._store, self._snapshot_state, self._lock)
 
     # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
     # (speak loop + kernel ops) goes through self._state._X directly; these
@@ -381,6 +385,9 @@ class SpeechDaemon:
                     if not cu.get("ended"):
                         self._burn_catchup(cu)
                     self._catchup = None
+        # SP6: the speak-loop completion hook — heard flipped and/or the frontier
+        # advanced above. Outside the lock (mark_dirty takes none).
+        self._persistence.mark_dirty()
 
     def _drop_render_items(self, session, render_id) -> None:
         st = self._state._streams.get(session)
@@ -447,7 +454,13 @@ class SpeechDaemon:
 
     def handle_message(self, msg):
         self._ctx.bind(msg)
-        return dispatch(self._ctx, msg)
+        try:
+            return dispatch(self._ctx, msg)
+        finally:
+            # SP6: the single dispatch chokepoint (socket / hotkey / catch-up all
+            # funnel here). mark_dirty is a non-blocking Event.set — safe under the
+            # transaction lock the three callers hold (§7).
+            self._persistence.mark_dirty()
 
     def _summarizer(self):
         if self._summarizer_override is not None:
@@ -845,6 +858,11 @@ class SpeechDaemon:
 
     def run(self) -> None:
         ensure_sonari_dir()
+        # SP6: restore is single-threaded, BEFORE the daemon is discoverable and
+        # before any speak/accept/hotkey thread can touch state (§8). Takes no
+        # lock; this ordering is what keeps it torn-state-free.
+        self._restore_state()
+        self._persistence.start()
         self._token = secrets.token_hex(32)
         port = self._server.bind()
         transport.write_lockfile(
@@ -863,6 +881,12 @@ class SpeechDaemon:
             pass
         finally:
             self.stop()
+            # SP6 shutdown contract (§7): join the writer, then quiesce the speak
+            # thread (so a final note_spoken can't land after the snapshot), THEN
+            # the final synchronous flush.
+            self._persistence.stop()
+            speak_thread.join(timeout=5.0)
+            self._persistence.flush()
             try:
                 os.unlink(LOCK_PATH)
             except FileNotFoundError:

@@ -361,3 +361,61 @@ def test_restore_fails_open_to_empty_on_malformed_inner_shape():
     assert daemon.history.unheard("good") == []    # NOT leaked from a partial apply
     assert daemon.history.unheard("bad") == []
     assert speaker.spoken == [] and speaker.earcons == []
+
+
+def _hotkey(daemon, mtype, session, **kw):
+    from sonari.protocol import PROTOCOL_VERSION
+    daemon._dispatch_hotkey({"v": PROTOCOL_VERSION, "type": mtype,
+                             "session": session, **kw})
+
+
+def test_store_targets_the_isolated_sonari_dir():
+    from sonari.paths import SONARI_DIR
+    from tests.daemon_helpers import make_daemon
+    daemon, *_ = make_daemon(foreground=None)
+    assert daemon._store._path == str(SONARI_DIR / "state.json")
+    assert daemon._persistence is not None            # writer constructed, not started
+
+
+def test_hotkey_only_skip_pile_marks_dirty():
+    from sonari.protocol import MsgType
+    from tests.daemon_helpers import make_daemon
+    daemon, *_ = make_daemon(foreground="s0")
+    daemon.sessions.register("s0", cwd="/x/s0")
+    daemon.history.record("s0", "prose", "a pile")    # something to skip
+    daemon._persistence._dirty.clear()
+    _hotkey(daemon, MsgType.SKIP_PILE, "s0")
+    assert daemon._persistence._dirty.is_set()        # frontier advance persisted
+
+
+def test_hotkey_only_flush_marks_dirty():
+    from sonari.protocol import MsgType
+    from tests.daemon_helpers import make_daemon
+    daemon, *_ = make_daemon(foreground="s0")
+    daemon._persistence._dirty.clear()
+    _hotkey(daemon, MsgType.FLUSH, "s0")
+    assert daemon._persistence._dirty.is_set()        # turn/msg counter bump persisted
+
+
+def test_note_spoken_marks_dirty():
+    from sonari.queue import SpeechItem
+    from tests.daemon_helpers import make_daemon
+    daemon, *_ = make_daemon(foreground="s0")
+    it = SpeechItem(id=1, session="s0", kind="prose", text="x", is_decision=False)
+    daemon._current_item = it
+    daemon._persistence._dirty.clear()
+    daemon.note_spoken(it, completed=True)
+    assert daemon._persistence._dirty.is_set()
+
+
+def test_flush_persists_the_last_delta():
+    from sonari.daemon.persistence import StateStore
+    from tests.daemon_helpers import make_daemon
+    daemon, *_ = make_daemon(foreground=None)
+    daemon.sessions.register("s1", cwd="/x/repo")
+    daemon.history.record("s1", "prose", "hello")
+    daemon._persistence.flush()                        # the shutdown write
+    data = StateStore(daemon._store._path).load()      # reload via a fresh store
+    assert data is not None
+    assert data["sessions"]["s1"]["folder"] == "repo"
+    assert data["history"]["s1"]["entries"][0]["text"] == "hello"
