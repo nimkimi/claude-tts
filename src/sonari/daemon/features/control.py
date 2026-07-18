@@ -85,7 +85,8 @@ def _also_clause(host, exclude=()):
     else is quiet the map is the positive 'All quiet.'; zero other sessions
     keeps the trained absent landmark."""
     sessions = host.sessions
-    ids = sorted((s for s in sessions.session_ids() if s not in exclude),
+    ids = sorted((s for s in sessions.session_ids()
+                  if s not in exclude and not sessions.is_provisional(s)),
                  key=lambda s: sessions.number(s) or 0)
     decisions, piles, muted_only = [], [], []
     quiet = 0

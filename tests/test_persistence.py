@@ -152,3 +152,26 @@ def test_set_identity_clears_provisional_and_restores_liveness():
     sm.set_identity("s1", Identity())                    # empty identity still clears it
     assert sm.is_provisional("s1") is False
     assert sm.is_live("s1") is True                      # empty tty -> fail-OPEN again
+
+
+def test_provisional_session_absent_from_where_am_i_also_map():
+    from sonari.sessions import Identity
+    from sonari.daemon.features import control
+    from tests.daemon_helpers import make_daemon
+    daemon, *_ = make_daemon(foreground=None)
+    daemon.sessions.load_state({"s1": {"folder": "repo", "number": 1}})  # provisional
+    daemon._stream("s1")                                  # create its stream (frontier None)
+    daemon.history.record("s1", "prose", "unheard pile")  # non-empty clause otherwise
+    assert control._also_clause(daemon) == ""             # provisional -> excluded entirely
+    daemon.sessions.set_identity("s1", Identity())        # clears provisional
+    out = control._also_clause(daemon)
+    assert "repo" in out and "unheard" in out             # now visible, named + counted
+
+
+def test_provisional_session_absent_from_chooser_snapshot():
+    from sonari.daemon.features import chooser
+    from tests.daemon_helpers import make_daemon
+    daemon, *_ = make_daemon(foreground=None)
+    daemon.sessions.load_state({"s1": {"folder": "repo", "number": 1}})
+    _origin, candidates = chooser._snapshot(daemon.sessions)
+    assert "s1" not in candidates                         # is_live False -> filtered; no chooser edit
