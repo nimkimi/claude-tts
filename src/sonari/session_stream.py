@@ -47,3 +47,14 @@ class SessionStream:
         NEVER retreats and is NOT derived from the heard flags."""
         if key is not None and (self.frontier is None or key > self.frontier):
             self.frontier = key
+
+    def to_state(self) -> dict:
+        """Serialize the durable frontier (list form — JSON has no tuple). Only
+        the frontier persists; every other field is transient (§4.2). PURE."""
+        return {"frontier": list(self.frontier) if self.frontier is not None else None}
+
+    def load_state(self, data) -> None:
+        """Rehydrate the frontier, converting JSON's list back to a TUPLE so
+        `key > self.frontier` (tuple-vs-tuple) never raises TypeError (§6). PURE."""
+        f = data.get("frontier")
+        self.frontier = tuple(f) if f is not None else None

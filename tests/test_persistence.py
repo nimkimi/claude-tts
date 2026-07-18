@@ -105,3 +105,20 @@ def test_history_shrunk_cap_keeps_newest_and_frontier_ages_out():
     entries, aged_out = h2.unheard_from_frontier("s1", (0, 0))
     assert aged_out is True                             # (0,0) behind oldest survivor (2,0)
     assert [e.text for e in entries] == ["p2", "p3", "p4"]  # tuple compare, no TypeError
+
+
+def test_session_stream_frontier_round_trip_via_json():
+    from sonari.session_stream import SessionStream
+    st = SessionStream(); st.advance_frontier((3, 0))
+    state = json.loads(json.dumps(st.to_state()))       # tuple -> list over JSON
+    assert state == {"frontier": [3, 0]}
+    st2 = SessionStream(); st2.load_state(state)
+    assert st2.frontier == (3, 0) and isinstance(st2.frontier, tuple)
+    assert (4, 0) > st2.frontier                         # tuple compare, no TypeError
+
+
+def test_session_stream_none_frontier_round_trip():
+    from sonari.session_stream import SessionStream
+    st = SessionStream()                                 # frontier None
+    st2 = SessionStream(); st2.load_state(st.to_state())
+    assert st2.frontier is None
