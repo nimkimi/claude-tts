@@ -20,39 +20,182 @@ from sonari.paths import (
 # pulls them from the active backend via get_platform() at call time (lazy — no
 # import-time OS dispatch). The ONLY sys.platform branch stays in platform/__init__.
 
-# action -> the speechd protocol message it sends. The hotkey-bindable action set
-# is deliberately small: navigation, stop/stop-all, jump, and speech-rate. (stop /
-# skip stay reachable via the CLI; they are just not hotkey actions.)
-ACTION_MESSAGES = {
-    # Message-cursor navigation over the current turn (next/prev/first/last item).
-    "nav_next": {"type": "nav", "to": "next"},
-    "nav_prev": {"type": "nav", "to": "prev"},
-    "nav_first": {"type": "nav", "to": "first"},
-    "nav_last": {"type": "nav", "to": "last"},
-    # Response-to-response navigation (Stage 5): jump a whole turn at a time. Two new
-    # `to` values on the existing NAV message (no new protocol type).
-    "nav_prev_response": {"type": "nav", "to": "prev_response"},
-    "nav_next_response": {"type": "nav", "to": "next_response"},
-    "stop_session": {"type": "stop_session"},   # ⌃⌘S: per-session stop/start
-    "stop_all": {"type": "stop_all"},   # ⌃⌘M: stop every session
-    "jump_waiting": {"type": "jump_waiting"},  # switch voice to a waiting background session
-    "jump_decision": {"type": "jump_decision"},   # ⌃⌘D: jump to the question/decision
-    "repeat_last": {"type": "repeat_last"},   # ⌃⌘R: re-speak the last content utterance
-    "chooser_step_next": {"type": "chooser_step", "direction": "next"},   # ⌃⌘Tab (chord held)
-    "chooser_step_prev": {"type": "chooser_step", "direction": "prev"},   # ⌃⌘⇧Tab
-    "where_am_i": {"type": "where_am_i"},          # ⌃⌘W: terse spoken status
-    "approve": {"type": "answer_permission", "behavior": "allow"},     # ⌃⌘Return: approve permission prompt
-    "deny": {"type": "answer_permission", "behavior": "deny"},         # ⌃⌘Escape: deny permission prompt
-    "faster": {"type": "set_rate", "delta": 25},
-    "slower": {"type": "set_rate", "delta": -25},
-    # SP4 pile-skip: bindable + resolvable, but ships UNBOUND (NOT in _DEFAULT_KEYS) —
-    # the chord is Nima's ear-gate. Proposed: ⌃⌘⇧↓ (keymap.json: key "down",
-    # mods ["ctrl","cmd","shift"]).
-    "skip_pile": {"type": "skip_pile"},
-    # SP5 catch-up: bindable + resolvable, ships UNBOUND (NOT in _DEFAULT_KEYS) —
-    # Nima's ear-gate. Proposed: ⌃⌘L (keymap.json: key "l", mods ["ctrl","cmd"]).
-    "catch_up": {"type": "catch_up"},
+# Every user-facing hotkey verb, with the metadata every consumer derives from:
+# the protocol message (hotkeyd), label + doc (generated README table, keymap
+# CLI), teach (learn mode / first-encounter hints; wording provisional, pending
+# owner ear-pass). An action with no default key ships unbound; "proposed" is
+# the chord the docs advertise for it.
+ACTIONS = {
+    "nav_next": {
+        "message": {"type": "nav", "to": "next"},
+        "label": "Next item",
+        "teach": "Next item. Step forward one item in the current turn.",
+        "doc": "Step forward one item in the current turn",
+        "proposed": None,
+    },
+    "nav_prev": {
+        "message": {"type": "nav", "to": "prev"},
+        "label": "Previous item",
+        "teach": "Previous item. Step back one item in the current turn.",
+        "doc": "Step back one item in the current turn",
+        "proposed": None,
+    },
+    "nav_prev_response": {
+        "message": {"type": "nav", "to": "prev_response"},
+        "label": "Previous response",
+        "teach": "Previous response. Jump back a whole reply.",
+        "doc": "Jump back one whole reply",
+        "proposed": None,
+    },
+    "nav_next_response": {
+        "message": {"type": "nav", "to": "next_response"},
+        "label": "Next response",
+        "teach": "Next response. Jump forward a whole reply.",
+        "doc": "Jump forward one whole reply",
+        "proposed": None,
+    },
+    "stop_session": {
+        "message": {"type": "stop_session"},
+        "label": "Stop or resume this session",
+        "teach": "Stop or resume. Silences this session's voice; press again to resume.",
+        "doc": "Stop/resume the current session's voice",
+        "proposed": None,
+    },
+    "stop_all": {
+        "message": {"type": "stop_all"},
+        "label": "Stop everything",
+        "teach": "Stop everything. Silences every session until resumed.",
+        "doc": "Stop every session's voice",
+        "proposed": None,
+    },
+    "jump_waiting": {
+        "message": {"type": "jump_waiting"},
+        "label": "Jump to a waiting session",
+        "teach": "Jump to a waiting session. Moves the voice to a session that needs you.",
+        "doc": "Move the voice to a background session that is waiting",
+        "proposed": None,
+    },
+    "jump_decision": {
+        "message": {"type": "jump_decision"},
+        "label": "Jump to the decision",
+        "teach": "Jump to the decision. Re-speaks the question that is waiting for an answer.",
+        "doc": "Jump to the pending decision",
+        "proposed": None,
+    },
+    "repeat_last": {
+        "message": {"type": "repeat_last"},
+        "label": "Repeat",
+        "teach": "Repeat. Re-speaks the last thing Sonari said.",
+        "doc": "Re-speak the last utterance",
+        "proposed": None,
+    },
+    "chooser_step_next": {
+        "message": {"type": "chooser_step", "direction": "next"},
+        "label": "Session chooser, next",
+        "teach": "Session chooser. Hold the chord and press Tab to browse sessions; release to switch.",
+        "doc": "Browse sessions forward (hold chord, tap Tab)",
+        "proposed": None,
+    },
+    "chooser_step_prev": {
+        "message": {"type": "chooser_step", "direction": "prev"},
+        "label": "Session chooser, previous",
+        "teach": "Session chooser, backwards.",
+        "doc": "Browse sessions backward",
+        "proposed": None,
+    },
+    "where_am_i": {
+        "message": {"type": "where_am_i"},
+        "label": "Where am I?",
+        "teach": "Where am I. Speaks a one-breath status of every session.",
+        "doc": "Speak a terse status of all sessions",
+        "proposed": None,
+    },
+    "approve": {
+        "message": {"type": "answer_permission", "behavior": "allow"},
+        "label": "Approve",
+        "teach": "Approve. Answers yes to the pending permission request.",
+        "doc": "Approve the pending permission request",
+        "proposed": None,
+    },
+    "deny": {
+        "message": {"type": "answer_permission", "behavior": "deny"},
+        "label": "Deny",
+        "teach": "Deny. Answers no to the pending permission request.",
+        "doc": "Deny the pending permission request",
+        "proposed": None,
+    },
+    "faster": {
+        "message": {"type": "set_rate", "delta": 25},
+        "label": "Faster",
+        "teach": "Faster. Raises the speech rate.",
+        "doc": "Speak faster",
+        "proposed": None,
+    },
+    "slower": {
+        "message": {"type": "set_rate", "delta": -25},
+        "label": "Slower",
+        "teach": "Slower. Lowers the speech rate.",
+        "doc": "Speak slower",
+        "proposed": None,
+    },
+    "skip_pile": {
+        "message": {"type": "skip_pile"},
+        "label": "Skip the pile",
+        "teach": "Skip the pile. Marks this session's unheard backlog as heard without reading it.",
+        "doc": "Settle the unheard backlog without hearing it",
+        "proposed": {"key": "down", "mods": ["ctrl", "cmd", "shift"]},
+    },
+    "catch_up": {
+        "message": {"type": "catch_up"},
+        "label": "Catch up",
+        "teach": "Catch up. Summarizes what you have not heard, then marks it heard.",
+        "doc": "Hear a summary of the unheard backlog",
+        "proposed": {"key": "l", "mods": ["ctrl", "cmd"]},
+    },
 }
+
+ACTION_MESSAGES = {name: meta["message"] for name, meta in ACTIONS.items()}
+
+_MOD_DISPLAY = {"ctrl": "Ctrl", "cmd": "Cmd", "shift": "Shift", "alt": "Alt"}
+_KEY_DISPLAY = {"left": "←", "right": "→", "up": "↑", "down": "↓",
+                "return": "Return", "escape": "Esc", "tab": "Tab",
+                "equal": "=", "minus": "-"}
+
+
+def combo_display(binding) -> str:
+    """'Ctrl+Cmd+W'-style rendering of a {key, mods} binding."""
+    parts = [_MOD_DISPLAY.get(m, m.title()) for m in binding.get("mods", [])]
+    key = (binding.get("key") or "")
+    parts.append(_KEY_DISPLAY.get(key, key.upper()))
+    return "+".join(parts)
+
+
+def hotkey_rows() -> list:
+    """Doc/CLI rows for every action: bound rows first (registry order), then
+    unbound. Uses the PLATFORM DEFAULT keymap, not the user's overrides — docs
+    describe the shipped defaults."""
+    defaults = default_keymap()
+    bound, unbound = [], []
+    for name, meta in ACTIONS.items():
+        binding = defaults.get(name)
+        row = {
+            "action": name,
+            "label": meta["label"],
+            "doc": meta["doc"],
+            "combo": combo_display(binding) if binding and binding.get("key") else None,
+            "proposed": (combo_display(meta["proposed"]) if meta.get("proposed") else None),
+        }
+        (bound if row["combo"] else unbound).append(row)
+    return bound + unbound
+
+
+def action_for_message(msg) -> "str | None":
+    """Reverse lookup: the action whose protocol message equals *msg* exactly.
+    Hotkeyd sends the registered message verbatim, so equality is safe."""
+    for name, meta in ACTIONS.items():
+        if meta["message"] == msg:
+            return name
+    return None
 
 # Shared action -> default key. The chord modifiers are platform-defaulted (macOS:
 # Ctrl+Cmd; Windows: Ctrl+Shift+Alt) via the active backend's default_mods().

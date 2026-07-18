@@ -61,8 +61,6 @@ def test_default_keymap_macos_uses_ctrl_cmd(mac):
     assert d["stop_session"]["key"] == "s" and d["stop_all"]["key"] == "m"
     assert d["jump_decision"]["key"] == "d" and d["where_am_i"]["key"] == "w"
     assert d["faster"]["key"] == "equal" and d["slower"]["key"] == "minus"
-    # Sub-project B: nav_first/nav_last lose their default keys so ⌃⌘↑/↓ can own response-nav.
-    assert "nav_first" not in d and "nav_last" not in d
     assert d["nav_prev_response"] == {"key": "up", "mods": ["ctrl", "cmd"]}
     assert d["nav_next_response"] == {"key": "down", "mods": ["ctrl", "cmd"]}
     assert d["chooser_step_next"] == {"key": "tab", "mods": ["ctrl", "cmd"]}
@@ -90,9 +88,9 @@ def test_default_keymap_binds_only_nav_stop_keys():
     assert {"nav_prev", "nav_next",
             "stop_session", "stop_all", "jump_waiting"} <= set(km.keys())
     assert set(km.keys()) <= set(keymap.ACTION_MESSAGES.keys())
-    # nav_first/nav_last remain valid actions but ship UNBOUND after sub-project B.
-    assert "nav_first" in keymap.ACTION_MESSAGES and "nav_first" not in km
-    assert "nav_last" in keymap.ACTION_MESSAGES and "nav_last" not in km
+    # nav_first/nav_last were cut entirely (Task 1): no longer valid actions at all.
+    assert "nav_first" not in keymap.ACTION_MESSAGES
+    assert "nav_last" not in keymap.ACTION_MESSAGES
 
 
 def test_default_keymap_binds_nav_stop_keys():
@@ -138,12 +136,12 @@ def test_unbind_action_default_writes_unbound_override(monkeypatch, tmp_path):
 
 
 def test_unbind_action_non_default_just_drops(monkeypatch, tmp_path):
-    # nav_first is a valid action that ships UNBOUND after sub-project B, so
+    # skip_pile is a valid action that ships UNBOUND (owner ear-gate), so
     # unbinding it just drops any user binding (no explicit null override needed).
     km, _ = _patch_keymap_paths(monkeypatch, tmp_path)
-    km.write_text(json.dumps({"nav_first": {"key": "]", "mods": ["alt"]}}), encoding="utf-8")
-    keymap.unbind_action("nav_first")            # no default -> remove the binding
-    assert "nav_first" not in json.loads(km.read_text(encoding="utf-8"))
+    km.write_text(json.dumps({"skip_pile": {"key": "]", "mods": ["alt"]}}), encoding="utf-8")
+    keymap.unbind_action("skip_pile")            # no default -> remove the binding
+    assert "skip_pile" not in json.loads(km.read_text(encoding="utf-8"))
 
 
 def test_unbind_unknown_action_raises():
@@ -349,3 +347,45 @@ def test_catch_up_is_a_valid_unbound_action():
     # ...but ships UNBOUND (owner ear-gate, like skip_pile): not in the defaults.
     km = keymap.default_keymap()
     assert "catch_up" not in km
+
+
+# --- Task 1: action registry (ACTIONS) + nav_first/nav_last cut -------------
+
+def test_every_action_has_complete_metadata():
+    for name, meta in keymap.ACTIONS.items():
+        assert meta["message"].get("type"), name
+        for field in ("label", "teach", "doc"):
+            assert isinstance(meta.get(field), str) and meta[field].strip(), (name, field)
+
+
+def test_action_messages_derived_from_actions():
+    assert keymap.ACTION_MESSAGES == {n: m["message"] for n, m in keymap.ACTIONS.items()}
+
+
+def test_nav_first_last_removed():
+    assert "nav_first" not in keymap.ACTIONS
+    assert "nav_last" not in keymap.ACTIONS
+
+
+def test_combo_display(mac):
+    assert keymap.combo_display({"key": "w", "mods": ["ctrl", "cmd"]}) == "Ctrl+Cmd+W"
+    assert keymap.combo_display({"key": "left", "mods": ["ctrl", "cmd"]}) == "Ctrl+Cmd+←"
+    assert keymap.combo_display({"key": "equal", "mods": ["ctrl", "cmd"]}) == "Ctrl+Cmd+="
+
+
+def test_hotkey_rows_bound_then_unbound(mac):
+    rows = keymap.hotkey_rows()
+    names = [r["action"] for r in rows]
+    assert set(names) == set(keymap.ACTIONS)
+    combos = [r["combo"] is not None for r in rows]
+    assert combos == sorted(combos, reverse=True)   # all bound rows precede unbound
+    by = {r["action"]: r for r in rows}
+    assert by["where_am_i"]["combo"] == "Ctrl+Cmd+W"
+    assert by["catch_up"]["combo"] is None
+    assert by["catch_up"]["proposed"] == "Ctrl+Cmd+L"
+
+
+def test_action_for_message_roundtrip():
+    for name, meta in keymap.ACTIONS.items():
+        assert keymap.action_for_message(dict(meta["message"])) == name
+    assert keymap.action_for_message({"type": "no_such"}) is None
