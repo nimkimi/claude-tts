@@ -3,6 +3,7 @@
 gen_docs.py lives in scripts/ (repo tooling, not shipped); load it by path."""
 import importlib.util
 import pathlib
+import re
 
 import pytest
 
@@ -40,3 +41,42 @@ def test_regenerate_is_idempotent(mac):
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     once = gen.regenerate(text)
     assert gen.regenerate(once) == once
+
+
+def test_every_slash_command_has_a_cli_verb(mac):
+    gen = _load_gen_docs()
+    slash, cli = gen.slash_verbs(), gen.cli_verbs()
+    missing = set(slash) - set(cli)
+    assert not missing, "slash commands with no CLI verb: {0}".format(missing)
+
+
+def test_every_cli_verb_is_documented(mac):
+    gen = _load_gen_docs()
+    table = gen.render_commands()
+    for verb in gen.cli_verbs():
+        assert "`sonari {0}".format(verb) in table, verb
+
+
+def test_readme_commands_island_is_current(mac):
+    gen = _load_gen_docs()
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "<!-- sonari:generated:commands:begin -->" in text
+    assert gen.regenerate(text) == text
+
+
+def test_commands_table_rows_are_well_formed(mac):
+    """A frontmatter/help description containing a literal '|' (e.g. verbosity's
+    'everything | medium | quiet') must not widen the row past the header's
+    column count — an unescaped pipe splits GFM tables and silently drops text."""
+    gen = _load_gen_docs()
+    lines = gen.render_commands().splitlines()
+    header_cols = len(re.findall(r"(?<!\\)\|", lines[0]))
+    for line in lines[2:]:
+        assert len(re.findall(r"(?<!\\)\|", line)) == header_cols, line
+
+
+def test_manifest_versions_agree():
+    import json
+    plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
+    market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
+    assert plugin["version"] == market["plugins"][0]["version"]

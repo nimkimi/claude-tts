@@ -20,6 +20,8 @@ for p in (_ROOT, os.path.join(_ROOT, "src")):
 from sonari import keymap
 
 README = os.path.join(_ROOT, "README.md")
+_CLI_EXCLUDE = {"daemon"}          # internal; not a user-facing verb
+COMMANDS_DIR = os.path.join(_ROOT, "commands")
 
 
 def render_hotkeys() -> str:
@@ -42,7 +44,52 @@ def render_hotkeys() -> str:
     return "\n".join(lines)
 
 
-_BLOCKS = {"hotkeys": render_hotkeys}
+def slash_verbs() -> dict:
+    """verb -> frontmatter description, from commands/*.md."""
+    out = {}
+    for fname in sorted(os.listdir(COMMANDS_DIR)):
+        if not fname.endswith(".md"):
+            continue
+        verb = fname[:-3]
+        desc = ""
+        with open(os.path.join(COMMANDS_DIR, fname), encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("description:"):
+                    desc = line.split(":", 1)[1].strip()
+                    break
+        out[verb] = desc
+    return out
+
+
+def cli_verbs() -> dict:
+    """verb -> argparse help string, from the real parser."""
+    from sonari.cli import _build_parser
+    parser = _build_parser()
+    out = {}
+    for action in parser._subparsers._group_actions:
+        for choice, sub in action.choices.items():
+            if choice in _CLI_EXCLUDE:
+                continue
+            help_by_choice = {
+                a.dest: a.help for a in action._choices_actions}
+            out[choice] = help_by_choice.get(choice) or sub.description or ""
+    return out
+
+
+def render_commands() -> str:
+    slash, cli = slash_verbs(), cli_verbs()
+    lines = ["| Slash command | CLI | Effect |", "|---|---|---|"]
+    for verb in sorted(set(slash) | set(cli)):
+        # escape literal '|' (e.g. verbosity's "everything | medium | quiet") so it
+        # can't be mistaken for a table column separator and truncate the row
+        effect = (slash.get(verb) or cli.get(verb, "")).replace("|", "\\|")
+        s = "`/sonari:{0}`".format(verb) if verb in slash else "—"
+        c = "`sonari {0}`".format(verb) if verb in cli else "—"
+        lines.append("| {0} | {1} | {2} |".format(s, c, effect))
+    return "\n".join(lines)
+
+
+_BLOCKS = {"hotkeys": render_hotkeys, "commands": render_commands}
 
 
 def regenerate(text: str) -> str:

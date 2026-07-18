@@ -135,20 +135,22 @@ they apply.
 
 ### Slash commands and CLI
 
+<!-- sonari:generated:commands:begin -->
 | Slash command | CLI | Effect |
 |---|---|---|
-| `/sonari:install` | `sonari install` | One-time setup: autostart, global hotkeys, control CLI (copies runtime to `~/.sonari/app`) |
-| `/sonari:uninstall` | `sonari uninstall` | Remove LaunchAgents, hotkey helper, launcher, and `~/.sonari/app` (keeps your settings) |
-| `/sonari:status` | `sonari status` | Show voice, rate, verbosity, min-queue, foreground session, queue length |
-| `/sonari:verbosity <level>` | `sonari verbosity <level>` | Set `everything` / `medium` / `quiet` |
-| `/sonari:voice <name>` | `sonari voice <name>` | Set the `say` voice |
-| `/sonari:rate <wpm>` | `sonari rate <wpm>` | Set words-per-minute |
-| `/sonari:minqueue <n>` | `sonari minqueue <n>` | Batch this many items before reading (1-10; 1 = read immediately) |
-| `/sonari:repeat` | `sonari repeat` | Re-speak the last item |
-| `/sonari:skip` | `sonari skip` | Skip the current item |
-| `/sonari:stop` | `sonari stop` | Stop now and clear the queue |
-| `/sonari:doctor` | `sonari doctor` | Run all health checks |
-| `/sonari:keymap` | `sonari keymap` | Show the active global hotkey bindings |
+| `/sonari:doctor` | `sonari doctor` | Run Sonari health checks (TTS, voice, daemon, hooks, hotkeys) |
+| — | `sonari install` | install the LaunchAgent + SONARI_DIR |
+| `/sonari:keymap` | `sonari keymap` | List Sonari hotkey bindings (incl. unbound); '<action> clear' to unbind |
+| `/sonari:minqueue` | `sonari minqueue` | Set how many items Sonari batches before reading (1 = read immediately) |
+| `/sonari:rate` | `sonari rate` | Set Sonari speech rate in words per minute |
+| — | `sonari skip` | skip the current item |
+| `/sonari:status` | `sonari status` | Show Sonari speech daemon status (verbosity, rate, voice, queue) |
+| — | `sonari stop` | stop all speech and clear the queue |
+| — | `sonari uninstall` | remove Sonari (LaunchAgents, launcher, runtime files) |
+| `/sonari:verbosity` | `sonari verbosity` | Set Sonari verbosity (everything \| medium \| quiet) |
+| `/sonari:voice` | `sonari voice` | Set the Sonari say voice (omit the name to list installed voices) |
+| `/sonari:voices` | `sonari voices` | Install or remove Sonari neural (Kokoro) voices |
+<!-- sonari:generated:commands:end -->
 
 ## Verbosity
 
