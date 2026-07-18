@@ -71,13 +71,19 @@ def on_earcon(ctx, msg):
     # W9 (absent -> chime alone), so the session==speaker() test must never reach them.
     if kind == "turn_done":
         host = ctx.host
+        speaker = host.sessions.speaker()
         # Known edge (accepted): speaker() is read at earcon-ARRIVAL time, so if
         # keep-going advances the voice off the just-finished session in the
         # hook-latency window, a turn heard live to completion gets one extra ding.
         # Rare (the finishing speaker usually still holds backlog) and self-limiting.
-        if not (session == host.sessions.speaker() and host.voice_state == "flowing"):
+        if not (session == speaker and host.voice_state == "flowing"):
             host.speaker.earcon(kind)
-            teaching.maybe_hint(host, "background_turn", session)
+            # The hint must land in the stream the voice is actually playing, not
+            # the just-finished (background) session's own stream: the speak loop
+            # only ever pops the SPEAKER stream, so a hint enqueued on `session`
+            # would sit unheard until the user reached that session some other
+            # way -- defeating its purpose. Target the speaker instead.
+            teaching.maybe_hint(host, "background_turn", speaker)
         # End-of-turn boundary: flush any sub-threshold buffered prose UNCONDITIONALLY
         # (a message below the minqueue threshold must still be read) — the flush
         # survives the earcon suppression above.

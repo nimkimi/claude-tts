@@ -13,7 +13,7 @@ import pytest
 
 from sonari import keymap
 from sonari.daemon.features import teaching
-from tests.daemon_helpers import make_daemon
+from tests.daemon_helpers import make_daemon, stream_queue
 
 
 @pytest.fixture
@@ -137,12 +137,21 @@ def test_hint_respects_verbosity():
 def test_background_turn_hint_fires_on_the_landed_ding():
     # The hint fires only on the branch that actually dings (a session that is
     # NOT the live speaker finishing) -- matches "A background session finished."
+    # It must land in the STREAM THE VOICE IS PLAYING (the speaker's), not the
+    # just-finished session's own stream: background streams sit unheard until
+    # the user reaches them some other way (the speak loop only ever pops the
+    # speaker stream), which would bury the "Control Command J jumps to it" text
+    # exactly where it's needed to save the user from.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     sessions.register("B", cwd="/x/B")
     sessions.set_speaker("B")                              # voice=B, workspace=A
     daemon.handle_message({"type": "earcon", "session": "A", "kind": "turn_done"})
-    hints = [it for it in queue._items if it.text == teaching.HINTS["background_turn"]]
-    assert len(hints) == 1
+    a_hints = [it for it in queue._items
+               if it.text == teaching.HINTS["background_turn"]]
+    assert a_hints == []                                   # not stuck in A's own stream
+    b_hints = [it for it in stream_queue(daemon, "B")._items
+               if it.text == teaching.HINTS["background_turn"]]
+    assert len(b_hints) == 1                                # heard on the speaker's stream
 
 
 def test_chooser_hint_fires_on_first_open():

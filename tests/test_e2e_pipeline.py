@@ -234,18 +234,20 @@ def test_background_reinvocation_does_not_hijack_foreground_voice():
     assert daemon.sessions.foreground() == "A"
 
     # Draining the voice plays A's whole reply in order — not B's completion.
+    # Task 11: B's turn_done landed-ding also fires the one-shot background_turn
+    # hint, but it must reach the stream the voice is ACTUALLY playing (A's,
+    # since A is the speaker) rather than sitting unheard in B's own stream —
+    # so it lands right after A's reply, FIFO.
     drain_queue(daemon, speaker)
     spoken = [text for kind, text in log if kind == "text"]
     assert spoken == [
         "First part of the answer.",
         "Second part of the answer.",
         "Third part.",
+        teaching.HINTS["background_turn"],
     ]
     # B's completion accumulated in B's OWN stream (a waiting target), not lost.
-    # Task 11: the turn_done landed-ding also fires the one-shot background_turn
-    # hint into B's stream, right after -- filter it out, orthogonal to this test.
-    b_texts = [i.text for i in daemon._stream("B").queue._items
-              if i.text != teaching.HINTS["background_turn"]]
+    b_texts = [i.text for i in daemon._stream("B").queue._items]
     assert b_texts == [
         "Background result is ready.",
     ]

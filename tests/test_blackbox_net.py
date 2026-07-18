@@ -174,7 +174,12 @@ def test_background_session_dings_at_turn_completion():
     assert log == []                                     # no mid-turn ding (waiting retired)
     daemon.handle_message(msg(MsgType.EARCON, "bg", kind="turn_done"))
     drain(daemon)
-    assert log == [("earcon", "turn_done")]              # the "landed" ding at completion (req 16)
+    # The "landed" ding at completion (req 16), followed by the first-encounter
+    # background_turn hint -- spoken on the SPEAKER's stream ("fg", drain()'s
+    # target), never on "bg"'s own stream (which would sit unheard).
+    from sonari.daemon.features import teaching
+    assert log == [("earcon", "turn_done"),
+                    ("text", teaching.HINTS["background_turn"])]
 
 
 # ---------------------------------------------------------------------------
