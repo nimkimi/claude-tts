@@ -242,8 +242,9 @@ class SessionManager:
 
     def is_live(self, session: str) -> bool:
         """True if *session*'s terminal is still open (its captured tty device node
-        exists). Fail-open: an unknown identity or empty tty -> live (never hide a
-        live session). Pure read over _identities; writes nothing."""
+        exists). A provisional (SP6-restored, not-yet-reconfirmed) session fails
+        CLOSED (§4.4). Otherwise fail-open: an unknown identity or empty tty -> live
+        (never hide a live session). Pure read over _identities; writes nothing."""
         if session in self._provisional:
             # SP6 (§4.4): fail-CLOSED while provisional — narrowly here, so a
             # terminal that closed during downtime is never a ghost the chooser or

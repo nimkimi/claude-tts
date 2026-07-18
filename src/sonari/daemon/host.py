@@ -854,7 +854,18 @@ class SpeechDaemon:
             self.sessions.load_state(roster)           # pre-validated: can't raise
             self._state._next_id = next_id
         except Exception:  # noqa: BLE001 - fail-open to EMPTY (§8), never partial
-            pass
+            # A swallowed restore fault loses the whole pile silently on the exact
+            # `sonari install`/crash restart path SP6 protects — leave a trace so
+            # the failure is diagnosable. The diagnostic itself must never re-raise
+            # (booting empty is the contract), so it is wrapped too.
+            try:
+                import sys
+                import traceback
+                print("sonari[restore]: state restore failed, booting empty",
+                      file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+            except Exception:
+                pass
 
     def run(self) -> None:
         ensure_sonari_dir()
