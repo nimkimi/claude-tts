@@ -194,6 +194,14 @@ ACTIONS = {
         "doc": "Toggle learn mode: keys speak what they do instead of doing it",
         "proposed": None,   # chord chosen at ear-batch #1
     },
+    "query_actions": {
+        "message": {"type": "query_actions"},
+        "label": "What can I do?",
+        # wording provisional, pending owner ear-pass
+        "teach": "What can I do. Speaks the keys that matter right now.",
+        "doc": "Speak the actions available right now",
+        "proposed": None,   # chord chosen at ear-batch #1
+    },
 }
 
 ACTION_MESSAGES = {name: meta["message"] for name, meta in ACTIONS.items()}

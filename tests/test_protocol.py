@@ -138,6 +138,7 @@ def test_msgtype_defines_no_extra_string_constants():
         "CATCH_UP": "catch_up",
         "CATCHUP_RESULT": "catchup_result",
         "LEARN_MODE": "learn_mode",
+        "QUERY_ACTIONS": "query_actions",
     }
     assert actual == expected
 

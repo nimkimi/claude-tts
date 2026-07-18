@@ -46,6 +46,7 @@ class MsgType:
     CATCH_UP = "catch_up"               # SP5: spoken host-LLM summary of the pile (ships unbound; ⌃⌘L proposed)
     CATCHUP_RESULT = "catchup_result"   # SP5 internal: worker→daemon-loop delivery of a prepared summary
     LEARN_MODE = "learn_mode"           # SP-D1: toggle learn mode (keys speak their teach line instead of acting)
+    QUERY_ACTIONS = "query_actions"     # "what can I do right now": speaks the context-relevant actions
 
 
 def encode(msg: dict) -> bytes:

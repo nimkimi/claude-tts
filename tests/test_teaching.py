@@ -212,3 +212,34 @@ def test_catch_up_done_hint_fires_on_successful_summary():
                            "ok": True, "text": "The build is green.", "reason": ""})
     hints = [it for it in queue._items if it.text == teaching.HINTS["catch_up_done"]]
     assert len(hints) == 1
+
+
+# --- Task 12: the query key ("what can I do right now") -----------------------
+
+def test_query_pending_decision():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    with daemon._state.transaction():
+        daemon.handle_message(
+            {"type": "permission_request", "session": "fg",
+             "tool": "Bash", "summary": "cmd"})
+    daemon.handle_message({"type": "query_actions"})
+    item = queue._items[-1]
+    assert item.text == teaching.QUERY_DECISION
+    assert item.mute_exempt and item.pause_exempt
+
+
+def test_query_while_stopped():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    daemon.voice_state = "stopped-all"
+    daemon.handle_message({"type": "query_actions"})
+    item = queue._items[-1]
+    assert item.text == teaching.QUERY_STOPPED
+    assert item.mute_exempt and item.pause_exempt
+
+
+def test_query_default():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "query_actions"})
+    item = queue._items[-1]
+    assert item.text == teaching.QUERY_DEFAULT
+    assert item.mute_exempt and item.pause_exempt

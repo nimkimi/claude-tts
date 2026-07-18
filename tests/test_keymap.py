@@ -398,3 +398,11 @@ def test_reread_and_cycle_are_bound_defaults(mac):
     by = {r["action"]: r for r in keymap.hotkey_rows()}
     assert by["reread_options"]["combo"] == "Ctrl+Cmd+O"
     assert by["cycle_verbosity"]["combo"] == "Ctrl+Cmd+V"
+
+
+# --- Task 12: query_actions ships unbound -----------------------------------
+
+def test_query_action_registered_unbound(mac):
+    assert keymap.ACTIONS["query_actions"]["message"] == {"type": "query_actions"}
+    by = {r["action"]: r for r in keymap.hotkey_rows()}
+    assert by["query_actions"]["combo"] is None

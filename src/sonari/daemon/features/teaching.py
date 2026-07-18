@@ -37,6 +37,33 @@ HINTS = {
 }
 
 
+# wording provisional, pending owner ear-pass
+QUERY_DECISION = ("A decision is waiting. Control Command Return approves, "
+                  "Escape denies, O re-reads the options.")
+QUERY_STOPPED = ("Speech is stopped. Control Command S resumes this session, "
+                 "M resumes everything.")
+QUERY_DEFAULT = ("Control Command W says where you are. J jumps to a waiting "
+                 "session. Hold Tab on the chord to browse sessions.")
+
+
+@handler(MsgType.QUERY_ACTIONS)
+def on_query_actions(ctx, msg):
+    from sonari.daemon.features.control import _has_decision
+    host = ctx.host
+    ws = host.sessions.workspace()
+    if ws is None:
+        return None
+    if _has_decision(host, ws):
+        text = QUERY_DECISION
+    elif host.voice_state != "flowing":
+        text = QUERY_STOPPED
+    else:
+        text = QUERY_DEFAULT
+    host._enqueue(ws, "prose", text, False,
+                  mute_exempt=True, pause_exempt=True)
+    return None
+
+
 def maybe_hint(host, key, session) -> None:
     """First-encounter hint: once per daemon run, 'everything' verbosity only.
 
