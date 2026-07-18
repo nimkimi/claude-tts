@@ -22,13 +22,14 @@ from sonari.paths import (
 
 # Every user-facing hotkey verb, with the metadata every consumer derives from:
 # the protocol message (hotkeyd), label + doc (generated README table, keymap
-# CLI), teach (learn mode / first-encounter hints; wording provisional, pending
-# owner ear-pass). An action with no default key ships unbound; "proposed" is
-# the chord the docs advertise for it.
+# CLI), teach (learn mode / first-encounter hints — each marked individually
+# below). An action with no default key ships unbound; "proposed" is the chord
+# the docs advertise for it.
 ACTIONS = {
     "nav_next": {
         "message": {"type": "nav", "to": "next"},
         "label": "Next item",
+        # wording provisional, pending owner ear-pass
         "teach": "Next item. Step forward one item in the current turn.",
         "doc": "Step forward one item in the current turn",
         "proposed": None,
@@ -36,6 +37,7 @@ ACTIONS = {
     "nav_prev": {
         "message": {"type": "nav", "to": "prev"},
         "label": "Previous item",
+        # wording provisional, pending owner ear-pass
         "teach": "Previous item. Step back one item in the current turn.",
         "doc": "Step back one item in the current turn",
         "proposed": None,
@@ -43,6 +45,7 @@ ACTIONS = {
     "nav_prev_response": {
         "message": {"type": "nav", "to": "prev_response"},
         "label": "Previous response",
+        # wording provisional, pending owner ear-pass
         "teach": "Previous response. Jump back a whole reply.",
         "doc": "Jump back one whole reply",
         "proposed": None,
@@ -50,6 +53,7 @@ ACTIONS = {
     "nav_next_response": {
         "message": {"type": "nav", "to": "next_response"},
         "label": "Next response",
+        # wording provisional, pending owner ear-pass
         "teach": "Next response. Jump forward a whole reply.",
         "doc": "Jump forward one whole reply",
         "proposed": None,
@@ -57,6 +61,7 @@ ACTIONS = {
     "stop_session": {
         "message": {"type": "stop_session"},
         "label": "Stop or resume this session",
+        # wording provisional, pending owner ear-pass
         "teach": "Stop or resume. Silences this session's voice; press again to resume.",
         "doc": "Stop/resume the current session's voice",
         "proposed": None,
@@ -64,6 +69,7 @@ ACTIONS = {
     "stop_all": {
         "message": {"type": "stop_all"},
         "label": "Stop everything",
+        # wording provisional, pending owner ear-pass
         "teach": "Stop everything. Silences every session until resumed.",
         "doc": "Stop every session's voice",
         "proposed": None,
@@ -71,6 +77,7 @@ ACTIONS = {
     "jump_waiting": {
         "message": {"type": "jump_waiting"},
         "label": "Jump to a waiting session",
+        # wording provisional, pending owner ear-pass
         "teach": "Jump to a waiting session. Moves the voice to a session that needs you.",
         "doc": "Move the voice to a background session that is waiting",
         "proposed": None,
@@ -78,6 +85,7 @@ ACTIONS = {
     "jump_decision": {
         "message": {"type": "jump_decision"},
         "label": "Jump to the decision",
+        # wording provisional, pending owner ear-pass
         "teach": "Jump to the decision. Re-speaks the question that is waiting for an answer.",
         "doc": "Jump to the pending decision",
         "proposed": None,
@@ -85,6 +93,7 @@ ACTIONS = {
     "repeat_last": {
         "message": {"type": "repeat_last"},
         "label": "Repeat",
+        # wording provisional, pending owner ear-pass
         "teach": "Repeat. Re-speaks the last thing Sonari said.",
         "doc": "Re-speak the last utterance",
         "proposed": None,
@@ -92,6 +101,7 @@ ACTIONS = {
     "chooser_step_next": {
         "message": {"type": "chooser_step", "direction": "next"},
         "label": "Session chooser, next",
+        # wording provisional, pending owner ear-pass
         "teach": "Session chooser. Hold the chord and press Tab to browse sessions; release to switch.",
         "doc": "Browse sessions forward (hold chord, tap Tab)",
         "proposed": None,
@@ -99,6 +109,7 @@ ACTIONS = {
     "chooser_step_prev": {
         "message": {"type": "chooser_step", "direction": "prev"},
         "label": "Session chooser, previous",
+        # wording provisional, pending owner ear-pass
         "teach": "Session chooser, backwards.",
         "doc": "Browse sessions backward",
         "proposed": None,
@@ -106,6 +117,7 @@ ACTIONS = {
     "where_am_i": {
         "message": {"type": "where_am_i"},
         "label": "Where am I?",
+        # wording provisional, pending owner ear-pass
         "teach": "Where am I. Speaks a one-breath status of every session.",
         "doc": "Speak a terse status of all sessions",
         "proposed": None,
@@ -113,6 +125,7 @@ ACTIONS = {
     "approve": {
         "message": {"type": "answer_permission", "behavior": "allow"},
         "label": "Approve",
+        # wording provisional, pending owner ear-pass
         "teach": "Approve. Answers yes to the pending permission request.",
         "doc": "Approve the pending permission request",
         "proposed": None,
@@ -120,6 +133,7 @@ ACTIONS = {
     "deny": {
         "message": {"type": "answer_permission", "behavior": "deny"},
         "label": "Deny",
+        # wording provisional, pending owner ear-pass
         "teach": "Deny. Answers no to the pending permission request.",
         "doc": "Deny the pending permission request",
         "proposed": None,
@@ -127,6 +141,7 @@ ACTIONS = {
     "faster": {
         "message": {"type": "set_rate", "delta": 25},
         "label": "Faster",
+        # wording provisional, pending owner ear-pass
         "teach": "Faster. Raises the speech rate.",
         "doc": "Speak faster",
         "proposed": None,
@@ -134,6 +149,7 @@ ACTIONS = {
     "slower": {
         "message": {"type": "set_rate", "delta": -25},
         "label": "Slower",
+        # wording provisional, pending owner ear-pass
         "teach": "Slower. Lowers the speech rate.",
         "doc": "Speak slower",
         "proposed": None,
@@ -141,6 +157,7 @@ ACTIONS = {
     "skip_pile": {
         "message": {"type": "skip_pile"},
         "label": "Skip the pile",
+        # wording provisional, pending owner ear-pass
         "teach": "Skip the pile. Marks this session's unheard backlog as heard without reading it.",
         "doc": "Settle the unheard backlog without hearing it",
         "proposed": {"key": "down", "mods": ["ctrl", "cmd", "shift"]},
@@ -148,6 +165,7 @@ ACTIONS = {
     "catch_up": {
         "message": {"type": "catch_up"},
         "label": "Catch up",
+        # wording provisional, pending owner ear-pass
         "teach": "Catch up. Summarizes what you have not heard, then marks it heard.",
         "doc": "Hear a summary of the unheard backlog",
         "proposed": {"key": "l", "mods": ["ctrl", "cmd"]},
