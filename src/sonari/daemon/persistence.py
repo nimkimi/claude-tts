@@ -11,6 +11,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 
 # Serialized format version. A mismatch on load() => fail open (§8): the daemon
 # boots empty rather than misreading a future/foreign schema. Reserves the
@@ -66,3 +67,78 @@ class StateStore:
                 except OSError:
                     pass
                 raise
+
+
+class PersistenceWriter:
+    """Off-lock, debounced state writer. A dirty Event coalesces bursts of
+    mark_dirty() into a small bounded number of saves. The snapshot is built
+    UNDER the daemon lock (passed in) and the disk write happens OUTSIDE it, so no
+    I/O ever runs under self._lock (the load-bearing perf rule, §7/§12).
+
+    snapshot_fn is invoked with `lock` held and MUST NOT acquire `lock` itself
+    (threading.Lock is non-reentrant) — it is the host's _snapshot_state, a
+    lock-free builder that reads state under the lock the writer holds.
+    """
+
+    def __init__(self, store, snapshot_fn, lock, *, debounce: float = 1.0,
+                 clock=time.monotonic, sleep=time.sleep) -> None:
+        self._store = store
+        self._snapshot_fn = snapshot_fn
+        self._lock = lock
+        self._debounce = debounce
+        self._clock = clock          # reserved monotonic seam (§9); coalesce uses _sleep
+        self._sleep = sleep
+        self._dirty = threading.Event()
+        self._running = threading.Event()
+        self._thread = None
+
+    def mark_dirty(self) -> None:
+        """Arm a save. NON-BLOCKING: sets an Event and returns. Acquires no lock
+        and does no I/O, so it is safe on the hot path and under self._lock."""
+        self._dirty.set()
+
+    def start(self) -> None:
+        self._running.set()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self) -> None:
+        while self._running.is_set():
+            self._run_one_cycle()
+
+    def _run_one_cycle(self) -> bool:
+        """One debounce+save cycle: block for dirty, coalesce a burst, clear,
+        snapshot, save. Returns False when woken for shutdown (nothing saved),
+        else True. A late mark_dirty landing after clear() re-arms the Event for a
+        redundant next cycle, so no steady-state mutation is dropped (§7)."""
+        self._dirty.wait()
+        if not self._running.is_set():
+            return False
+        self._sleep(self._debounce)          # coalesce a burst into one save
+        self._dirty.clear()
+        self._save_once()
+        return True
+
+    def _save_once(self) -> None:
+        """Build the snapshot UNDER the lock, write OUTSIDE it. Never propagates a
+        fault — a failed save must not kill the writer or the shutdown flush."""
+        try:
+            with self._lock:
+                data = self._snapshot_fn()
+            self._store.save(data)
+        except Exception:  # noqa: BLE001 - a save fault must never propagate
+            pass
+
+    def flush(self) -> None:
+        """Synchronous snapshot + save for shutdown (§7). Same off-lock
+        discipline as the loop; used after the writer thread is joined."""
+        self._save_once()
+
+    def stop(self) -> None:
+        """Stop the loop and JOIN the thread (§7 shutdown contract). Idempotent:
+        a never-started writer just clears the flags."""
+        self._running.clear()
+        self._dirty.set()                    # unblock a waiting _run_one_cycle
+        if self._thread is not None:
+            self._thread.join()
+            self._thread = None

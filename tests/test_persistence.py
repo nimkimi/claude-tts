@@ -175,3 +175,74 @@ def test_provisional_session_absent_from_chooser_snapshot():
     daemon.sessions.load_state({"s1": {"folder": "repo", "number": 1}})
     _origin, candidates = chooser._snapshot(daemon.sessions)
     assert "s1" not in candidates                         # is_live False -> filtered; no chooser edit
+
+
+class _CountingStore:
+    def __init__(self):
+        self.saves = 0
+        self.last = None
+
+    def save(self, data):
+        self.saves += 1
+        self.last = data
+
+
+class _RaisingStore:
+    def save(self, data):
+        raise RuntimeError("disk full")
+
+
+def test_writer_snapshot_runs_under_the_lock():
+    from sonari.daemon.persistence import PersistenceWriter
+    store = _CountingStore()
+    lock = threading.Lock()
+
+    def snap():
+        assert lock.locked() is True            # snapshot MUST be built under the lock
+        return {"version": STATE_VERSION, "n": 7}
+
+    writer = PersistenceWriter(store, snap, lock)
+    writer.flush()                               # synchronous snapshot + save
+    assert store.saves == 1
+    assert store.last == {"version": STATE_VERSION, "n": 7}
+
+
+def test_writer_coalesces_a_burst_into_one_save():
+    from sonari.daemon.persistence import PersistenceWriter
+    store = _CountingStore()
+    lock = threading.Lock()
+    writer = PersistenceWriter(store, lambda: {"version": STATE_VERSION},
+                               lock, debounce=0.0, sleep=lambda _s: None)
+    writer._running.set()                        # arm without launching the thread
+    for _ in range(5):
+        writer.mark_dirty()                      # 5 marks -> one set Event
+    assert writer._run_one_cycle() is True
+    assert store.saves == 1                      # coalesced: 5 marks -> 1 save
+    assert not writer._dirty.is_set()            # drained
+
+
+def test_writer_flush_swallows_a_raising_save():
+    from sonari.daemon.persistence import PersistenceWriter
+    writer = PersistenceWriter(_RaisingStore(), lambda: {"version": STATE_VERSION},
+                               threading.Lock())
+    writer.flush()                               # must NOT raise
+
+
+def test_mark_dirty_acquires_no_lock():
+    from sonari.daemon.persistence import PersistenceWriter
+    lock = threading.Lock()
+    writer = PersistenceWriter(_CountingStore(), lambda: {}, lock)
+    with lock:                                   # hold the lock the writer was given
+        writer.mark_dirty()                      # must not block/deadlock on it
+    assert writer._dirty.is_set()
+
+
+def test_writer_stop_joins_a_started_thread():
+    from sonari.daemon.persistence import PersistenceWriter
+    store = _CountingStore()
+    writer = PersistenceWriter(store, lambda: {"version": STATE_VERSION},
+                               threading.Lock(), debounce=0.0)
+    writer.start()
+    writer.mark_dirty()
+    writer.stop()                                # unblocks the wait + joins
+    assert writer._thread is None
