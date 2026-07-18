@@ -13,7 +13,16 @@ off.
 - **Selection by number** — answer prompts with the option's number; no key injection.
 - **Global hotkeys** — stop, repeat, skip, jump-to-decision, catch-up, rate, verbosity, re-read (work mid-speech).
   - **Catch-up** summarizes a session via your own logged-in coding-agent CLI (no separate API key). It draws from that subscription's usage — roughly 16–32k tokens a press, far cheaper on repeats within the hour — and falls back to a plain last-line digest when the summary is unavailable.
-- **Self-contained** — runs on the macOS system Python; no `pip`, no third-party packages.
+- **Self-contained core** — the speech engine runs on the macOS system Python; no pip, no third-party packages. (The optional Kokoro neural voice is a separate ~316 MB add-on — see Voices.)
+
+## Privacy
+
+Sonari runs entirely on your own Mac. It collects nothing, sends nothing over the network,
+and has no servers, telemetry, or analytics.
+
+Sonari stores session text locally in ~/.sonari/state.json so unheard speech survives
+restarts. Nothing leaves your Mac. Uninstall preserves this file — delete ~/.sonari to
+remove everything. See [PRIVACY.md](PRIVACY.md).
 
 ## Requirements
 
@@ -68,26 +77,28 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 
 The public install path above does **not** use `pip` — the venv is for tests only.
 
-## Enhanced-voice setup (recommended)
+## What it sounds like
 
-Sonari defaults to the best enhanced/neural English voice it can find and falls back to
-**Samantha**. Enhanced voices sound dramatically better and are free and offline. To install
-one:
+You ask Claude to refactor a file and look away:
 
-1. Open **System Settings → Accessibility → Spoken Content**.
-2. Click **System Voice → Manage Voices…**.
-3. Pick an English voice marked **(Enhanced)** or **(Premium)** — e.g. *Ava (Premium)*,
-   *Zoe (Premium)*, or *Allison* — and download it.
-4. Run `sonari doctor` to confirm Sonari picks it up, or pin it explicitly:
+> *"I'll update the parser to handle nested blocks. First I'll read the current implementation…"*
+> — spoken as it streams, sentence by sentence.
+>
+> **♪ chime** — the permission earcon, the instant Claude asks.
+> *"Permission: Edit parser.py. Press Control Command Return to approve."*
+>
+> You press ⌃⌘Return without looking up. The voice continues:
+> *"Done. The parser now handles nested blocks."*
+> **♪ ding** — your turn.
 
-```bash
-sonari voice "Ava (Premium)"
-```
+A second session finishing in the background plays its own turn-done sound; press ⌃⌘J to jump the voice over to it, or ⌃⌘W anytime to hear where everything stands.
 
-## Controls and slash commands
+## The cockpit
 
-Control is via global hotkeys (work even mid-speech), the `sonari` CLI, and namespaced slash
-commands inside a session.
+Start with **⌃⌘W** — it's home base. It speaks a terse status of every session you have
+running: what the voice is on, what's piled up behind it, and where your hands are focused
+right now. Press it whenever you lose track; everything below is easier once you know you
+can always ask.
 
 ### Global hotkeys
 
@@ -133,7 +144,55 @@ then `Enter` to confirm. If a question has **more than nine options**, numbers c
 use the **arrow keys** plus `Enter` for the tenth and beyond. Sonari speaks these cues when
 they apply.
 
-### Slash commands and CLI
+Digits answer the prompt on screen; digits while holding the chooser chord (⌃⌘Tab) switch
+sessions instead — two different digit meanings, never active at once.
+
+## Sessions and the fleet
+
+The voice only ever follows one session at a time — the **speaker**. Run several sessions
+side by side and the rest keep going in the background: their prose and decisions pile up
+silently in their own queue (nothing is lost), and each one plays a short **earcon** the
+moment it finishes a turn or needs you, so you know something happened without hearing it
+live.
+
+Press **⌃⌘J** to jump the voice straight to whichever background session is waiting, or
+hold **⌃⌘Tab** and tap through the chooser to browse the fleet by number. Left alone,
+Sonari's keep-going behavior also advances the voice to the longest-waiting background
+session once the current one runs out of queued speech.
+
+Wherever you answer a question or approve a permission is simply whatever terminal you're
+typing in — your response always goes there, whether or not that session currently has the
+voice.
+
+## Voices
+
+Sonari defaults to the best enhanced/neural English voice it can find and falls back to
+**Samantha**.
+
+### Enhanced voices (recommended)
+
+Enhanced voices sound dramatically better and are free and offline. To install one:
+
+1. Open **System Settings → Accessibility → Spoken Content**.
+2. Click **System Voice → Manage Voices…**.
+3. Pick an English voice marked **(Enhanced)** or **(Premium)** — e.g. *Ava (Premium)*,
+   *Zoe (Premium)*, or *Allison* — and download it.
+4. Run `sonari doctor` to confirm Sonari picks it up, or pin it explicitly:
+
+```bash
+sonari voice "Ava (Premium)"
+```
+
+### Neural voice (Kokoro)
+
+`/sonari:voices` provisions the optional Kokoro neural voice — a ~316 MB download that
+installs its own Python runtime via uv/pip. Quality is comparable to Apple's Premium voices;
+try those (free, no download tooling) first.
+
+## Slash commands and CLI
+
+Sonari's setup and speech-control commands are also available as `sonari` CLI subcommands
+and, where it makes sense inside a session, as namespaced slash commands.
 
 <!-- sonari:generated:commands:begin -->
 | Slash command | CLI | Effect |
@@ -175,14 +234,6 @@ turn in the queue. Claude Code blocks on the prompt until you respond, so hearin
 context first costs nothing. "Higher priority" therefore means *"alert you instantly with a
 sound,"* never *"speak it out of order."*
 
-## Per-session behavior
-
-Sonari tracks a single **foreground** session (set by `SessionStart` and each
-`UserPromptSubmit`). Only the foreground session is *spoken*; if you run multiple sessions,
-background sessions still fire decision **earcons** so you are alerted, but their prose and
-decision text are not read aloud until you bring that session forward. Submitting a new
-prompt or stopping flushes the queue, so the voice always resumes at what is current.
-
 ## Doctor and troubleshooting
 
 Run `sonari doctor` first — it reports each check as pass/fail. Common issues:
@@ -191,7 +242,7 @@ Run `sonari doctor` first — it reports each check as pass/fail. Common issues:
   daemon starts lazily on the first hook; if the socket is unreachable, run `sonari install`
   to (re)load the daemon (`sonari doctor` tells you whether the socket is reachable), or
   check `~/.sonari/speechd.log`.
-- **Robotic voice.** No enhanced voice is installed; see *Enhanced-voice setup* above.
+- **Robotic voice.** No enhanced voice is installed; see *Voices* above.
 - **Hooks not firing.** Re-enable `sonari` via `/plugin` (or re-launch with
   `claude --plugin-dir /path/to/sonari`), then run `sonari doctor` and confirm the
   `plugin hooks.json` check passes.
@@ -204,26 +255,12 @@ State, config, the socket, and logs all live under `~/.sonari/`
 
 ## Uninstall
 
-To remove Sonari, disable the `sonari` plugin via `/plugin` (or stop passing
-`--plugin-dir`), then run:
+Disable the `sonari` plugin via `/plugin` (or stop passing `--plugin-dir`), then run
+`sonari uninstall` (or, from inside a session, `/sonari:uninstall`).
 
-```bash
-sonari uninstall
-```
-
-`sonari uninstall` removes the LaunchAgents, the hotkey helper, and the
-`~/.local/bin/sonari` launcher. It preserves your `~/.sonari/config.json` and
-`~/.sonari/keymap.json` so your settings survive a reinstall.
-
-The in-session equivalent is `/sonari:uninstall`. Uninstall also removes the
-stable app copy at `~/.sonari/app`, and **preserves** your `config.json` and
-`keymap.json`.
-
-## Privacy
-
-Sonari runs entirely on your own Mac. It collects nothing, sends nothing over the network,
-and has no servers, telemetry, or analytics — the text it speaks is processed locally and is
-never stored or transmitted. See [PRIVACY.md](PRIVACY.md) for the full details.
+This removes the LaunchAgents, the hotkey helper, the `~/.local/bin/sonari` launcher, and
+the stable app copy at `~/.sonari/app`. It **preserves** `config.json`, `keymap.json`, and
+`state.json` (your session text) — delete `~/.sonari` to remove everything.
 
 ## License
 
