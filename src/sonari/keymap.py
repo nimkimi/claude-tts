@@ -197,11 +197,11 @@ def action_for_message(msg) -> "str | None":
             return name
     return None
 
+
 # Shared action -> default key. The chord modifiers are platform-defaulted (macOS:
 # Ctrl+Cmd; Windows: Ctrl+Shift+Alt) via the active backend's default_mods().
-# nav_first/nav_last remain valid actions but ship UNBOUND so ⌃⌘↑/↓ can own
-# response-nav (extra_default_bindings). Per-platform extras (chooser, response-nav)
-# are NOT listed here — they live in extra_default_bindings().
+# Per-platform extras (chooser, response-nav) are NOT listed here — they live in
+# extra_default_bindings(), which is what frees ⌃⌘↑/↓ for response-nav.
 _DEFAULT_KEYS = {
     "nav_prev": "left", "nav_next": "right",
     "stop_session": "s", "stop_all": "m", "jump_waiting": "j",
