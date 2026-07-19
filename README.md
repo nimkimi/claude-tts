@@ -11,7 +11,7 @@ off.
 - **Ordered narration** — prose, plans, questions, and permissions are spoken in order, never out of sequence.
 - **Per-decision earcons** — a distinct sound the moment a question, plan, permission, or error appears.
 - **Selection by number** — answer prompts with the option's number; no key injection.
-- **Global hotkeys** — stop, repeat, skip, jump-to-decision, catch-up, rate, verbosity, re-read (work mid-speech).
+- **Global hotkeys** — stop, repeat, jump between sessions, jump-to-decision, where-am-I, re-read options, verbosity, rate — all work mid-speech. Catch-up and skip-the-pile ship unbound, ready to bind.
   - **Catch-up** summarizes a session via your own logged-in coding-agent CLI (no separate API key). It draws from that subscription's usage — roughly 16–32k tokens a press, far cheaper on repeats within the hour — and falls back to a plain last-line digest when the summary is unavailable.
 - **Self-contained core** — the speech engine runs on the macOS system Python; no pip, no third-party packages. (The optional Kokoro neural voice is a separate ~316 MB add-on — see Voices.)
 
