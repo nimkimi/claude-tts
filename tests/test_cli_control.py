@@ -5,12 +5,23 @@ import pytest
 from sonari import cli
 from sonari.cli import control
 from sonari.protocol import MsgType, PROTOCOL_VERSION
+import sonari.platform as platform
 
 
 def _sent(send_mock):
     assert send_mock.call_count == 1, send_mock.call_args_list
     args, kwargs = send_mock.call_args
     return args[0], args, kwargs
+
+
+@pytest.fixture
+def mac(monkeypatch):
+    """Pin the active platform to macOS so combo strings (e.g. 'Ctrl+Cmd+W')
+    are deterministic regardless of the host running the suite."""
+    monkeypatch.setattr(platform.sys, "platform", "darwin")
+    platform._CACHE = None
+    yield
+    platform._CACHE = None
 
 
 def test_status_sends_status_and_prints(capsys):
@@ -288,9 +299,11 @@ def test_skip_subcommand_sends_skip():
     assert msg == {"v": PROTOCOL_VERSION, "type": MsgType.SKIP}
 
 
-def test_keymap_listing_is_human(capsys):
+def test_keymap_listing_is_human(mac, capsys):
     """Keymap listing shows human-readable labels, combos, action names,
-    and surfaces unbound actions and proposed bindings."""
+    and surfaces unbound actions and proposed bindings. Pinned to macOS (the
+    `mac` fixture) so the exact combo strings ('Ctrl+Cmd+W') are deterministic
+    regardless of the host running the suite."""
     class _Args:
         def __init__(self, action=None, value=None):
             self.action = action
@@ -301,3 +314,25 @@ def test_keymap_listing_is_human(capsys):
     assert "Where am I?" in out and "Ctrl+Cmd+W" in out and "where_am_i" in out
     assert "unbound" in out          # catch_up/skip_pile/learn_mode/query_actions
     assert "Ctrl+Cmd+L" in out       # proposed chord surfaces
+
+
+def test_keymap_listing_reflects_persisted_override(mac, capsys, tmp_path, monkeypatch):
+    """A user override persisted in keymap.json must be what the no-args
+    listing shows — not the compiled-in platform default."""
+    import json
+
+    monkeypatch.setattr(control.keymap, "KEYMAP_PATH", tmp_path / "keymap.json")
+    (tmp_path / "keymap.json").write_text(
+        json.dumps({"where_am_i": {"key": "q", "mods": ["ctrl", "cmd"]}}),
+        encoding="utf-8",
+    )
+
+    class _Args:
+        def __init__(self, action=None, value=None):
+            self.action = action
+            self.value = value
+
+    control._cmd_keymap(_Args(action=None, value=None))
+    out = capsys.readouterr().out
+    assert "Ctrl+Cmd+Q" in out           # the persisted override
+    assert "Ctrl+Cmd+W" not in out       # not the compiled-in default

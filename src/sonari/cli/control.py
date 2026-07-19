@@ -133,8 +133,10 @@ def _cmd_keymap(args) -> int:
             pass
         print(f"Unbound {action}.")
         return 0
-    # No args: list EVERY action — bound ones with their combo, the rest "(unbound)".
-    for row in keymap.hotkey_rows():
+    # No args: list EVERY action against the user's ACTUAL keymap (defaults
+    # merged with any persisted overrides) — bound ones show their combo, the
+    # rest "unbound".
+    for row in keymap.hotkey_rows(keymap.load_keymap()):
         if row["combo"]:
             where = row["combo"]
         elif row["proposed"]:

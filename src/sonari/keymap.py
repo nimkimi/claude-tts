@@ -220,14 +220,17 @@ def combo_display(binding) -> str:
     return "+".join(parts)
 
 
-def hotkey_rows() -> list:
+def hotkey_rows(bindings=None) -> list:
     """Doc/CLI rows for every action: bound rows first (registry order), then
-    unbound. Uses the PLATFORM DEFAULT keymap, not the user's overrides — docs
-    describe the shipped defaults."""
-    defaults = default_keymap()
+    unbound. Defaults to the PLATFORM DEFAULT keymap (what generated docs like
+    the README and scripts/gen_docs.py describe) when *bindings* is omitted.
+    Callers that need to reflect what is actually bound right now — e.g. the
+    `sonari keymap` listing — pass load_keymap() explicitly."""
+    if bindings is None:
+        bindings = default_keymap()
     bound, unbound = [], []
     for name, meta in ACTIONS.items():
-        binding = defaults.get(name)
+        binding = bindings.get(name)
         row = {
             "action": name,
             "label": meta["label"],
