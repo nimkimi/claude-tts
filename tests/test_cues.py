@@ -3,7 +3,7 @@ daemon emits), well-formed (known families/tiers only), helper-consistent."""
 from sonari.cues import CUES, Cue, is_registered, transient_kinds
 
 FAMILIES = {"attention", "feedback", "failure", "status", "attribution", "content"}
-TIERS = {"transient", "prelude", "queued"}
+TIERS = {"transient", "prelude", "queued", "alarm"}
 
 
 def test_registry_keys_match_entry_names():
@@ -35,3 +35,10 @@ def test_prelude_and_queued_entries():
 def test_is_registered():
     assert is_registered("error")
     assert not is_registered("waiting")   # the retired SP3 kind must not come back
+
+
+def test_alarm_tier_entries():
+    # §7 registry honesty: the witness alarms are REGISTERED but out-of-band —
+    # raw-spawn playback for when the queue/arbiter may be dead.
+    assert {n for n, c in CUES.items() if c.tier == "alarm"} == {
+        "alarm_daemon_down", "alarm_hotkeys_down"}

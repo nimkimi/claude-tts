@@ -12,9 +12,15 @@ Tiers:
   cancel epoch — barge-in cuts the whole unit and it replays whole).
 - "queued": the speak loop's normal verbal traffic (registered for
   completeness and the generated README island; no separate mechanism).
+- "alarm": contractually OUT-OF-BAND verbal+tone (the witness): played via a
+  raw process spawn precisely because the queue/arbiter may be dead; never
+  fired through host.cue() (it rejects the tier) nor the transient arbiter.
 
-Reserved for later — deliberately NOT entries (YAGNI): D7's answerable/
-unanswerable failure split, D2's silence cues."""
+D2/D7 delivered their reserved cues (failure words ride cue(word=); the
+silences are your_turn/submit_ack/repoint/crossing; the witness owns the alarm
+tier). Still deliberately NOT entries (YAGNI): a watcher for the alarm paths
+themselves (the disclosed residual), and the off-queue boot cue's future
+home."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,7 +30,7 @@ from dataclasses import dataclass
 class Cue:
     name: str          # registry key
     family: str        # "attention" | "feedback" | "failure" | "status" | "attribution" | "content"
-    tier: str          # "transient" | "prelude" | "queued"
+    tier: str          # "transient" | "prelude" | "queued" | "alarm"
     doc: str           # user-facing one-liner for the generated README island
     # transient cues resolve their asset via Speaker (config-first + fallbacks);
     # prelude cues resolve per call site (spearcon path / pitch asset).
@@ -67,6 +73,13 @@ CUES = {c.name: c for c in (
         "Spoken readout of session output"),
     Cue("summary_voice", "content", "queued",
         "The catch-up summary's island voice"),
+    # --- §7 witness alarm tier (out-of-band). Assets PROVISIONAL (ear-batch-2);
+    # Python-level fallbacks in speaker._FALLBACK_EARCONS keep them from ever
+    # being silently unconfigured; playback is a raw spawn, never the arbiter. ---
+    Cue("alarm_daemon_down", "failure", "alarm",
+        "hotkeyd lost the daemon and sounds the alarm itself"),
+    Cue("alarm_hotkeys_down", "failure", "alarm",
+        "The daemon lost hotkeyd and sounds the alarm itself"),
 )}
 
 

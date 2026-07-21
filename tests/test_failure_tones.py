@@ -137,3 +137,9 @@ def test_speak_loop_failure_speaks_the_word_after_the_tone():
 def test_crossing_fallback_can_never_be_silently_unconfigured():
     from sonari.speaker import _FALLBACK_EARCONS
     assert _FALLBACK_EARCONS["crossing"] == "/System/Library/Sounds/Frog.aiff"
+
+
+def test_alarm_assets_can_never_be_silently_unconfigured():
+    from sonari.speaker import _FALLBACK_EARCONS
+    assert _FALLBACK_EARCONS["alarm_daemon_down"] == "/System/Library/Sounds/Hero.aiff"
+    assert _FALLBACK_EARCONS["alarm_hotkeys_down"] == "/System/Library/Sounds/Glass.aiff"

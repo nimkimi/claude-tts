@@ -390,6 +390,16 @@ class SpeechDaemon:
         handler under the transaction, or wraps the call itself); plain
         tone-only calls stay lock-free. A rejected kind enqueues nothing."""
         c = CUES.get(kind)
+        if c is not None and c.tier == "alarm":
+            # §7 registry honesty: alarm-tier kinds are contractually
+            # OUT-OF-BAND (they exist for when the queue/arbiter may be dead)
+            # and are never fired through the transient arbiter. Same
+            # never-raises contract; distinct message so a misroute is
+            # diagnosable as a misroute, not a typo.
+            import sys
+            print("sonari: alarm cue misrouted through cue(): {0}".format(kind),
+                  file=sys.stderr)
+            return
         if c is None or c.tier != "transient":
             import sys
             print("sonari: unregistered cue: {0}".format(kind), file=sys.stderr)

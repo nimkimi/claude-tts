@@ -61,3 +61,10 @@ def test_cue_rejected_kind_never_enqueues_its_word(capsys):
     assert speaker.earcons == []
     assert len(queue) == 0
     assert "unregistered cue: nope" in capsys.readouterr().err
+
+
+def test_alarm_tier_kind_is_refused_by_cue(capsys):
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon.cue("alarm_hotkeys_down")
+    assert speaker.earcons == []                   # never reaches the arbiter
+    assert "alarm cue misrouted" in capsys.readouterr().err

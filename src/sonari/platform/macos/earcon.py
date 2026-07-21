@@ -24,6 +24,10 @@ _DEFAULTS = {
     "submit_ack": "/System/Library/Sounds/Morse.aiff",  # prompt-submit ack (dark by default)
     "repoint":    "/System/Library/Sounds/Bottle.aiff", # workspace repoint on click
     "crossing":   "/System/Library/Sounds/Frog.aiff",   # keep-going miss marker (prelude)
+    # §7 witness alarms — played via raw spawn (hotkeyd / the daemon), never
+    # the transient arbiter. PROVISIONAL assets (ear-batch-2).
+    "alarm_daemon_down":  "/System/Library/Sounds/Hero.aiff",
+    "alarm_hotkeys_down": "/System/Library/Sounds/Glass.aiff",
 }
 
 

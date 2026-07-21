@@ -19,6 +19,8 @@ _FALLBACK_EARCONS = {
     # D2 §6.6 crossing prelude — resolved via host._asset_path (config-first),
     # never through transient(). PROVISIONAL asset (ear-batch-2).
     "crossing": "/System/Library/Sounds/Frog.aiff",
+    "alarm_daemon_down": "/System/Library/Sounds/Hero.aiff",
+    "alarm_hotkeys_down": "/System/Library/Sounds/Glass.aiff",
 }
 
 

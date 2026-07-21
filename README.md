@@ -117,6 +117,8 @@ is bound to the sentence it decorates and plays with it as one unit.
 | `crossing` | prelude | A neutral marker where the voice crossed to a session whose call-sign is not cached yet |
 | `speech` | queued | Spoken readout of session output |
 | `summary_voice` | queued | The catch-up summary's island voice |
+| `alarm_daemon_down` | alarm | hotkeyd lost the daemon and sounds the alarm itself |
+| `alarm_hotkeys_down` | alarm | The daemon lost hotkeyd and sounds the alarm itself |
 <!-- sonari:generated:sounds:end -->
 
 ## The cockpit
