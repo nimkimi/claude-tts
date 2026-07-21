@@ -112,7 +112,7 @@ def test_error_earcon_failure_is_contained(monkeypatch):
     # If signaling the error itself raises, the loop must still not die.
     daemon, queue, speaker, *_ = make_daemon(foreground="fg")
     monkeypatch.setattr(speaker, "speak", _raise(RuntimeError("synth blew up")))
-    monkeypatch.setattr(speaker, "earcon", _raise(RuntimeError("earcon backend down")))
+    monkeypatch.setattr(speaker, "transient", _raise(RuntimeError("earcon backend down")))
     daemon._enqueue("fg", "prose", "hello", False)
 
     daemon._speak_loop_once()                    # must return normally despite both raising

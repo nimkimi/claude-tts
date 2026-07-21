@@ -4,7 +4,7 @@ from tests.daemon_helpers import FakeSpeaker, make_daemon
 def test_fake_speaker_records():
     fs = FakeSpeaker()
     fs.speak("hi")
-    fs.earcon("plan")
+    fs.transient("plan")
     fs.cancel()
     fs.set_rate(150)
     fs.set_voice("Ava")

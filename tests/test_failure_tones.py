@@ -40,8 +40,8 @@ def test_new_kinds_fall_back_on_an_existing_installs_config():
     played = []
     sp = Speaker(earcon_player=lambda p: played.append(p) or None,
                  earcons={"error": "/System/Library/Sounds/Sosumi.aiff"})
-    sp.earcon("error_misdirected")
-    sp.earcon("error_system")
+    sp.transient("error_misdirected")
+    sp.transient("error_system")
     assert played == ["/System/Library/Sounds/Basso.aiff",
                       "/System/Library/Sounds/Blow.aiff"]
 
@@ -50,8 +50,8 @@ def test_config_entry_wins_and_old_kinds_keep_silent_noop():
     played = []
     sp = Speaker(earcon_player=lambda p: played.append(p) or None,
                  earcons={"error_misdirected": "/custom/door.aiff"})
-    sp.earcon("error_misdirected")                 # config override wins
-    sp.earcon("turn_done")                         # absent OLD kind: silent no-op unchanged
+    sp.transient("error_misdirected")              # config override wins
+    sp.transient("turn_done")                      # absent OLD kind: silent no-op
     assert played == ["/custom/door.aiff"]
 
 

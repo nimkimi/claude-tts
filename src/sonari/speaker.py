@@ -9,7 +9,7 @@ _DEFAULT_WAIT_TIMEOUT = 120  # seconds; generous upper bound for even long TTS
 # only when the whole `earcons` config key is absent (bootstrap.py:73-74), so on
 # an EXISTING install a new config-dict kind would be SILENTLY disabled — the
 # worst eyes-free failure. These kinds therefore resolve config-first, then fall
-# back to the built-in asset (the pitch() precedent, below). A config entry
+# back to the built-in asset (the pitch-asset precedent). A config entry
 # always wins, so the owner swaps assets without a code change. Old kinds keep
 # today's silent-no-op semantics when unconfigured.
 _FALLBACK_EARCONS = {
@@ -39,7 +39,6 @@ class Speaker:
         self._current = None
         self._current_lock = threading.Lock()
         self._cancel_epoch = 0          # bumped by cancel(); closes the synth-gap race
-        self._earcon_procs: list = []
         self._transient_proc = None     # the one-slot arbiter's current tone
         self._transient_lock = threading.Lock()
         self._wait_timeout = _wait_timeout
@@ -105,40 +104,6 @@ class Speaker:
             proc = self._current
         if proc is not None:
             proc.terminate()
-
-    def _reap_earcon_procs(self) -> None:
-        """Non-blocking poll: discard entries whose process has finished."""
-        self._earcon_procs = [p for p in self._earcon_procs if p.poll() is None]
-
-    def earcon(self, kind: str) -> None:
-        if self._earcon_player is None:
-            return
-        # Reap any finished earcon processes before launching a new one.
-        self._reap_earcon_procs()
-        path = self._earcons.get(kind)
-        if path is None:
-            path = _FALLBACK_EARCONS.get(kind)   # never-silent NEW kinds only
-        if path is None:
-            return
-        proc = self._earcon_player(path)
-        if proc is not None and hasattr(proc, "poll"):
-            self._earcon_procs.append(proc)
-
-    def pitch(self, direction: str) -> None:
-        """Play a pitch-direction chirp (up = next/yes, down = prev/no), fire-and-
-        forget. The asset is resolved DIRECTLY from the package (not the configurable
-        earcons dict) so the cue can never be silently disabled by an existing user's
-        `earcons` config (bootstrap merges with a whole-key guard). Reuses the earcon
-        player (afplay) and the same non-blocking reap as earcon()."""
-        if self._earcon_player is None or direction not in ("up", "down"):
-            return
-        self._reap_earcon_procs()
-        from pathlib import Path
-        path = str(Path(__file__).resolve().parent
-                   / "assets" / "pitch_{0}.wav".format(direction))
-        proc = self._earcon_player(path)
-        if proc is not None and hasattr(proc, "poll"):
-            self._earcon_procs.append(proc)
 
     def transient(self, kind: str) -> None:
         """One-slot transient arbiter (D8 law 3): short non-verbal tones bypass

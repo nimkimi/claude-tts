@@ -46,7 +46,6 @@ class FakeSpeaker:
         self.spoken_voices: list = []
         self.complete = True          # next speak() reports completed?
         self._epoch = 0
-        self.pitches: list[str] = []  # pitch(direction) calls
         self.epochs: list = []        # cancel_epoch passed to each speak() call
 
     def speak(self, text=None, audio_path=None, cancel_epoch=None, voice=None) -> bool:
@@ -58,12 +57,6 @@ class FakeSpeaker:
 
     def cancel_epoch(self) -> int:
         return self._epoch
-
-    def earcon(self, kind: str) -> None:
-        self.earcons.append(kind)
-
-    def pitch(self, direction: str) -> None:
-        self.pitches.append(direction)
 
     def transient(self, kind: str) -> None:
         # One list for ALL tone assertions: transient kinds land in `earcons`
