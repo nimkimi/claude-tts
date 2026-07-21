@@ -351,19 +351,31 @@ class SpeechDaemon:
             return None
         return self._spearcons.get(folder)
 
-    def cue(self, kind: str) -> None:
+    def cue(self, kind: str, *, word=None, session=None) -> None:
         """Fire a registered TRANSIENT cue (D8 law 4) — with enqueue-with-prelude,
         the only audio API feature code may use. An unknown or non-transient kind
         is a stderr line, never a raise (an eyes-free daemon must not crash on a
         bad cue name); the drift guard makes an unregistered literal a suite
         failure, so production only ever sees this path on a malformed socket
-        kind."""
+        kind.
+
+        D7a extension: `word=`/`session=` attach a short queued clarification to
+        a SPONTANEOUS failure tone — the tone is the instant part, the word rides
+        the queue in normal order (law 1: verbal never bypasses it) as
+        mute-exempt + pause-exempt chrome (a failure on the held speaker still
+        speaks; never folder-prefixed, never repeat-captured, no call-sign).
+        CALLER MUST HOLD self._lock when passing `word` (every word site is a
+        handler under the transaction, or wraps the call itself); plain
+        tone-only calls stay lock-free. A rejected kind enqueues nothing."""
         c = CUES.get(kind)
         if c is None or c.tier != "transient":
             import sys
             print("sonari: unregistered cue: {0}".format(kind), file=sys.stderr)
             return
         self.speaker.transient(kind)
+        if word is not None and session is not None:
+            self._enqueue(session, "prose", word, False,
+                          mute_exempt=True, pause_exempt=True)
 
     def _attributed_text(self, item) -> str:
         """item.text, prefixed with the session's folder name when the voice switches
