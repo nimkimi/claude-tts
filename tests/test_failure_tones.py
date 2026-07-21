@@ -1,8 +1,9 @@
 """W6 (spec §7): three failure classes, principled by what-you-should-do-next.
 Invalid/nothing-there keeps Sosumi ('error', unchanged); misdirected answers get
 'error_misdirected'; speak-loop crashes get 'error_system'. New kinds can NEVER
-be silently disabled on an existing install (speaker-side fallback — the pitch()
-precedent; bootstrap merges defaults only when the whole earcons key is absent)."""
+be silently disabled on an existing install (speaker-side fallback — the
+pitch-asset precedent; bootstrap merges defaults only when the whole earcons key
+is absent)."""
 from sonari.protocol import PROTOCOL_VERSION
 from sonari.speaker import Speaker
 from tests.daemon_helpers import make_daemon

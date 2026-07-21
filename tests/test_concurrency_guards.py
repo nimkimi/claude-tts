@@ -462,9 +462,6 @@ class _ReentrantFlusher:
     def cancel(self):
         self._epoch += 1
 
-    def earcon(self, kind):
-        pass
-
 
 class _HeardEntry:
     def __init__(self):

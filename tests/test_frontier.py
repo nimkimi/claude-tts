@@ -16,7 +16,6 @@ class _FakeSpeaker:
     def __init__(self): self._epoch = 0; self.spoken = []
     def cancel(self): self._epoch += 1
     def cancel_epoch(self): return self._epoch
-    def earcon(self, kind): pass
     def speak(self, text=None, audio_path=None, cancel_epoch=None):
         self.spoken.append(text)
         return True

@@ -111,8 +111,8 @@ class Speaker:
         no stacking). Transients may coexist with speech, never with each other.
         Called from handler threads (under the daemon lock) AND the speak thread
         (_signal_speak_failure) — hence its own lock, never the daemon's. Asset
-        resolution matches earcon(): config dict first, then _FALLBACK_EARCONS;
-        an unconfigured legacy kind stays a silent no-op."""
+        resolution: the config dict first, then _FALLBACK_EARCONS; an unconfigured
+        legacy kind stays a silent no-op."""
         if self._earcon_player is None:
             return
         path = self._earcons.get(kind)
