@@ -151,11 +151,11 @@ def test_prose_ordering_decision_earcon_fires_before_fifo_text():
         ("text", "I will start now."),
         ("text", "Which approach? Option 1: Refactor. Option 2: Rewrite. "
                  "Press the option's number to choose, or Escape to cancel. "
-                 "Selecting is immediate."),
+                 "Selecting is immediate. — at the terminal."),
         ("earcon", "permission"),
         ("text", "Applying the change now."),
         ("text", "Run: pytest -q Press the option's number to choose, "
-                 "or Escape to cancel."),
+                 "or Escape to cancel. — at the terminal."),
     ]
 
 
@@ -242,7 +242,7 @@ def test_decision_fifo_earcon_fires_first_then_prose_then_choice():
         ("earcon", "choice"),
         ("text", "Some prose."),
         ("text", "Q Option 1: A. Option 2: B. Press the option's number to choose, "
-                 "or Escape to cancel. Selecting is immediate."),
+                 "or Escape to cancel. Selecting is immediate. — at the terminal."),
     ]
 
 
@@ -320,7 +320,7 @@ def test_jump_waiting_blocked_session_outranks_prose_only():
         ("cancel", None),
         ("text", "Jumping to blocked. Bring it forward to type."),
         ("text", "Pick? Option 1: One. Option 2: Two. Press the option's number to "
-                 "choose, or Escape to cancel. Selecting is immediate."),
+                 "choose, or Escape to cancel. Selecting is immediate. — at the terminal."),
     ]
 
 

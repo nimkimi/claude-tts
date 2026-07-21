@@ -166,10 +166,10 @@ def test_scripted_session_full_ordering():
         ("earcon", "choice"),
         ("text", "Let me check the files."),
         ("text", "I will start now."),
-        ("text", "Which approach? Option 1: Refactor. Option 2: Rewrite. Press the option's number to choose, or Escape to cancel. Selecting is immediate."),
+        ("text", "Which approach? Option 1: Refactor. Option 2: Rewrite. Press the option's number to choose, or Escape to cancel. Selecting is immediate. — at the terminal."),
         ("earcon", "permission"),
         ("text", "Applying the change now."),
-        ("text", "Run: pytest -q Press the option's number to choose, or Escape to cancel."),
+        ("text", "Run: pytest -q Press the option's number to choose, or Escape to cancel. — at the terminal."),
     ]
 
 

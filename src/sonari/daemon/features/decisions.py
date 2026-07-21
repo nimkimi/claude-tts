@@ -13,6 +13,31 @@ from sonari.spearcon import spearcon_label
 MISDIRECT_ROUTE_WORD = "No ask here — {0} is asking."
 MISDIRECT_EMPTY_WORD = "Nothing to answer."
 
+# D7b (§5) the advisory frame: an UNANSWERABLE decision keeps its distinct
+# arrival timbre + callsign but its spoken frame says where it is serviceable.
+# PROVISIONAL wording (ear-batch-2 slot); attachment point = end of the full
+# composed announce, inside the one chokepoint below.
+ADVISORY_SUFFIX = " — at the terminal."
+
+
+def _announce_decision(ctx, session, kind, text, *, answerable):
+    """The ONE announce chokepoint for every decision producer (D7b/T7c).
+    answerable=True is RESERVED for the blocking permission request — the only
+    ask serviceable from the keyboard (⌃⌘Return / ⌃⌘Escape); CHOICE/PLAN/legacy
+    PERMISSION are structurally unanswerable (upstream-blocked, see
+    docs/upstream/claude-code-feature-request-answer-hook.md — no answer
+    gesture may be attempted for them) and arrive as advisories wearing the
+    terminal frame. Returns (item_id, text-as-announced); the drift guards in
+    tests/test_answerability.py pin that no decision enqueue lives anywhere
+    else and no other producer passes True."""
+    if not answerable:
+        text = text + ADVISORY_SUFFIX
+    entry = ctx.host.history.record(session, kind, text)
+    ctx.host.history.end_message(session)
+    ctx.host._flush_prose_buffer(session)   # prose before the ask (unchanged order)
+    item_id = ctx.host._enqueue(session, kind, text, True, entry=entry, forward=True)
+    return item_id, text
+
 
 def _choice_text(msg) -> str:
     parts = []
@@ -94,8 +119,8 @@ def _choice_notes(msg) -> str:
 
 @handler(MsgType.CHOICE)
 def on_choice(ctx, msg):
-    session = ctx.session                 # was: msg.get("session", "")
-    verbosity = ctx.verbosity             # was: self.config.get("verbosity", "everything")
+    session = ctx.session
+    verbosity = ctx.verbosity
     text = _choice_text(msg)
     extras = [e for e in (
         _choice_notes(msg),
@@ -103,47 +128,36 @@ def on_choice(ctx, msg):
     ) if e]
     if extras:
         text = "{0} {1}".format(text, " ".join(extras))
-    ctx.host._stream(session).options = text
-    entry = ctx.host.history.record(session, "choice", text)
-    ctx.host.history.end_message(session)
     # The flip: gating moved to playback. Every session enqueues its own
     # decision into its own stream; the foreground-driven loop voices it.
-    ctx.host._flush_prose_buffer(session)   # prose before the question
-    ctx.host._enqueue(session, "choice", text, True, entry=entry, forward=True)
+    _, text = _announce_decision(ctx, session, "choice", text, answerable=False)
+    ctx.host._stream(session).options = text
     return None
 
 
 @handler(MsgType.PLAN)
 def on_plan(ctx, msg):
-    session = ctx.session                 # was: msg.get("session", "")
-    verbosity = ctx.verbosity             # was: self.config.get("verbosity", "everything")
+    session = ctx.session
+    verbosity = ctx.verbosity
     text = _plan_text(msg)
     cue = _selection_cue(ctx, session, verbosity)
     if cue:
         text = "{0} {1}".format(text, cue)
+    _, text = _announce_decision(ctx, session, "plan", text, answerable=False)
     ctx.host._stream(session).options = text
-    entry = ctx.host.history.record(session, "plan", text)
-    ctx.host.history.end_message(session)
-    # The flip: enqueue unconditionally into this session's own stream.
-    ctx.host._flush_prose_buffer(session)   # prose before the plan
-    ctx.host._enqueue(session, "plan", text, True, entry=entry, forward=True)
     return None
 
 
 @handler(MsgType.PERMISSION)
 def on_permission(ctx, msg):
-    session = ctx.session                 # was: msg.get("session", "")
-    verbosity = ctx.verbosity             # was: self.config.get("verbosity", "everything")
+    session = ctx.session
+    verbosity = ctx.verbosity
     text = _permission_text(msg)
     cue = _selection_cue(ctx, session, verbosity)
     if cue:
         text = "{0} {1}".format(text, cue)
+    _, text = _announce_decision(ctx, session, "permission", text, answerable=False)
     ctx.host._stream(session).options = text
-    entry = ctx.host.history.record(session, "permission", text)
-    ctx.host.history.end_message(session)
-    # The flip: enqueue unconditionally into this session's own stream.
-    ctx.host._flush_prose_buffer(session)   # prose before the permission ask
-    ctx.host._enqueue(session, "permission", text, True, entry=entry, forward=True)
     return None
 
 
@@ -166,15 +180,14 @@ def on_permission_request(ctx, msg):
     # BLOCKING permission ask from the PermissionRequest hook. Speak the prompt on the
     # ASKING session as a decision item (so ⌃⌘D lands on it), register a pending decision,
     # and return the AWAIT sentinel — _handle_message_guarded then blocks OUTSIDE the lock.
+    # NOTE: st.options is deliberately NOT set here (W4: reread falls back to the
+    # stored pending text), and answerable=True — the one keyboard-serviceable ask.
     host = ctx.host
     session = ctx.session
-    text = _permission_request_text(msg)
     host.cue("permission")     # arrival chime, immediate; the call-sign binds
                                # to the enqueued ask below (ruling 1)
-    entry = host.history.record(session, "permission", text)
-    host.history.end_message(session)
-    host._flush_prose_buffer(session)        # prose before the permission ask
-    item_id = host._enqueue(session, "permission", text, True, entry=entry, forward=True)
+    item_id, text = _announce_decision(ctx, session, "permission",
+                                       _permission_request_text(msg), answerable=True)
     teaching.maybe_hint(host, "decision", session)
     # We are under the daemon lock here, so mutate the store directly.
     prev = host._pending_decisions.get(session)
