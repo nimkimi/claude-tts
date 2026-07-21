@@ -92,6 +92,12 @@ def on_set_foreground(ctx, msg):
             st = ctx.host._streams.get(session)
             if st is None or not st.stopped:
                 ctx.host.voice_state = "flowing"
+                # D2 §6.3: an IMPLICIT lift gets the same audible mark as the
+                # explicit ⌃⌘S resume (playback.py's "Resumed."). Not enqueued
+                # HERE: on the real submit path a FLUSH follows this message and
+                # its clear would wipe the word — arm the flag; on_flush (or the
+                # SESSION_START leg below, the no-FLUSH path) delivers it.
+                ctx.host._stream(session).announce_resume = True
     else:
         ctx.host.sessions.register(session, cwd=cwd)     # denied: ding + accrue
     # Identity (re)capture — piggybacked on ANY message carrying identity fields:
@@ -132,6 +138,13 @@ def on_set_foreground(ctx, msg):
             # non-blocking); skips already-cached labels. Never on the hot path.
             ctx.host._spearcons.pregenerate(
                 [ctx.host.sessions.folder(s) for s in ctx.host.sessions.session_ids()])
+        st = ctx.host._streams.get(session)
+        if st is not None and st.announce_resume:
+            # SessionStart sends SET_FOREGROUND then SESSION_START (no FLUSH):
+            # deliver the deferred lift mark now.
+            st.announce_resume = False
+            ctx.host._enqueue(session, "prose", "Resumed.", False,
+                              mute_exempt=True, at_front=True)
     return None
 
 
@@ -146,6 +159,16 @@ def on_session_end(ctx, msg):
     # stopped-all STAYS (the other sessions remain individually muted).
     if was_speaker and ctx.host.voice_state == "quiet-hold":
         ctx.host.voice_state = "flowing"
+        # D2 §6.3: the other implicit lift. Mark the resumption where the freed
+        # voice will actually land (the keep-going pick, same selection the loop
+        # makes under this same lock); with nothing waiting there is no audible
+        # resumption to mark. Import at call time: host imports this module at
+        # module load (the @handler side-effect imports).
+        from sonari.daemon.host import _select_keep_going
+        target = _select_keep_going(ctx.host._streams, ctx.host.sessions)
+        if target is not None:
+            ctx.host._enqueue(target, "prose", "Resumed.", False,
+                              mute_exempt=True, at_front=True)
     st = ctx.host._streams.get(session)
     if st is not None:
         ctx.host._drop_pending(st.queue.clear())

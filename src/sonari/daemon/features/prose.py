@@ -136,5 +136,11 @@ def on_flush(ctx, msg):
     # already cleared live playback (queue, assembler, nav_cursor -> snap to
     # live edge); history is no longer wiped here. SESSION_END still clears it.
     ctx.host.history.start_turn(session)
+    if st.announce_resume:
+        # D2 §6.3: the Policy-A submit lift (lifecycle) deferred its audible
+        # mark past this clear — deliver it now, mirroring ⌃⌘S resume's cue.
+        st.announce_resume = False
+        ctx.host._enqueue(session, "prose", "Resumed.", False,
+                          mute_exempt=True, at_front=True)
     ctx.host._wake.set()
     return None

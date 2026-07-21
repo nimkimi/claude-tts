@@ -20,6 +20,11 @@ class SessionStream:
         self.nav_turn = None                # two-level nav anchor: the turn being navigated
                                             # (None == the live turn); a new prompt snaps it back
         self.stopped = False                # per-session stop (⌃⌘S / ⌃⌘M); sticky across prompts
+        self.announce_resume = False        # D2 §6.3: a Policy-A lift happened on the
+                                            # SET_FOREGROUND leg; on_flush (or the
+                                            # SESSION_START leg) delivers "Resumed."
+                                            # AFTER the new-prompt clear. Transient —
+                                            # never serialized.
         self.warned_immediate = False       # warned once about immediate selection
         self.guided = False                 # received the setup-guidance cue once
         # SP4 frontier: the monotonic "furthest I've dealt with" high-water mark,

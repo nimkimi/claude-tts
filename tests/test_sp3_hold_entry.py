@@ -35,7 +35,7 @@ def test_quiet_hold_suppresses_keep_going():
     assert not any(s and "b backlog" in s for s in speaker.spoken)
 
 
-# --- F1: SESSION_END of the MUTED speaker lifts a phantom quiet-hold ---
+# --- F1 + D2 §6.3: SESSION_END of the MUTED speaker lifts the phantom hold AUDIBLY ---
 def test_session_end_of_muted_speaker_lifts_phantom_quiet_hold():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     sessions.register("B", cwd="/x/B")
@@ -44,9 +44,21 @@ def test_session_end_of_muted_speaker_lifts_phantom_quiet_hold():
     daemon.handle_message(_msg(MsgType.SESSION_END, "A"))          # the muted speaker ends
     assert daemon.voice_state == "flowing"                        # phantom hold cleared
     assert sessions.speaker() is None
-    daemon._speak_loop_once()                                     # keep-going resumes onto B
+    daemon._speak_loop_once()                                     # keep-going: the lift word first
     assert sessions.speaker() == "B"
+    assert speaker.spoken[-1] == "Resumed."                       # D2 §6.3 audible lift
+    daemon._speak_loop_once()                                     # then the resumed backlog
     assert any(s and "b backlog" in s for s in speaker.spoken)
+
+
+def test_session_end_lift_with_nothing_waiting_stays_wordless():
+    # No eligible keep-going pick == no audible resumption to mark (seam 6).
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    sessions.register("B", cwd="/x/B")                             # B idle, empty queue
+    daemon.handle_message(_msg(MsgType.STOP_SESSION, "A"))
+    daemon.handle_message(_msg(MsgType.SESSION_END, "A"))
+    assert daemon.voice_state == "flowing"
+    assert all(len(st.queue) == 0 for st in daemon._streams.values())
 
 
 # --- F1: SESSION_END under stopped-all STAYS stopped-all (others still muted) ---
