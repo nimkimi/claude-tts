@@ -21,6 +21,10 @@ class SpeechItem:
     voice: "str | None" = None  # SP5: per-utterance say voice override (the summary body); None == main voice
     render_id: "int | None" = None  # SP5: groups a catch-up render's frame/body/tail items
     catchup_burn: bool = False  # SP5: True on the render's LAST item; note_spoken burns on its completion
+    prelude: tuple = ()  # D8: audio paths the loop plays BEFORE text/audio_path, as
+                         # one atomic unit (same claim + cancel epoch; an interrupted
+                         # unit replays whole). Not persisted: to_state() serializes
+                         # only {frontier}, so no state-version bump.
 
 
 class SpeechQueue:

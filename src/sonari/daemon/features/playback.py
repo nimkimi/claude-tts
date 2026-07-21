@@ -283,7 +283,9 @@ def on_repeat_last(ctx, msg):
                       audio_path=cur.audio_path, forward=cur.forward, at_front=True)
     # The repeat is mute_exempt: never re-captured (idempotence), never prefixed
     # (the captured text already carries any prefix). A spearcon-only last
-    # utterance replays its audio file (audio_path passthrough).
+    # utterance replays its audio file (audio_path passthrough). Preludes never
+    # replay: _last_utterance captures content only — the chirp/call-sign
+    # decorated the ORIGINAL moment, not the repeat.
     host._enqueue(tgt, "prose", text, False, mute_exempt=True,
                   pause_exempt=True, at_front=True, audio_path=audio_path)
     return None

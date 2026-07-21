@@ -267,7 +267,8 @@ class SpeechDaemon:
                  pause_exempt: bool = False, at_front: bool = False,
                  names_session: bool = False, audio_path=None,
                  forward: bool = False, voice=None, render_id=None,
-                 catchup_burn: bool = False, after_id=None) -> int:
+                 catchup_burn: bool = False, after_id=None,
+                 prelude: tuple = ()) -> int:
         """Returns the new item's id (W7: on_permission_request tracks its queued
         ask); all other callers ignore it."""
         item = SpeechItem(
@@ -284,6 +285,7 @@ class SpeechDaemon:
             voice=voice,
             render_id=render_id,
             catchup_burn=catchup_burn,
+            prelude=prelude,
         )
         st = self._stream(session)
         if entry is not None:
@@ -718,13 +720,21 @@ class SpeechDaemon:
                 return
             vkw = {"voice": item.voice} if item.voice is not None else {}
             try:
-                if item.audio_path:
-                    completed = self.speaker.speak(
-                        item.text, audio_path=item.audio_path,
-                        cancel_epoch=cancel_epoch, **vkw)
-                else:
-                    completed = self.speaker.speak(
-                        item.text, cancel_epoch=cancel_epoch, **vkw)
+                # Same atomic-unit rule as the normal branch: a pause-exempt cue
+                # with a prelude (e.g. the answer chirp) plays whole or not at all.
+                completed = True
+                for p in item.prelude:
+                    if not self.speaker.speak(audio_path=p, cancel_epoch=cancel_epoch):
+                        completed = False
+                        break
+                if completed:
+                    if item.audio_path:
+                        completed = self.speaker.speak(
+                            item.text, audio_path=item.audio_path,
+                            cancel_epoch=cancel_epoch, **vkw)
+                    else:
+                        completed = self.speaker.speak(
+                            item.text, cancel_epoch=cancel_epoch, **vkw)
             except Exception:  # noqa: BLE001 - one bad cue must not wedge the hold
                 self._signal_speak_failure()
                 completed = False
@@ -794,13 +804,23 @@ class SpeechDaemon:
             return
         vkw = {"voice": item.voice} if item.voice is not None else {}
         try:
-            if item.audio_path:
-                completed = self.speaker.speak(
-                    text, audio_path=item.audio_path,
-                    cancel_epoch=cancel_epoch, **vkw)
-            else:
-                completed = self.speaker.speak(
-                    text, cancel_epoch=cancel_epoch, **vkw)
+            # ATOMIC UNIT (D8 law 2): prelude parts + content share the claim and
+            # the cancel epoch. Any part not completing abandons the rest, so the
+            # unit is never half-heard; note_spoken(completed=False) leaves it
+            # unheard and a stop requeues the WHOLE item (aria-atomic replay).
+            completed = True
+            for p in item.prelude:
+                if not self.speaker.speak(audio_path=p, cancel_epoch=cancel_epoch):
+                    completed = False
+                    break
+            if completed:
+                if item.audio_path:
+                    completed = self.speaker.speak(
+                        text, audio_path=item.audio_path,
+                        cancel_epoch=cancel_epoch, **vkw)
+                else:
+                    completed = self.speaker.speak(
+                        text, cancel_epoch=cancel_epoch, **vkw)
         except Exception:  # noqa: BLE001 - one bad utterance must not abort the item
             self._signal_speak_failure()
             completed = False
