@@ -20,6 +20,10 @@ from sonari.daemon.limits import RATE_MIN, RATE_MAX, MINQUEUE_MIN, MINQUEUE_MAX
 from sonari.daemon.persistence import StateStore, PersistenceWriter, STATE_VERSION
 
 PERMISSION_WAIT_TIMEOUT = 120.0   # daemon's own wait; MUST be < the hook's client send timeout (130s)
+# D7a (§4) spontaneous-failure words — the tone is the instant part, the word is
+# the queued clarification. Both PROVISIONAL pending the ear-batch-2 audition.
+EXPIRED_WORD = "That ask timed out — check the terminal."
+SPEAK_FAILURE_WORD = "Speech failed; kept unheard."
 # Side-effect imports: importing each feature module runs its @handler
 # decorators, populating the registry (assert_complete in __init__ guards it).
 from sonari.daemon.features import control  # noqa: F401
@@ -490,7 +494,7 @@ class SpeechDaemon:
         is IN FLIGHT (already popped) remove_by_id misses: it finishes playing and
         the expiry earcon beside it is the honest context (accepted edge)."""
         try:
-            self.cue("permission_expired")
+            self.cue("permission_expired", word=EXPIRED_WORD, session=session)
         except Exception:  # noqa: BLE001 - expiry signaling must never break the reply
             pass
         item_id = pd.get("item_id")
@@ -696,16 +700,23 @@ class SpeechDaemon:
                 traceback.print_exc(file=sys.stderr)
                 self._state._wake.wait(0.1)
 
-    def _signal_speak_failure(self) -> None:
+    def _signal_speak_failure(self, session=None) -> None:
         """An utterance raised (missing TTS extra, synth/playback failure, ...).
         The inner speak-loop handlers swallow it so one bad item can't wedge the
         loop — but for an eyes-free user a swallowed exception is a SILENT no-op,
-        the worst outcome (#41). Signal it audibly (error earcon) and log the
-        traceback. Never raises — error signaling must not itself re-break the
-        loop. Call only from within an active `except` block (print_exc reads the
-        handled exception)."""
+        the worst outcome (#41). Signal it audibly — the error tone plus, when
+        the failing item's *session* is known, the D7a word so the failure is
+        learnable, not a bare tone (T14). The word needs the queue and the queue
+        needs self._lock; both call sites run on the speak thread OUTSIDE the
+        lock, so the lock is taken here. Never raises — error signaling must not
+        itself re-break the loop. Call only from within an active `except` block
+        (print_exc reads the handled exception)."""
         try:
-            self.cue("error_system")   # W6: "Sonari itself failed; content preserved unheard"
+            if session is not None:
+                with self._lock:
+                    self.cue("error_system", word=SPEAK_FAILURE_WORD, session=session)
+            else:
+                self.cue("error_system")   # W6: "Sonari itself failed; content preserved unheard"
         except Exception:  # noqa: BLE001 - signaling failure must not wedge the loop
             pass
         try:
@@ -759,7 +770,7 @@ class SpeechDaemon:
                         completed = self.speaker.speak(
                             item.text, cancel_epoch=cancel_epoch, **vkw)
             except Exception:  # noqa: BLE001 - one bad cue must not wedge the hold
-                self._signal_speak_failure()
+                self._signal_speak_failure(item.session)
                 completed = False
             self.note_spoken(item, completed)
             return
@@ -844,7 +855,7 @@ class SpeechDaemon:
                     completed = self.speaker.speak(
                         text, cancel_epoch=cancel_epoch, **vkw)
         except Exception:  # noqa: BLE001 - one bad utterance must not abort the item
-            self._signal_speak_failure()
+            self._signal_speak_failure(item.session)
             completed = False
         requeued = False
         with self._lock:

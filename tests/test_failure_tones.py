@@ -61,3 +61,49 @@ def test_macos_defaults_gain_the_new_kinds():
     assert _DEFAULTS["error_misdirected"] == "/System/Library/Sounds/Basso.aiff"
     assert _DEFAULTS["error_system"] == "/System/Library/Sounds/Blow.aiff"
     assert _DEFAULTS["error"] == "/System/Library/Sounds/Sosumi.aiff"  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# D7a (§4): spontaneous failures speak a word after the tone
+# ---------------------------------------------------------------------------
+
+def test_permission_expiry_speaks_the_word_on_the_asking_session():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon.handle_message(_msg("permission_request", "fg", tool="Bash", summary="ls"))
+    with daemon._lock:
+        daemon._expire_permission("fg", daemon._pending_decisions["fg"])
+    assert "permission_expired" in speaker.earcons
+    texts = [it.text for it in queue._items]
+    assert "That ask timed out — check the terminal." in texts   # word enqueued on fg
+    assert "Bash: ls" not in texts                               # the dead ask was removed
+
+
+def test_expiry_word_speaks_on_a_muted_session():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon.handle_message(_msg("stop_session", "fg"))          # fg muted, voice held
+    daemon.handle_message(_msg("permission_request", "fg", tool="Bash", summary="ls"))
+    with daemon._lock:
+        daemon._expire_permission("fg", daemon._pending_decisions["fg"])
+    daemon._speak_loop_once()                                  # held branch: "Stopped."
+    daemon._speak_loop_once()                                  # held branch: the word
+    assert "That ask timed out — check the terminal." in speaker.spoken
+
+
+def test_speak_loop_failure_speaks_the_word_after_the_tone():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    calls = {"n": 0}
+    real_speak = speaker.speak
+
+    def _boom_once(text=None, audio_path=None, cancel_epoch=None, voice=None):
+        if calls["n"] == 0:
+            calls["n"] += 1
+            raise RuntimeError("synth failure")
+        return real_speak(text, audio_path=audio_path,
+                          cancel_epoch=cancel_epoch, voice=voice)
+
+    speaker.speak = _boom_once
+    daemon._enqueue("fg", "prose", "doomed.", False)
+    daemon._speak_loop_once()                      # raises inside; tone + queued word
+    assert "error_system" in speaker.earcons
+    daemon._speak_loop_once()                      # the word drains in normal order
+    assert speaker.spoken[-1] == "Speech failed; kept unheard."
