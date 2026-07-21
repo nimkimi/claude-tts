@@ -773,29 +773,22 @@ class SpeechDaemon:
                 if next_sess is not None:
                     self.sessions.set_speaker(next_sess)
                     st = self._state._streams.get(next_sess)
-                    # W13 PRE-ROLL (inside this SAME locked block — M1): the most
-                    # frequent voice switch gets the same spearcon cue as a
-                    # deliberate jump. On a cache hit, synthesize the ~200ms
-                    # folder spearcon, enqueue_front it, and let the pop below
-                    # claim IT — the content item stays queued (popped next
-                    # iteration, attribution claimed via names_session, so
-                    # _attributed_text no longer splices the folder prefix).
-                    # The QUEUE, not a local, carries the content across
-                    # iterations: FLUSH/STOP semantics are inherited for free.
-                    # Miss -> today's splice byte-identically; _spearcon_path
-                    # never blocks (a cache stat + non-blocking Popen kick).
-                    if st is not None:
-                        folder = self.sessions.folder(next_sess)
-                        sp = self._spearcon_path(folder)
-                        if sp is not None:
-                            st.queue.enqueue_front(SpeechItem(
-                                id=self._alloc_id(), session=next_sess,
-                                kind="prose", text=folder, is_decision=False,
-                                mute_exempt=True, names_session=True,
-                                audio_path=sp))
                     # pop_next() is guaranteed non-None: _select_keep_going verified
                     # len(queue) > 0 for next_sess inside this same held lock.
                     item = st.queue.pop_next() if st is not None else None
+                    # W13 PRE-ROLL via the D8 prelude (inside this SAME locked
+                    # block — M1): the most frequent voice switch gets the same
+                    # spearcon cue as a deliberate jump, bound to the content
+                    # item itself as ONE atomic unit — FLUSH/STOP can never
+                    # split the pair. names_session claims attribution, so
+                    # _attributed_text no longer splices the folder prefix.
+                    # Miss -> today's splice byte-identically; _spearcon_path
+                    # never blocks (a cache stat + non-blocking Popen kick).
+                    if item is not None:
+                        sp = self._spearcon_path(self.sessions.folder(next_sess))
+                        if sp is not None:
+                            item.prelude = (sp,)
+                            item.names_session = True
             self._state._current_item = item
             # Capture the speaker's cancel baseline atomically with the claim, so a
             # cancel() arriving during speak() is detected (M2 — the pop->speak gap).

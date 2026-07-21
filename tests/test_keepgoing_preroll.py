@@ -1,6 +1,6 @@
-"""W13 (spec §14, Block-1 ratified): the most frequent voice switch carries the
-thinnest cue. Keep-going now pre-rolls the new speaker's folder spearcon —
-delivery only; selection is byte-identical (anchor 7); all inside the M1 lock."""
+"""W13 via D8 (owner ruling 4): keep-going's pre-roll spearcon is the content
+item's own PRELUDE — one atomic unit, so FLUSH/STOP can never split the pair
+(the flush-between-pair attribution seam). Selection stays byte-identical."""
 from sonari.protocol import PROTOCOL_VERSION
 from tests.daemon_helpers import make_daemon, stream_queue
 
@@ -16,18 +16,16 @@ def _prime(daemon):
     daemon._speak_loop_once()
 
 
-def test_hit_plays_the_spearcon_then_unprefixed_content():
+def test_hit_binds_the_spearcon_prelude_to_the_content_item():
     daemon, queue, speaker, sessions, config = make_daemon()
     _prime(daemon)
     sessions.register("bg", cwd="/x/bg")
     daemon._spearcons.available["bg"] = "/sp/bg.aiff"
     daemon._enqueue("bg", "prose", "bg content.", False)
-    daemon._speak_loop_once()                      # keep-going claims the PRE-ROLL
-    assert speaker.audio_paths[-1] == "/sp/bg.aiff"
+    daemon._speak_loop_once()                      # ONE iteration: spearcon + content
     assert sessions.speaker() == "bg"
-    daemon._speak_loop_once()                      # then the content, attribution claimed
+    assert speaker.audio_paths[-2:] == ["/sp/bg.aiff", None]
     assert speaker.spoken[-1] == "bg content."     # NO spliced folder prefix
-    assert speaker.audio_paths[-1] is None
 
 
 def test_miss_keeps_todays_splice_byte_identically_and_kicks_generation():
@@ -85,14 +83,14 @@ def test_flush_mid_preroll_loses_nothing_and_leaves_no_orphan():
     daemon._enqueue("bg", "prose", "bg content.", False, entry=_Entry())
 
     class _Reentrant:
-        """FLUSH(bg) lands DURING the pre-roll spearcon's playback — the queued
-        content item must be cleared exactly like any queued item (inherited
-        FLUSH semantics), with no orphaned marker and no resurrection."""
+        """FLUSH(bg) lands DURING the prelude's playback — the in-flight unit is
+        superseded by the new prompt (dropped, marker released; never resurrected),
+        exactly like any cut item."""
         def __init__(self):
             self._epoch = 0
             self.fired = False
 
-        def speak(self, text=None, audio_path=None, cancel_epoch=None):
+        def speak(self, text=None, audio_path=None, cancel_epoch=None, voice=None):
             if not self.fired:
                 self.fired = True
                 daemon.handle_message(_msg("flush", "bg"))
@@ -104,11 +102,11 @@ def test_flush_mid_preroll_loses_nothing_and_leaves_no_orphan():
         def cancel(self):
             self._epoch += 1
 
-        def earcon(self, kind):
+        def transient(self, kind):
             pass
 
     daemon.speaker = _Reentrant()
-    daemon._speak_loop_once()                      # pre-roll claimed; FLUSH races it
+    daemon._speak_loop_once()                      # unit claimed; FLUSH races it
     assert daemon._current_item is None            # claim released
-    assert len(stream_queue(daemon, "bg")._items) == 0   # content flushed, NOT resurrected
+    assert len(stream_queue(daemon, "bg")._items) == 0   # content NOT resurrected
     assert daemon._pending_heard == {}             # no orphaned marker
