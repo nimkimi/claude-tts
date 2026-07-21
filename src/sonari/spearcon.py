@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -82,9 +83,14 @@ class SpearconCache:
         self.generate(label)
         return None
 
-    def generate(self, label: str):
-        """Spawn a non-blocking `say -o` rendering *label*'s short form to its cache
-        file. Fire-and-forget; any spawn error is swallowed (the caller falls back to
+    def generate(self, label):
+        """Spawn a non-blocking render of *label*'s short form. `say -o` writes a
+        SIBLING temp file (<final>.part) and an atomic same-directory rename
+        publishes it — one spawned shell so fire-and-forget is preserved, and a
+        killed/failed render can never leave a truncated file that get() would
+        treat as a permanent cache hit. Two concurrent renders of one label race
+        benignly (the loser's mv fails after the winner published; errors are
+        swallowed). Any spawn error is swallowed (the caller falls back to
         speech). Returns the proc, or None."""
         short = spearcon_label(label)
         if not short:
@@ -92,11 +98,15 @@ class SpearconCache:
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
             p = self.path_for(label)
+            tmp = p.parent / (p.name + ".part")
             cmd = ["say"]
             if self._voice_available:
                 cmd += ["-v", self._voice]
-            cmd += ["-r", str(self._rate), "-o", str(p), short]
-            return self._popen(cmd)
+            cmd += ["-r", str(self._rate), "-o", str(tmp), short]
+            script = "{0} && mv {1} {2}".format(
+                " ".join(shlex.quote(c) for c in cmd),
+                shlex.quote(str(tmp)), shlex.quote(str(p)))
+            return self._popen(["sh", "-c", script])
         except (OSError, ValueError):
             return None
 
@@ -110,6 +120,16 @@ class SpearconCache:
         """Prune to the *max_files* most-recently-modified .aiff at daemon start
         (stale reclamation; label-keyed orphan detection isn't possible at start —
         no sessions are registered yet). Bounds disk; never raises."""
+        # Sweep stale in-flight renders: cleanup runs at daemon start, so any
+        # surviving *.part is a dead render (its shell died before the publish).
+        try:
+            for part in self._dir.glob("*.part"):
+                try:
+                    part.unlink()
+                except OSError:
+                    pass
+        except OSError:
+            pass
         try:
             files = sorted(self._dir.glob("*.aiff"),
                            key=lambda p: p.stat().st_mtime if p.exists() else 0.0,
