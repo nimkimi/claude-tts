@@ -16,8 +16,11 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
      keep-going (host), prose gating
    - `_enqueue` delivery flags (`mute_exempt`/`pause_exempt`/`at_front`) — any
      new cue must state WHY each flag is set or not
-   - spoken session references ("this session" vs "another session" — the
-     this/another split is semantic; see the naming inventory)
+   - spoken session references ("this session" vs "another session"): the split
+     is semantic — "this session" = the workspace you are currently at (the
+     catch-up target), "another session" = some other workspace — so preserve it;
+     collapsing to one word makes one context say something false, a meaning
+     regression, not a cleanup
    - `commands/*.md` ↔ CLI parser ↔ README (the drift tests cover this — trust
      them, but new surfaces need new tests)
    - manifest descriptions and versions (pyproject / plugin.json /

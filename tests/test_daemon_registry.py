@@ -96,7 +96,7 @@ def test_assert_complete_raises_on_missing_type():
 
 
 # ------------------------------------------------------------------ #
-# Task 3.5 pins — all 35 MsgType keys present + negative guard        #
+# Task 3.5 pins — every MsgType key has a handler + negative guard    #
 # ------------------------------------------------------------------ #
 # NOTE: "pins" here = test fixtures pinned to the protocol, unrelated to the
 # (now-removed) pin_toggle feature.
@@ -124,6 +124,7 @@ ALL_TYPES = [
     _MsgType.CATCH_UP,
     _MsgType.CATCHUP_RESULT,
     _MsgType.LEARN_MODE,
+    _MsgType.QUERY_ACTIONS,
 ]
 
 

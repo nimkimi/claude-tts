@@ -4,8 +4,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CMD = os.path.join(REPO, "commands")
 
 # The shipped slash-commands. Files use NTFS-safe names (no colon) so they check
-# out and work on Windows too. stop/skip are pure hotkey mirrors and
-# install/uninstall are CLI-only, so none of them ship a command file.
+# out and work on Windows too. stop/skip are pure hotkey mirrors, so they alone
+# ship no command file (see DROPPED); everything in COMMANDS — install/uninstall
+# included — ships one.
 COMMANDS = ("status", "verbosity", "doctor", "keymap", "voice", "rate", "install", "uninstall")
 ARG_COMMANDS = ("verbosity", "voice", "rate", "keymap")  # forward $ARGUMENTS
 DROPPED = ("stop", "skip")
