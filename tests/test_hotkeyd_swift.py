@@ -39,7 +39,12 @@ def test_resolved_json_shape_matches_swift_contract(monkeypatch, tmp_path):
     keymap.write_resolved()
     data = json.loads(resolved.read_text(encoding="utf-8"))
     assert isinstance(data, list) and data
-    for entry in data:
+    # The trailing entry is the keyCode-less §7 witness-config record (an old
+    # hotkeyd binary's loadEntries guard skips it); every hotkey binding before
+    # it carries the int/int/str contract the Swift reads.
+    assert data[-1]["action"] == "witness_config"
+    assert "keyCode" not in data[-1]
+    for entry in data[:-1]:
         assert set(entry.keys()) >= {"keyCode", "modifiers", "message"}
         assert isinstance(entry["keyCode"], int)
         assert isinstance(entry["modifiers"], int)

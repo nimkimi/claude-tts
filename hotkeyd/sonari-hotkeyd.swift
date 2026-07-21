@@ -73,11 +73,14 @@ func lockInfo() -> (port: UInt16, token: String)? {
 }
 
 // Best-effort: connect to the speechd localhost-TCP listener and write
-// the session token followed by one newline-JSON message line.
-func sendMessage(_ message: String) {
-    guard let info = lockInfo() else { return }
+// the session token followed by one newline-JSON message line. Returns
+// whether the line was handed to a connected socket (the witness beat
+// counts consecutive failures; every other caller ignores it).
+@discardableResult
+func sendMessage(_ message: String) -> Bool {
+    guard let info = lockInfo() else { return false }
     let fd = socket(AF_INET, SOCK_STREAM, 0)
-    if fd < 0 { return }
+    if fd < 0 { return false }
     defer { close(fd) }
     var addr = sockaddr_in()
     addr.sin_family = sa_family_t(AF_INET)
@@ -88,9 +91,10 @@ func sendMessage(_ message: String) {
             connect(fd, sptr, socklen_t(MemoryLayout<sockaddr_in>.size))
         }
     }
-    if connected != 0 { return }
+    if connected != 0 { return false }
     let line = info.token + "\n" + message + "\n"
     _ = line.withCString { write(fd, $0, strlen($0)) }
+    return true
 }
 
 // --- Focus-watcher: report which terminal (tty / iTerm id) has OS keyboard focus.
@@ -151,6 +155,67 @@ func pollFocus() {
         if line == lastFocusLine { return }     // change-detection: no idle traffic
         lastFocusLine = line
         sendMessage(line)
+    }
+}
+
+// --- Witness (daemon-death direction): ping speechd on the focus timer's
+// cadence (every 10 ticks ~ 5 s); at 3 consecutive send failures (~ 15 s)
+// sound the alarm ONCE; re-arm only after a later successful send. The alarm
+// is a raw shell-out — the daemon is the thing that just died, so nothing may
+// route through it. /usr/bin/env resolves afplay/say via PATH. Config rides
+// the resolved file's witness_config entry; the compiled-in defaults below
+// mean a stale resolved file can never silently disable the alarm. ---
+struct WitnessConfig {
+    var alarmAsset = "/System/Library/Sounds/Hero.aiff"   // compiled-in defaults
+    var alarmWords = "Sonari is down."                    // (stale-file safety)
+    var alarmEnabled = true
+}
+
+func loadWitnessConfig() -> WitnessConfig {
+    var cfg = WitnessConfig()
+    guard let data = FileManager.default.contents(atPath: resolvedPath()),
+          let parsed = try? JSONSerialization.jsonObject(with: data),
+          let array = parsed as? [[String: Any]] else { return cfg }
+    for obj in array where (obj["action"] as? String) == "witness_config" {
+        if let a = obj["alarmAsset"] as? String { cfg.alarmAsset = a }
+        if let w = obj["alarmWords"] as? String { cfg.alarmWords = w }
+        if let e = obj["alarmEnabled"] as? Bool { cfg.alarmEnabled = e }
+    }
+    return cfg
+}
+
+let witnessConfig = loadWitnessConfig()
+let witnessPingEveryTicks = 10       // 0.5 s focus ticks -> ~5 s cadence
+let witnessFailAfter = 3             // 3 failed sends -> ~15 s
+var witnessTick = 0
+var witnessFailures = 0
+var witnessAlarmed = false
+
+func witnessShellOut(_ tool: String, _ argument: String) {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    p.arguments = [tool, argument]
+    try? p.run()
+}
+
+func fireWitnessAlarm() {
+    guard witnessConfig.alarmEnabled else { return }
+    witnessShellOut("afplay", witnessConfig.alarmAsset)
+    witnessShellOut("say", witnessConfig.alarmWords)
+}
+
+func witnessBeat() {
+    witnessTick += 1
+    if witnessTick % witnessPingEveryTicks != 0 { return }
+    if sendMessage("{\"v\": 1, \"type\": \"witness_ping\"}") {
+        witnessFailures = 0
+        witnessAlarmed = false          // recovery re-arms
+    } else {
+        witnessFailures += 1
+        if witnessFailures >= witnessFailAfter && !witnessAlarmed {
+            witnessAlarmed = true       // once, until a successful send
+            fireWitnessAlarm()
+        }
     }
 }
 
@@ -321,7 +386,10 @@ app.setActivationPolicy(.accessory)
 NSWorkspace.shared.notificationCenter.addObserver(
     forName: NSWorkspace.didActivateApplicationNotification,
     object: nil, queue: .main) { _ in pollFocus() }
-let focusTimer = Timer(timeInterval: 0.5, repeats: true) { _ in pollFocus() }
+let focusTimer = Timer(timeInterval: 0.5, repeats: true) { _ in
+    pollFocus()
+    witnessBeat()
+}
 RunLoop.main.add(focusTimer, forMode: .common)
 pollFocus()   // report initial focus
 

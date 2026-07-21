@@ -202,12 +202,31 @@ def test_write_resolved_emits_array_of_bindings(monkeypatch, tmp_path):
     keymap.write_resolved()
     data = json.loads((tmp_path / "hotkeyd.resolved.json").read_text(encoding="utf-8"))
     # len must match the platform's full default_keymap (not just _DEFAULT_KEYS) because
-    # extra_default_bindings() adds the macOS response-nav (⌃⌘↑/↓) and chooser (⌃⌘Tab/⌃⌘⇧Tab) bindings.
-    assert isinstance(data, list) and len(data) == len(keymap.default_keymap())
-    for entry in data:
+    # extra_default_bindings() adds the macOS response-nav (⌃⌘↑/↓) and chooser (⌃⌘Tab/⌃⌘⇧Tab)
+    # bindings — PLUS the trailing §7 witness-config entry (keyCode-less, so an
+    # old hotkeyd binary's entry guard skips it).
+    assert isinstance(data, list) and len(data) == len(keymap.default_keymap()) + 1
+    for entry in data[:-1]:
         assert isinstance(entry["keyCode"], int)
         assert isinstance(entry["modifiers"], int)
         assert isinstance(entry["message"], str)
+    witness = data[-1]
+    assert witness["action"] == "witness_config"
+    assert "keyCode" not in witness
+    assert witness["alarmAsset"] == "/System/Library/Sounds/Hero.aiff"  # isolated config -> fallback
+    assert witness["alarmWords"] == "Sonari is down."
+    assert witness["alarmEnabled"] is True
+
+
+def test_write_resolved_witness_asset_honors_config(monkeypatch, tmp_path):
+    _patch_keymap_paths(monkeypatch, tmp_path)
+    from sonari.config import load_config, save_config
+    cfg = load_config()
+    cfg["earcons"] = {"alarm_daemon_down": "/custom/siren.aiff"}
+    save_config(cfg)
+    keymap.write_resolved()
+    data = json.loads((tmp_path / "hotkeyd.resolved.json").read_text(encoding="utf-8"))
+    assert data[-1]["alarmAsset"] == "/custom/siren.aiff"
 
 
 def test_write_resolved_no_tmp_leftover(monkeypatch, tmp_path):

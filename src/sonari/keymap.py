@@ -405,11 +405,28 @@ def write_default_keymap_if_absent() -> bool:
     return True
 
 
+def _witness_entry() -> dict:
+    """The §7 witness-config entry appended to the resolved array. keyCode-less:
+    an old hotkeyd binary's loadEntries guard requires keyCode and skips it; a
+    new binary reads it by action name. The asset resolves config-first with the
+    Python fallback (never silently unconfigured); hotkeyd's compiled-in
+    defaults are the last resort, so a STALE resolved file cannot disable the
+    alarm either. Words PROVISIONAL (ear-batch-2)."""
+    from sonari.config import load_config
+    from sonari.speaker import _FALLBACK_EARCONS
+    earcons = load_config().get("earcons") or {}
+    asset = earcons.get("alarm_daemon_down") or _FALLBACK_EARCONS["alarm_daemon_down"]
+    return {"action": "witness_config", "alarmAsset": asset,
+            "alarmWords": "Sonari is down.", "alarmEnabled": True}
+
+
 def write_resolved(keymap=None) -> str:
-    """Atomically write the resolved array to HOTKEYD_RESOLVED_PATH; return its
-    path. Uses load_keymap() when no explicit keymap is given."""
+    """Atomically write the resolved array (bindings + the witness-config entry)
+    to HOTKEYD_RESOLVED_PATH; return its path. Uses load_keymap() when no
+    explicit keymap is given."""
     if keymap is None:
         keymap = load_keymap()
     ensure_sonari_dir()
-    atomic_write_json(HOTKEYD_RESOLVED_PATH, resolve_keymap(keymap), indent=None)
+    atomic_write_json(HOTKEYD_RESOLVED_PATH,
+                      resolve_keymap(keymap) + [_witness_entry()], indent=None)
     return str(HOTKEYD_RESOLVED_PATH)
