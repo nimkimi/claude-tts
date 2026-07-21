@@ -174,7 +174,7 @@ ACTIONS = {
         "message": {"type": "skip_pile"},
         "label": "Skip the pile",
         # wording provisional, pending owner ear-pass
-        "teach": "Skip the pile. Marks this session's unheard backlog as heard without reading it.",
+        "teach": "Skip the pile. Settles this session's unheard backlog without reading it.",
         "doc": "Settle the unheard backlog without hearing it",
         "proposed": {"key": "down", "mods": ["ctrl", "cmd", "shift"]},
     },

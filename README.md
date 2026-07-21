@@ -85,7 +85,7 @@ You ask Claude to refactor a file and look away:
 > — spoken as it streams, sentence by sentence.
 >
 > **♪ chime** — the permission earcon, the instant Claude asks.
-> *"Permission: Edit parser.py. Press Control Command Return to approve."*
+> *"Edit parser.py. Press Control Command Return to approve."*
 >
 > You press ⌃⌘Return without looking up. The voice continues:
 > *"Done. The parser now handles nested blocks."*
@@ -233,7 +233,7 @@ question, plan, or permission is voiced *in its natural place* — after the pro
 explains it — so if the voice is mid-sentence when a permission appears, you still hear the
 remaining sentences first, then the permission. What *is* instant is the **alert**: the
 moment any decision appears, a short distinct earcon plays immediately (a different sound for
-permission, choice, plan, error, turn-done, and ready), while the spoken detail waits its
+permission, choice, plan, error, turn-done), while the spoken detail waits its
 turn in the queue. Claude Code blocks on the prompt until you respond, so hearing the
 context first costs nothing. "Higher priority" therefore means *"alert you instantly with a
 sound,"* never *"speak it out of order."*
