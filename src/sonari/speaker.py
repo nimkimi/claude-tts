@@ -40,6 +40,7 @@ class Speaker:
         self._current_lock = threading.Lock()
         self._cancel_epoch = 0          # bumped by cancel(); closes the synth-gap race
         self._transient_proc = None     # the one-slot arbiter's current tone
+        self._terminated_procs: list = []   # superseded tones awaiting a reap
         self._transient_lock = threading.Lock()
         self._wait_timeout = _wait_timeout
 
@@ -121,12 +122,24 @@ class Speaker:
         if path is None:
             return
         with self._transient_lock:
+            # Deterministic reap: purge previously-terminated tones that have
+            # exited before spawning a new one (the old earcon reap's guarantee —
+            # dropping the reference to a terminated proc leaves reaping to
+            # non-deterministic CPython GC).
+            self._reap_terminated_procs()
             prev = self._transient_proc
             if prev is not None and prev.poll() is None:
                 prev.terminate()
+                self._terminated_procs.append(prev)   # retain until the next reap
             proc = self._earcon_player(path)
             self._transient_proc = (proc if proc is not None
                                     and hasattr(proc, "poll") else None)
+
+    def _reap_terminated_procs(self) -> None:
+        """Non-blocking poll: drop superseded tones whose process has finished.
+        Called under _transient_lock."""
+        self._terminated_procs = [p for p in self._terminated_procs
+                                  if p.poll() is None]
 
     def pitch_asset(self, direction: str) -> "str | None":
         """Path of the packaged pitch chirp (up = yes/next, down = no/prev), or

@@ -50,6 +50,12 @@ def test_second_transient_terminates_a_still_playing_first():
     sp.transient("turn_done")                      # first still playing
     assert player.procs[0].terminate_calls == 1    # superseded, never stacked
     assert player.paths == ["/snd/a.aiff", "/snd/b.aiff"]
+    # The terminated tone is RETAINED for a deterministic reap, not dropped
+    # unreaped (the old earcon reap's guarantee — CPython GC is non-deterministic).
+    assert sp._terminated_procs == [player.procs[0]]
+    sp.transient("error")                          # a third tone reaps the finished first
+    assert player.procs[0] not in sp._terminated_procs   # poll-purged, never leaked
+    assert len(sp._terminated_procs) <= 1          # bounded: only the just-superseded proc
 
 
 def test_finished_transient_is_not_terminated():
