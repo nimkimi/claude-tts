@@ -28,6 +28,24 @@ def test_hit_binds_the_spearcon_prelude_to_the_content_item():
     assert speaker.spoken[-1] == "bg content."     # NO spliced folder prefix
 
 
+def test_hit_preserves_an_existing_prelude_never_clobbers_it():
+    """A chirp-preluded confirm (owner ruling 3: the directional chirp is bound to
+    Approved./Denied.) sitting in a background stream is delivered by keep-going; a
+    spearcon cache HIT must NOT overwrite its bound chirp with the folder call-sign.
+    The prelude is one atomic unit and the yes/no chirp is the redundant channel."""
+    daemon, queue, speaker, sessions, config = make_daemon()
+    _prime(daemon)
+    sessions.register("bg", cwd="/x/bg")
+    daemon._spearcons.available["bg"] = "/sp/bg.aiff"   # cache HIT — the clobber trigger
+    daemon._enqueue("bg", "prose", "Approved.", False,
+                    mute_exempt=True, pause_exempt=True,
+                    prelude=("/pitch/up.wav",))
+    daemon._speak_loop_once()                      # keep-going delivers the confirm
+    assert sessions.speaker() == "bg"
+    assert speaker.audio_paths[-2:] == ["/pitch/up.wav", None]   # chirp kept, NOT /sp/bg.aiff
+    assert speaker.spoken[-1] == "Approved."
+
+
 def test_miss_keeps_todays_splice_byte_identically_and_kicks_generation():
     daemon, queue, speaker, sessions, config = make_daemon()
     _prime(daemon)

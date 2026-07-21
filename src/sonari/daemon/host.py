@@ -786,7 +786,13 @@ class SpeechDaemon:
                     # never blocks (a cache stat + non-blocking Popen kick).
                     if item is not None:
                         sp = self._spearcon_path(self.sessions.folder(next_sess))
-                        if sp is not None:
+                        if sp is not None and not item.prelude:
+                            # Mirror the sibling guard at _enqueue (:290): only the
+                            # heal-on-pop case (a cache-miss item with an empty
+                            # prelude) gains the folder spearcon. An item that
+                            # already carries a prelude — the answer chirp bound to
+                            # Approved./Denied. — keeps it; the atomic unit is never
+                            # overwritten with a session call-sign.
                             item.prelude = (sp,)
                             item.names_session = True
             self._state._current_item = item
