@@ -110,6 +110,7 @@ is bound to the sentence it decorates and plays with it as one unit.
 | `permission_expired` | transient | A permission ask timed out unanswered |
 | `your_turn` | transient | The turn you were hearing live just finished |
 | `submit_ack` | transient | Your prompt was submitted (off by default) |
+| `repoint` | transient | Your click moved the workspace to a different session |
 | `pitch_up` | prelude | Rising chirp bound to the front of an approval |
 | `pitch_down` | prelude | Falling chirp bound to the front of a denial |
 | `callsign` | prelude | The asking session's spoken label, bound to its own utterance |

@@ -267,19 +267,24 @@ class SessionManager:
         self._touch_mru(session)
 
     def set_os_focus(self, term_program: str = "", tty: str = "",
-                     iterm_session_id: str = "", focused: bool = True) -> None:
+                     iterm_session_id: str = "", focused: bool = True) -> bool:
         """Record which terminal currently has OS keyboard focus, resolved to a live
         session. `focused=False` (or an unresolvable identity) clears it — including
         the retained raw signal, so a later identity never resurrects a pre-departure
         pin. Match is by NON-EMPTY identity only: tty for Apple_Terminal, bare GUID
         for iTerm.app. This is the INBOUND focus signal — distinct from
-        focus()/foreground() (the voice)."""
+        focus()/foreground() (the voice). Returns True iff the resolved WORKSPACE
+        session changed across this call (D2 §6.2: the feature layer cues on the
+        change; this module stays audio-free). The late-identity repair path
+        (set_identity -> _resolve_os_focus) is NOT a click and reports nothing."""
+        before = self.workspace()
         if not focused:
             self._os_focus_raw = None
             self._os_focused_session = None
-            return
+            return self.workspace() != before
         self._os_focus_raw = (term_program, tty, iterm_session_id)
         self._resolve_os_focus()
+        return self.workspace() != before
 
     def _resolve_os_focus(self) -> None:
         """Resolve the retained raw focus signal against the current identities.

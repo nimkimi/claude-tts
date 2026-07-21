@@ -53,6 +53,8 @@ CUES = {c.name: c for c in (
         "The turn you were hearing live just finished"),
     Cue("submit_ack", "status", "transient",
         "Your prompt was submitted (off by default)"),
+    Cue("repoint", "status", "transient",
+        "Your click moved the workspace to a different session"),
     Cue("pitch_up", "feedback", "prelude",
         "Rising chirp bound to the front of an approval"),
     Cue("pitch_down", "feedback", "prelude",

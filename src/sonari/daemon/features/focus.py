@@ -30,12 +30,17 @@ def _waiting_target(ctx, exclude):
 def on_os_focus(ctx, msg):
     """Inbound OS-focus signal from the focus-watcher. Session-less: reads the front
     terminal's identity off the message and resolves it to a session. Fire-and-forget."""
-    ctx.host.sessions.set_os_focus(
+    changed = ctx.host.sessions.set_os_focus(
         term_program=msg.get("term_program", ""),
         tty=msg.get("tty", ""),
         iterm_session_id=msg.get("iterm_session_id", ""),
         focused=msg.get("focused", True),
     )
+    if changed:
+        # D2 §6.2 (RL3): the workspace under your keyboard is now a DIFFERENT
+        # session — mark the crossing. Tone-only (clicks are too frequent for
+        # words); the no-op refocus / every-click cases return False above.
+        ctx.host.cue("repoint")
     return None
 
 
