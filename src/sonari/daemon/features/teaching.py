@@ -1,11 +1,18 @@
 """Self-teaching: learn mode (SP-D1). The daemon teaches its own cockpit.
 
-Learn-mode interception itself lives in SpeechDaemon._dispatch_hotkey (it must
-see the raw hotkey message before dispatch); this module owns the toggle."""
+Learn-mode interception lives in SpeechDaemon.handle_message, the single dispatch
+chokepoint (socket / hotkey / catch-up all funnel through it): while learn mode is
+on, any message that resolves to a registered action speaks that action's teach
+line instead of dispatching. Non-action-shaped messages (CLI control carrying a
+"v" key, hook prose) never equal a registered action, so they are never taught; an
+action-shaped message teaches regardless of transport — on macOS the socket IS the
+hotkey transport (hotkeyd sends resolved action messages over it). This module
+owns the toggle."""
 from __future__ import annotations
 
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
+from sonari.daemon.features.control import _has_decision
 
 # wording provisional, pending owner ear-pass
 LEARN_ON = ("Learn mode. Press any Sonari key to hear what it does. "
@@ -40,15 +47,13 @@ HINTS = {
 # wording provisional, pending owner ear-pass
 QUERY_DECISION = ("A decision is waiting. Control Command Return approves, "
                   "Escape denies, O re-reads the options.")
-QUERY_STOPPED = ("Speech is stopped. Control Command S resumes this session, "
-                 "M resumes everything.")
+QUERY_STOPPED = "Speech is stopped. Control Command S resumes this session."
 QUERY_DEFAULT = ("Control Command W says where you are. J jumps to a waiting "
                  "session. Hold Tab on the chord to browse sessions.")
 
 
 @handler(MsgType.QUERY_ACTIONS)
 def on_query_actions(ctx, msg):
-    from sonari.daemon.features.control import _has_decision
     host = ctx.host
     ws = host.sessions.workspace()
     if ws is None:

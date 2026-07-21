@@ -1,8 +1,11 @@
-"""Learn mode (SP-D1, Task 10): while on, every Sonari hotkey speaks its own
-'teach' sentence instead of acting, with a 120s idle auto-exit. The interception
-lives in SpeechDaemon._dispatch_hotkey (the raw hotkey path), so a socket message
-is never intercepted; the LEARN_MODE handler in features/teaching.py owns only
-the toggle.
+"""Learn mode (SP-D1, Task 10): while on, every action-shaped Sonari message
+speaks its own 'teach' sentence instead of acting, with a 120s idle auto-exit.
+The interception lives in SpeechDaemon.handle_message (the shared dispatch
+chokepoint — socket, hotkey and catch-up all funnel through it), so an
+action-shaped message teaches on ANY transport (on macOS a real key press arrives
+as a socket message). Non-action-shaped messages (CLI control carrying a "v" key,
+hook prose) never equal a registered action, so they always execute. The
+LEARN_MODE handler in features/teaching.py owns only the toggle.
 
 Task 11: first-encounter hints (teaching.maybe_hint) — one-shot spoken cues fired
 the first time each of four moments happens in a daemon run, 'everything'
@@ -55,17 +58,45 @@ def test_learn_mode_toggle_announces(timers):
     assert timers[0].cancelled is True and len(timers) == 1   # manual exit cancels the idle timer
 
 
-def test_hotkey_intercepted_speaks_teach_and_does_not_execute(timers, monkeypatch):
+def _dispatch_spy(monkeypatch):
+    """Record every message that reaches the registry dispatch (the layer BELOW
+    the learn-mode interception), so a test can prove an action did or did not
+    execute. Returns the recording list."""
+    import sonari.daemon.host as host_mod
+    dispatched = []
+    real_dispatch = host_mod.dispatch
+
+    def spy(ctx, m):
+        dispatched.append(m.get("type"))
+        return real_dispatch(ctx, m)
+
+    monkeypatch.setattr(host_mod, "dispatch", spy)
+    return dispatched
+
+
+def test_learn_mode_intercepts_at_the_handle_message_chokepoint(timers, monkeypatch):
+    # PRODUCTION PATH: interception lives in handle_message, the shared dispatch
+    # chokepoint — NOT _dispatch_hotkey — so a real macOS key press (which arrives
+    # as a socket message) teaches instead of executing. Spy on the registry
+    # dispatch to prove the action never reached its handler.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     daemon.handle_message({"type": "learn_mode"})          # learn mode ON
-    dispatched = []
-    real = daemon.handle_message
+    dispatched = _dispatch_spy(monkeypatch)
+    daemon.handle_message({"type": "where_am_i"})          # the real production path
+    assert "where_am_i" not in dispatched                  # never reached its handler
+    assert daemon._learn_mode is True                      # interception does not toggle
+    item = queue._items[-1]
+    assert item.text == keymap.ACTIONS["where_am_i"]["teach"]
+    assert item.mute_exempt and item.pause_exempt
 
-    def spy(m):
-        dispatched.append(m.get("type"))
-        return real(m)
 
-    monkeypatch.setattr(daemon, "handle_message", spy)
+def test_hotkey_press_teaches_via_delegation(timers, monkeypatch):
+    # The hotkey path (_dispatch_hotkey) inherits interception by delegating to
+    # handle_message. Spy on the registry dispatch (interception now lives above
+    # it) to prove the pressed action never executed.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "learn_mode"})          # learn mode ON
+    dispatched = _dispatch_spy(monkeypatch)
     daemon._dispatch_hotkey({"type": "where_am_i"})
     assert "where_am_i" not in dispatched                  # the action never dispatched
     assert daemon._learn_mode is True                      # interception does not toggle
@@ -74,21 +105,51 @@ def test_hotkey_intercepted_speaks_teach_and_does_not_execute(timers, monkeypatc
     assert item.mute_exempt and item.pause_exempt
 
 
-def test_learn_mode_toggle_key_is_exempt_from_interception(timers):
+def test_learn_mode_toggle_is_exempt_via_handle_message(timers):
+    # The toggle key itself is never taught -> learn mode can always be exited,
+    # even through the production chokepoint.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     daemon.handle_message({"type": "learn_mode"})          # ON
     assert daemon._learn_mode is True
-    daemon._dispatch_hotkey({"type": "learn_mode"})        # the toggle key itself
+    daemon.handle_message({"type": "learn_mode"})          # the toggle, in learn mode
     assert daemon._learn_mode is False                     # exits (not taught)
     assert queue._items[-1].text == "Learn mode off."
 
 
-def test_socket_path_never_intercepted(timers):
+def test_cli_shaped_message_still_executes_in_learn_mode(timers):
+    # A CLI control message carries a "v" (protocol version) key, so it never
+    # equals a registered action message -> it executes even in learn mode. The
+    # socket/CLI is not a teaching surface; only action-shaped messages teach.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     daemon.handle_message({"type": "learn_mode"})          # ON
-    daemon.handle_message({"type": "stop"})                # socket path
+    daemon.handle_message({"v": 1, "type": "stop"})        # the real CLI stop shape
+    assert speaker.cancels == 1                            # executed, not taught
+    assert daemon._learn_mode is True                      # a CLI message leaves mode alone
+
+
+def test_non_action_message_executes_in_learn_mode(timers):
+    # Teaching keys on message SHAPE, not transport: a message whose type is not a
+    # registered action (here a bare "stop", distinct from the CLI's "v"-keyed
+    # shape) never matches an action, so it executes even in learn mode. There is
+    # no "socket path is never taught" rule — on macOS the socket IS the hotkey
+    # transport, and action-shaped messages teach on it.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "learn_mode"})          # ON
+    daemon.handle_message({"type": "stop"})                # not an action message
     assert speaker.cancels == 1                            # stop executed, not taught
-    assert daemon._learn_mode is True                      # socket path leaves mode alone
+    assert daemon._learn_mode is True                      # leaves mode alone
+
+
+def test_non_action_submessage_dispatches_in_learn_mode(timers, monkeypatch):
+    # A chord sub-message that is NOT a registered action (a chooser digit) must
+    # fall through to dispatch, not be swallowed as a teach. With no chooser open
+    # it is a safe no-op; the point is that it REACHED its handler.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "learn_mode"})          # ON
+    dispatched = _dispatch_spy(monkeypatch)
+    daemon.handle_message({"type": "chooser_digit", "digit": 3})
+    assert "chooser_digit" in dispatched                   # fell through to the handler
+    assert daemon._chooser is None                          # safe no-op (no gesture opened)
 
 
 def test_auto_exit_timer_rearms_and_fires(timers):
@@ -103,6 +164,21 @@ def test_auto_exit_timer_rearms_and_fires(timers):
     timers[-1].fn()                                        # the idle timer fires
     assert daemon._learn_mode is False
     assert queue._items[-1].text == "Learn mode off."
+
+
+def test_stale_timer_after_rearm_is_a_noop(timers):
+    # A stale idle timer that fired just past its cancel window must NOT kill a
+    # freshly re-armed learn mode, and must NOT orphan the live timer. Each armed
+    # timer carries its own identity; the expiry callback bails unless it is still
+    # the live one. (The runtime reviewer reproduced the original bug this way.)
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    daemon.handle_message({"type": "learn_mode"})          # timer T1
+    first = timers[-1]
+    daemon._dispatch_hotkey({"type": "where_am_i"})        # re-arm -> T2, T1 cancelled
+    assert len(timers) == 2
+    first.fn()                                             # fire the STALE (T1) callback
+    assert daemon._learn_mode is True                      # not killed by the stale timer
+    assert daemon._learn_timer is timers[-1]               # the live timer (T2) is intact
 
 
 # --- Task 11: first-encounter hints -------------------------------------------
@@ -152,6 +228,20 @@ def test_background_turn_hint_fires_on_the_landed_ding():
     b_hints = [it for it in stream_queue(daemon, "B")._items
                if it.text == teaching.HINTS["background_turn"]]
     assert len(b_hints) == 1                                # heard on the speaker's stream
+
+
+def test_background_turn_hint_not_fired_on_speakers_own_stopped_session():
+    # Under quiet-hold the speaker's OWN session finishing still dings (the
+    # "something landed" cue), but it is not a BACKGROUND turn -> no
+    # background_turn hint, and the once-per-run key is NOT burned unheard.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    daemon.voice_state = "quiet-hold"                       # speaker A, stopped
+    daemon.handle_message({"type": "earcon", "session": "A", "kind": "turn_done"})
+    assert speaker.earcons[-1] == "turn_done"               # the ding still fires
+    hints = [it for it in queue._items
+             if it.text == teaching.HINTS["background_turn"]]
+    assert hints == []                                      # no false hint spoken
+    assert "background_turn" not in daemon._hinted          # key not consumed unheard
 
 
 def test_chooser_hint_fires_on_first_open():
@@ -235,6 +325,10 @@ def test_query_while_stopped():
     item = queue._items[-1]
     assert item.text == teaching.QUERY_STOPPED
     assert item.mute_exempt and item.pause_exempt
+    # stop_all is one-way (playback.py) — the query must teach only the real
+    # resume, never a false "M resumes everything".
+    assert "Control Command S resumes this session" in teaching.QUERY_STOPPED
+    assert "resumes everything" not in teaching.QUERY_STOPPED
 
 
 def test_query_default():

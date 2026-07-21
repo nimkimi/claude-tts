@@ -78,12 +78,16 @@ def on_earcon(ctx, msg):
         # Rare (the finishing speaker usually still holds backlog) and self-limiting.
         if not (session == speaker and host.voice_state == "flowing"):
             host.speaker.earcon(kind)
-            # The hint must land in the stream the voice is actually playing, not
-            # the just-finished (background) session's own stream: the speak loop
-            # only ever pops the SPEAKER stream, so a hint enqueued on `session`
-            # would sit unheard until the user reached that session some other
-            # way -- defeating its purpose. Target the speaker instead.
-            teaching.maybe_hint(host, "background_turn", speaker)
+            # The hint is about a BACKGROUND session finishing, so fire it only when
+            # the finished session is NOT the speaker. The earcon branch above also
+            # covers the speaker's OWN session finishing under quiet-hold/stopped-all
+            # (still a "something landed" ding) -- but that is not a background turn,
+            # so hinting there would speak false content into a stopped stream and
+            # burn the once-per-run key unheard. When it IS a background turn, target
+            # the SPEAKER's stream (the only stream the speak loop pops), not the
+            # finished session's own stream, or the hint would sit unheard.
+            if session != speaker:
+                teaching.maybe_hint(host, "background_turn", speaker)
         # End-of-turn boundary: flush any sub-threshold buffered prose UNCONDITIONALLY
         # (a message below the minqueue threshold must still be read) — the flush
         # survives the earcon suppression above.

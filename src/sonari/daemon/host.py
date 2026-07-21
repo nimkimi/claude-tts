@@ -474,21 +474,27 @@ class SpeechDaemon:
             self._arm_learn_timer()
 
     def _arm_learn_timer(self) -> None:
-        import threading
         if self._learn_timer is not None:
             self._learn_timer.cancel()
-        self._learn_timer = threading.Timer(self.LEARN_MODE_IDLE_S,
-                                            self._learn_mode_expired)
-        self._learn_timer.daemon = True
-        self._learn_timer.start()
+        # Give the timer its OWN identity: the callback closes over `timer` and
+        # bails unless it is still the live timer (see _learn_mode_expired), so a
+        # stale timer that fired just past its cancel window can't kill a freshly
+        # re-armed or re-entered learn mode, nor orphan the live timer.
+        timer = threading.Timer(self.LEARN_MODE_IDLE_S,
+                                lambda: self._learn_mode_expired(timer))
+        timer.daemon = True
+        self._learn_timer = timer
+        timer.start()
 
-    def _learn_mode_expired(self) -> None:
+    def _learn_mode_expired(self, timer) -> None:
         # The idle timer fired on its own thread: take the transaction (the lock)
-        # and re-check the flag before acting, mirroring _expire_permission's
-        # "still ours" discipline — a manual exit that already flipped the flag
-        # (and cancelled us a beat too late) must be a no-op here.
+        # and confirm we are STILL the live timer before acting. This mirrors
+        # _expire_permission's "still ours" discipline via true timer identity — a
+        # manual exit or a re-arm that already replaced/cleared the timer (even if
+        # it cancelled us a beat too late) makes this a no-op, so a stale fire can
+        # neither kill a freshly re-armed learn mode nor orphan the live timer.
         with self._state.transaction():
-            if not self._learn_mode:
+            if not self._learn_mode or self._learn_timer is not timer:
                 return
             self._learn_mode = False
             self._learn_timer = None
@@ -501,6 +507,28 @@ class SpeechDaemon:
     def handle_message(self, msg):
         self._ctx.bind(msg)
         try:
+            # Learn mode intercepts HERE, at the single dispatch chokepoint (socket
+            # / hotkey / catch-up all funnel through handle_message): while on, any
+            # message that resolves to a registered action speaks that action's
+            # teach line instead of dispatching, and re-arms the idle timer. Exact
+            # dict-equality (action_for_message) keeps every non-action message
+            # executing — CLI control carries a "v" key, hook messages carry
+            # session/extra fields, neither ever equals a registered action;
+            # hotkeyd sends resolved action messages verbatim, so an action-shaped
+            # message teaches regardless of transport (on macOS the socket IS the
+            # hotkey transport). The toggle key itself is exempt so learn mode can
+            # always be exited.
+            if self._learn_mode and msg.get("type") != MsgType.LEARN_MODE:
+                from sonari import keymap
+                action = keymap.action_for_message(msg)
+                if action is not None:
+                    self._arm_learn_timer()
+                    ws = self.sessions.workspace()
+                    if ws is not None:
+                        self._enqueue(ws, "prose",
+                                      keymap.ACTIONS[action]["teach"], False,
+                                      mute_exempt=True, pause_exempt=True)
+                    return None
             return dispatch(self._ctx, msg)
         finally:
             # SP6: the single dispatch chokepoint (socket / hotkey / catch-up all
@@ -593,9 +621,11 @@ class SpeechDaemon:
                 pass
 
     def _dispatch_hotkey(self, message: dict) -> None:
-        """A hotkey fire is handled like an inbound socket message, EXCEPT that
-        learn mode intercepts it here (before dispatch) to speak the pressed key's
-        teach line instead of acting — the socket path is deliberately never taught.
+        """A hotkey fire is handled exactly like an inbound socket message: it is
+        dispatched through handle_message under the daemon lock. Learn mode is NOT
+        intercepted here — it lives in handle_message, the shared dispatch
+        chokepoint, so a real macOS key press (which arrives as a socket message
+        from the separate hotkeyd) is taught identically to an in-process fire.
 
         MUST hold self._lock around handle_message, identical to the socket path
         (_handle_conn): the hotkey thread mutates shared state (queue, history,
@@ -607,17 +637,6 @@ class SpeechDaemon:
         """
         try:
             with self._state.transaction():
-                if self._learn_mode and message.get("type") != "learn_mode":
-                    from sonari import keymap
-                    action = keymap.action_for_message(message)
-                    if action is not None:
-                        self._arm_learn_timer()
-                        ws = self.sessions.workspace()
-                        if ws is not None:
-                            self._enqueue(ws, "prose",
-                                          keymap.ACTIONS[action]["teach"], False,
-                                          mute_exempt=True, pause_exempt=True)
-                        return
                 self.handle_message(message)
         except Exception:  # noqa: BLE001 - one bad hotkey must not kill the pump
             pass
