@@ -84,19 +84,28 @@ def test_every_phase1_event_is_hooked():
     assert not missing, f"hooks.json is missing event hooks: {sorted(missing)}"
 
 
-def test_plugin_json_version_is_0_5_0():
+# The one version to bump; every surface below must carry it in lockstep.
+VERSION = "0.6.0"
+
+
+def test_plugin_json_version():
     data = _load(PLUGIN_JSON)
-    assert data.get("version") == "0.5.0"
+    assert data.get("version") == VERSION
 
 
-def test_pyproject_version_is_0_5_0():
+def test_pyproject_version():
     text = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert 'version = "0.5.0"' in text
+    assert f'version = "{VERSION}"' in text
 
 
-def test_marketplace_plugin_version_is_0_5_0():
+def test_marketplace_plugin_version():
     mp = REPO_ROOT / ".claude-plugin" / "marketplace.json"
     data = _load(mp)
     plugins = data.get("plugins") or []
     assert plugins, "marketplace.json declares no plugins"
-    assert plugins[0].get("version") == "0.5.0"
+    assert plugins[0].get("version") == VERSION
+
+
+def test_package_version_matches_manifests():
+    import sonari
+    assert sonari.__version__ == VERSION
