@@ -40,6 +40,8 @@ class Speaker:
         self._current_lock = threading.Lock()
         self._cancel_epoch = 0          # bumped by cancel(); closes the synth-gap race
         self._earcon_procs: list = []
+        self._transient_proc = None     # the one-slot arbiter's current tone
+        self._transient_lock = threading.Lock()
         self._wait_timeout = _wait_timeout
 
     def cancel_epoch(self) -> int:
@@ -175,6 +177,40 @@ class Speaker:
         proc = self._earcon_player(path)
         if proc is not None and hasattr(proc, "poll"):
             self._earcon_procs.append(proc)
+
+    def transient(self, kind: str) -> None:
+        """One-slot transient arbiter (D8 law 3): short non-verbal tones bypass
+        the queue; a new transient TERMINATES a still-playing one (latest-wins,
+        no stacking). Transients may coexist with speech, never with each other.
+        Called from handler threads (under the daemon lock) AND the speak thread
+        (_signal_speak_failure) — hence its own lock, never the daemon's. Asset
+        resolution matches earcon(): config dict first, then _FALLBACK_EARCONS;
+        an unconfigured legacy kind stays a silent no-op."""
+        if self._earcon_player is None:
+            return
+        path = self._earcons.get(kind)
+        if path is None:
+            path = _FALLBACK_EARCONS.get(kind)   # never-silent NEW kinds only
+        if path is None:
+            return
+        with self._transient_lock:
+            prev = self._transient_proc
+            if prev is not None and prev.poll() is None:
+                prev.terminate()
+            proc = self._earcon_player(path)
+            self._transient_proc = (proc if proc is not None
+                                    and hasattr(proc, "poll") else None)
+
+    def pitch_asset(self, direction: str) -> "str | None":
+        """Path of the packaged pitch chirp (up = yes/next, down = no/prev), or
+        None for an unknown direction. Package-direct (never the configurable
+        earcons dict) so an existing user's `earcons` config can never silently
+        disable it (bootstrap merges with a whole-key guard)."""
+        if direction not in ("up", "down"):
+            return None
+        from pathlib import Path
+        return str(Path(__file__).resolve().parent
+                   / "assets" / "pitch_{0}.wav".format(direction))
 
     def set_voice(self, v) -> None:
         self._voice = v

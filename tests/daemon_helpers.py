@@ -67,6 +67,16 @@ class FakeSpeaker:
     def pitch(self, direction: str) -> None:
         self.pitches.append(direction)
 
+    def transient(self, kind: str) -> None:
+        # One list for ALL tone assertions: transient kinds land in `earcons`
+        # so per-kind checks hold across the earcon->transient migration.
+        self.earcons.append(kind)
+
+    def pitch_asset(self, direction: str) -> "str | None":
+        if direction not in ("up", "down"):
+            return None
+        return "/pitch/{0}.wav".format(direction)
+
     def cancel(self) -> None:
         self.cancels += 1
         self._epoch += 1
