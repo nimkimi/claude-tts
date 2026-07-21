@@ -89,6 +89,31 @@ def test_expiry_word_speaks_on_a_muted_session():
     assert "That ask timed out — check the terminal." in speaker.spoken
 
 
+def test_misdirected_answer_names_the_asking_session():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.register("other", cwd="/x/invoice-generator")
+    daemon.handle_message(_msg("permission_request", "other", tool="Bash", summary="ls"))
+    daemon.handle_message(_msg("answer_permission", "fg", behavior="allow"))
+    assert speaker.earcons[-1] == "error_misdirected"
+    # Routed word on the WORKSPACE stream, naming the asker by its spoken short
+    # label (spearcon_label source: 'invoice-generator' -> 'invoice').
+    assert queue._items[-1].text == "No ask here — invoice is asking."
+
+
+def test_answer_with_nothing_pending_anywhere_says_so():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon.handle_message(_msg("answer_permission", "fg", behavior="allow"))
+    assert speaker.earcons == ["error_misdirected"]
+    assert queue._items[-1].text == "Nothing to answer."
+
+
+def test_answer_with_no_workspace_stays_tone_only():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    daemon.handle_message(_msg("answer_permission", "", behavior="allow"))
+    assert speaker.earcons == ["error_misdirected"]
+    assert all(len(st.queue) == 0 for st in daemon._streams.values())
+
+
 def test_speak_loop_failure_speaks_the_word_after_the_tone():
     daemon, queue, speaker, sessions, config = make_daemon()
     calls = {"n": 0}

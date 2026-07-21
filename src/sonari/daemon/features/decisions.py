@@ -5,6 +5,13 @@ import threading
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
 from sonari.daemon.features import teaching
+from sonari.spearcon import spearcon_label
+
+
+# D7a (§4) misdirected-answer words (the RL5 false-remedy heal) — PROVISIONAL
+# pending the ear-batch-2 audition.
+MISDIRECT_ROUTE_WORD = "No ask here — {0} is asking."
+MISDIRECT_EMPTY_WORD = "Nothing to answer."
 
 
 def _choice_text(msg) -> str:
@@ -189,8 +196,23 @@ def on_answer_permission(ctx, msg):
     target = host.sessions.workspace()
     pd = host._pending_decisions.get(target) if target is not None else None
     if pd is None:
-        # W6 misdirected: valid intent, wrong session — go to the asking one.
-        host.cue("error_misdirected")
+        # W6 misdirected, now the RL5 false-remedy HEAL: the tone stays the
+        # instant part; the word says WHERE the live ask actually is — the
+        # asker's spoken short label, same source as its spearcon text — or
+        # that none exists anywhere. A None workspace has nowhere to speak
+        # the word: tone only. First-registered pending entry wins (dict
+        # insertion order == oldest live ask); it can never be `target`
+        # (target's own miss is what brought us here).
+        if target is None:
+            host.cue("error_misdirected")
+            return None
+        other = next(iter(host._pending_decisions), None)
+        if other is not None:
+            label = spearcon_label(host.sessions.folder(other) or "") or "another session"
+            word = MISDIRECT_ROUTE_WORD.format(label)
+        else:
+            word = MISDIRECT_EMPTY_WORD
+        host.cue("error_misdirected", word=word, session=target)
         return None
     pd["behavior"] = behavior
     pd["event"].set()
