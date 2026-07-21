@@ -50,6 +50,11 @@ class FakeSpeaker:
     def earcon(self, kind):
         self.log.append(("earcon", kind))
 
+    def transient(self, kind):
+        # Same log entry as earcon() — the earcon->transient migration must not
+        # change what these ordering assertions observe.
+        self.log.append(("earcon", kind))
+
     def pitch(self, direction: str) -> None:
         # Chirps are parallel audio outside the speech queue; not mixed into
         # the ordering log so characterization tests don't need updating.

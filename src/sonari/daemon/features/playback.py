@@ -69,7 +69,7 @@ def on_skip_pile(ctx, msg):
         # is addressable.
         cue_target = ws if ws is not None else spk
         if cue_target is None:
-            host.speaker.earcon("error")
+            host.cue("error")
             return None
         # Nothing ahead of the frontier — do NOT nag "skipped 0" (B3 rejected).
         host._enqueue(cue_target, "prose", "Nothing to skip.", False,
@@ -121,7 +121,7 @@ def on_stop_session(ctx, msg):
     else:
         fg = sessions.speaker()                   # STOP the speaker (status quo)
     if fg is None:
-        ctx.host.speaker.earcon("error")
+        ctx.host.cue("error")
         return None
     st = ctx.host._stream(fg)
     if st.stopped:
@@ -206,7 +206,7 @@ def on_jump_decision(ctx, msg):
             ctx.host._enqueue(tgt, "prose", "No decision here.", False,
                               mute_exempt=True, pause_exempt=True, at_front=True)
         else:
-            ctx.host.speaker.earcon("error")
+            ctx.host.cue("error")
         return None
     crossed = target != sessions.speaker()   # voice owner is speaker(); SP2 advances it independently of workspace()
     ctx.host.voice_state = "flowing"                 # ⌃⌘D re-engage (R5:149 groups jump/⌃⌘D)
@@ -263,7 +263,7 @@ def on_repeat_last(ctx, msg):
         ws_st = host._streams.get(ws) if ws is not None else None
         playable = ws is not None and not (ws_st is not None and ws_st.stopped)
         if not playable:
-            host.speaker.earcon("error")
+            host.cue("error")
             return None
         tgt = ws
     last = host._last_utterance

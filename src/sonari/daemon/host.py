@@ -8,6 +8,7 @@ import time
 
 from sonari.protocol import MsgType
 from sonari.queue import SpeechItem
+from sonari.cues import CUES
 from sonari.session_stream import SessionStream
 from sonari.paths import LOCK_PATH, ensure_sonari_dir
 from sonari.platform import transport
@@ -337,6 +338,20 @@ class SpeechDaemon:
             return None
         return self._spearcons.get(folder)
 
+    def cue(self, kind: str) -> None:
+        """Fire a registered TRANSIENT cue (D8 law 4) — with enqueue-with-prelude,
+        the only audio API feature code may use. An unknown or non-transient kind
+        is a stderr line, never a raise (an eyes-free daemon must not crash on a
+        bad cue name); the drift guard makes an unregistered literal a suite
+        failure, so production only ever sees this path on a malformed socket
+        kind."""
+        c = CUES.get(kind)
+        if c is None or c.tier != "transient":
+            import sys
+            print("sonari: unregistered cue: {0}".format(kind), file=sys.stderr)
+            return
+        self.speaker.transient(kind)
+
     def _attributed_text(self, item) -> str:
         """item.text, prefixed with the session's folder name when the voice switches
         to a session different from the one last spoken — so the user knows who's
@@ -450,7 +465,7 @@ class SpeechDaemon:
         is IN FLIGHT (already popped) remove_by_id misses: it finishes playing and
         the expiry earcon beside it is the honest context (accepted edge)."""
         try:
-            self.speaker.earcon("permission_expired")
+            self.cue("permission_expired")
         except Exception:  # noqa: BLE001 - expiry signaling must never break the reply
             pass
         item_id = pd.get("item_id")
@@ -665,7 +680,7 @@ class SpeechDaemon:
         loop. Call only from within an active `except` block (print_exc reads the
         handled exception)."""
         try:
-            self.speaker.earcon("error_system")   # W6: "Sonari itself failed; content preserved unheard"
+            self.cue("error_system")   # W6: "Sonari itself failed; content preserved unheard"
         except Exception:  # noqa: BLE001 - signaling failure must not wedge the loop
             pass
         try:

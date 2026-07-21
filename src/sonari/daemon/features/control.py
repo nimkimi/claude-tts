@@ -314,7 +314,7 @@ def on_where_am_i(ctx, msg):
             cue += _also_clause(host, exclude=(ws,))
             host._enqueue(ws, "prose", cue, False, mute_exempt=True, pause_exempt=True)
         else:
-            host.speaker.earcon("error")
+            host.cue("error")
         return None
     # Capture the in-flight item BEFORE cancel so we can resume it afterwards.
     cur = host._current_item

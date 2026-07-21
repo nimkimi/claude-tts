@@ -77,7 +77,7 @@ def on_earcon(ctx, msg):
         # hook-latency window, a turn heard live to completion gets one extra ding.
         # Rare (the finishing speaker usually still holds backlog) and self-limiting.
         if not (session == speaker and host.voice_state == "flowing"):
-            host.speaker.earcon(kind)
+            host.cue(kind)
             # The hint is about a BACKGROUND session finishing, so fire it only when
             # the finished session is NOT the speaker. The earcon branch above also
             # covers the speaker's OWN session finishing under quiet-hold/stopped-all
@@ -105,7 +105,7 @@ def on_earcon(ctx, msg):
         else:
             host.speaker.earcon(kind)
     else:
-        ctx.host.speaker.earcon(kind)
+        ctx.host.cue(kind)
     return None
 
 

@@ -53,6 +53,11 @@ class FakeSpeaker:
     def earcon(self, kind):
         self.log.append(("earcon", kind))
 
+    def transient(self, kind):
+        # Same log entry as earcon() — the earcon->transient migration must not
+        # change what these ordering assertions observe.
+        self.log.append(("earcon", kind))
+
     def set_voice(self, v):
         self.voice = v
 

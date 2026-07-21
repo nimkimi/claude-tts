@@ -58,7 +58,7 @@ def on_jump_waiting(ctx, msg):
             ctx.host._enqueue(tgt, "prose", "No session waiting.", False,
                               mute_exempt=True, pause_exempt=True, at_front=True)
         else:
-            ctx.host.speaker.earcon("error")
+            ctx.host.cue("error")
         return None
     # Explicit move: switch the VOICE (not OS focus) to the
     # target, cut the current utterance so the switch is immediate, and lead

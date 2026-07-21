@@ -65,7 +65,7 @@ def _open(host):
     new state, or None (error-toned) when no live candidate exists."""
     origin, candidates = _snapshot(host.sessions)
     if not candidates:
-        host.speaker.earcon("error")
+        host.cue("error")
         return None
     cur = host._current_item
     entry = host._pending_heard.get(cur.id) if cur is not None else None
@@ -157,7 +157,7 @@ def _deliver_preview(host, st):
         ws_st = host._streams.get(ws) if ws is not None else None
         playable = ws is not None and not (ws_st is not None and ws_st.stopped)
         if not playable:
-            host.speaker.earcon("error")   # nowhere voiceable; browse stays open
+            host.cue("error")   # nowhere voiceable; browse stays open
             return
         tgt = ws
     host._enqueue(tgt, "prose", _preview_text(host, st), False,
@@ -185,7 +185,7 @@ def _commit(host, st, target):
         return
     sessions = host.sessions
     if target not in sessions.session_ids() or not sessions.is_live(target):
-        host.speaker.earcon("error")   # audible failed landing (eyes-free), never silent
+        host.cue("error")   # audible failed landing (eyes-free), never silent
         _restore_and_clear(host)       # resume the captured item, move nothing
         return None
     _remove_preview(host, st)
@@ -252,7 +252,7 @@ def on_chooser_digit(ctx, msg):
         digit = None
     target = host.sessions.session_for_number(digit) if digit is not None else None
     if target is None or not host.sessions.is_live(target):
-        host.speaker.earcon("error")       # unknown/dead number: browse stays open (§3)
+        host.cue("error")       # unknown/dead number: browse stays open (§3)
         return None
     _commit(host, st, target)
     return None

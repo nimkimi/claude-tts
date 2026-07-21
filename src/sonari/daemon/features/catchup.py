@@ -32,7 +32,7 @@ def on_catch_up(ctx, msg):
         return None
     target = sessions.workspace()
     if target is None:
-        host.speaker.earcon("error")
+        host.cue("error")
         return None
     st = host._stream(target)
     entries, aged_out = host.history.unheard_from_frontier(target, st.frontier)

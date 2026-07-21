@@ -515,6 +515,11 @@ class _RaisingSpeaker:
     def earcon(self, kind):
         self.earcons.append(kind)
 
+    def transient(self, kind):
+        # Same list as earcon() — the earcon->transient migration must not
+        # change what this assertion observes.
+        self.earcons.append(kind)
+
 
 def test_speak_failure_signals_error_system_and_the_loop_survives():
     """W6 guard: a raising utterance inside the REAL _speak_loop_once fires the
