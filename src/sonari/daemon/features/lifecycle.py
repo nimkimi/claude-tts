@@ -145,6 +145,10 @@ def on_set_foreground(ctx, msg):
             st.announce_resume = False
             ctx.host._enqueue(session, "prose", "Resumed.", False,
                               mute_exempt=True, at_front=True)
+        if ctx.host._restore_line is not None:
+            ctx.host._enqueue(session, "prose", ctx.host._restore_line, False,
+                              mute_exempt=True, pause_exempt=True)
+            ctx.host._restore_line = None
     return None
 
 

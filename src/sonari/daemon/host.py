@@ -143,6 +143,10 @@ class SpeechDaemon:
         # thread is NOT started here — run() starts it AFTER restore (§8).
         self._persistence = PersistenceWriter(
             self._store, self._snapshot_state, self._lock)
+        # D2 §6.4/§6.5: the composed restart line when it must be DEFERRED —
+        # every restored session was muted, so no playable stream existed at
+        # boot. Delivered (once) by on_flush / the SESSION_START leg.
+        self._restore_line = None
 
     # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
     # (speak loop + kernel ops) goes through self._state._X directly; these
@@ -1013,6 +1017,58 @@ class SpeechDaemon:
             except Exception:
                 pass
 
+    _RESTORE_COUNT_WORDS = {1: "One", 2: "Two", 3: "Three", 4: "Four", 5: "Five",
+                            6: "Six", 7: "Seven", 8: "Eight", 9: "Nine"}
+
+    def _compose_restore_line(self) -> "str | None":
+        """The ONE factual post-restore line (D2 §6.4/§6.5), or None when nothing
+        was restored. A PILE = a restored session whose history extends past its
+        frontier (catch-up-reachable; frontier None == everything unheard).
+        Content-only — no session-liveness claims (D3's hide-vs-mark untouched).
+        Strings PROVISIONAL pending the ear-batch-2 audition."""
+        piles = 0
+        for sid in self.history.session_ids():
+            st = self._state._streams.get(sid)
+            frontier = st.frontier if st is not None else None
+            entries, _ = self.history.unheard_from_frontier(sid, frontier)
+            if entries:
+                piles += 1
+        parts = []
+        if piles:
+            count = self._RESTORE_COUNT_WORDS.get(piles, str(piles))
+            parts.append("{0} {1} restored.".format(
+                count, "pile" if piles == 1 else "piles"))
+        for sid, st in self._state._streams.items():
+            if st.stopped:
+                folder = self.sessions.folder(sid) or "Another session"
+                parts.append("{0} is muted.".format(folder))
+        return " ".join(parts) if parts else None
+
+    def _announce_restored(self) -> None:
+        """Voice the restore line. Runs single-threaded in run() right after
+        _restore_state (before the server binds), so no lock is needed and the
+        line is queue-ordered — it naturally follows the OFF-queue boot cue (R2
+        untouched, no boot-reorder). forward=False / no entry: it can never
+        advance a restored frontier. Delivery target: the first restored
+        NON-stopped stream (keep-going adopts it right after boot), else the
+        first non-muted pile session from history (its stream is created
+        non-stopped); when EVERY restored session is muted there is no playable
+        stream yet — DEFER via _restore_line to the first lifecycle activity."""
+        line = self._compose_restore_line()
+        if line is None:
+            return
+        target = next((sid for sid, st in self._state._streams.items()
+                       if not st.stopped), None)
+        if target is None:
+            stopped = {sid for sid, st in self._state._streams.items() if st.stopped}
+            target = next((sid for sid in self.history.session_ids()
+                           if sid not in stopped), None)
+        if target is not None:
+            self._enqueue(target, "prose", line, False,
+                          mute_exempt=True, pause_exempt=True)
+        else:
+            self._restore_line = line
+
     def _on_shutdown_signal(self, signum, frame) -> None:
         """A graceful-teardown signal landed (SIGTERM from `launchctl unload`):
         drop out of run()'s loop so the `finally` runs the stop/join/flush and the
@@ -1039,6 +1095,7 @@ class SpeechDaemon:
         # before any speak/accept/hotkey thread can touch state (§8). Takes no
         # lock; this ordering is what keeps it torn-state-free.
         self._restore_state()
+        self._announce_restored()
         self._persistence.start()
         self._token = secrets.token_hex(32)
         port = self._server.bind()

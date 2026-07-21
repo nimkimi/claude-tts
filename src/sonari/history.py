@@ -202,6 +202,10 @@ class SessionHistory:
         d = self._entries.get(session)
         return (d[-1].msg_id, d[-1].seq) if d else None
 
+    def session_ids(self) -> list:
+        """Sessions with surviving transcript entries (the restore pile scan)."""
+        return list(self._entries.keys())
+
     def reset(self, session: str) -> None:
         """Forget a session entirely (SESSION_END)."""
         self._entries.pop(session, None)

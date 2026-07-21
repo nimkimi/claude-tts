@@ -142,5 +142,12 @@ def on_flush(ctx, msg):
         st.announce_resume = False
         ctx.host._enqueue(session, "prose", "Resumed.", False,
                           mute_exempt=True, at_front=True)
+    if ctx.host._restore_line is not None:
+        # D2 §6.4/§6.5: the all-muted restart line deferred past boot — the
+        # first submit is the first moment a reachable queue exists (a muted
+        # speaker's pause-exempt cue is voiced by the held branch).
+        ctx.host._enqueue(session, "prose", ctx.host._restore_line, False,
+                          mute_exempt=True, pause_exempt=True)
+        ctx.host._restore_line = None
     ctx.host._wake.set()
     return None
