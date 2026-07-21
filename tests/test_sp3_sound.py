@@ -7,11 +7,12 @@ def _msg(t, session, **kw):
     return {"v": PROTOCOL_VERSION, "type": t, "session": session, **kw}
 
 
-# --- M3 core: the FLOWING speaker's turn_done is SUPPRESSED (heard live, req 18) ---
-def test_flowing_speaker_turn_done_suppressed():
+# --- D2 §6.1 (T3): the FLOWING speaker's turn boundary now SPEAKS — your_turn
+#     (the old silence made "done" and "stack died" identical; req 18 superseded) ---
+def test_flowing_speaker_turn_done_becomes_your_turn():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     daemon.handle_message(_msg(MsgType.EARCON, "fg", kind="turn_done"))
-    assert speaker.earcons == []
+    assert speaker.earcons == ["your_turn"]
 
 
 # --- a NON-speaker's turn_done DINGS ("something landed", req 16) ---
@@ -39,7 +40,7 @@ def test_turn_done_flush_survives_earcon_suppression():
     daemon.handle_message(_msg(MsgType.PROSE, "fg", delta="Only one. ", index=0, final=True))
     assert len(daemon._stream("fg").queue) == 0                 # held below threshold
     daemon.handle_message(_msg(MsgType.EARCON, "fg", kind="turn_done"))
-    assert speaker.earcons == []                                # earcon suppressed (flowing speaker)
+    assert speaker.earcons == ["your_turn"]                     # solo boundary tone (D2 §6.1)
     assert len(daemon._stream("fg").queue) > 0                 # ... but the flush STILL ran
 
 

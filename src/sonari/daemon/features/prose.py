@@ -89,6 +89,13 @@ def on_earcon(ctx, msg):
             # finished session's own stream, or the hint would sit unheard.
             if session != speaker:
                 teaching.maybe_hint(host, "background_turn", speaker)
+        else:
+            # D2 §6.1 (T3): the SOLO boundary. This is the session you were
+            # hearing live and its turn just ended — the old silence here made
+            # "done" and "stack died" identical, so quiet was never a warranted
+            # claim. Distinct kind (and asset) from the background landed ding
+            # so solo-done and background-done can differ by ear.
+            host.cue("your_turn")
         # End-of-turn boundary: flush any sub-threshold buffered prose UNCONDITIONALLY
         # (a message below the minqueue threshold must still be read) — the flush
         # survives the earcon suppression above.

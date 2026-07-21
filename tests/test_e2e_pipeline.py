@@ -170,6 +170,7 @@ def test_scripted_session_full_ordering():
         ("earcon", "permission"),
         ("text", "Applying the change now."),
         ("text", "Run: pytest -q Press the option's number to choose, or Escape to cancel. — at the terminal."),
+        ("earcon", "your_turn"),
     ]
 
 

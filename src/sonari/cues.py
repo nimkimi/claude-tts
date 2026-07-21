@@ -47,6 +47,10 @@ CUES = {c.name: c for c in (
         "Sonari itself failed; the content is preserved unheard"),
     Cue("permission_expired", "failure", "transient",
         "A permission ask timed out unanswered"),
+    # --- D2 §6 silences (2026-07-21). Assets PROVISIONAL pending the owner's
+    # ear-batch-2 audition; swaps are config-level, never code. ---
+    Cue("your_turn", "status", "transient",
+        "The turn you were hearing live just finished"),
     Cue("pitch_up", "feedback", "prelude",
         "Rising chirp bound to the front of an approval"),
     Cue("pitch_down", "feedback", "prelude",

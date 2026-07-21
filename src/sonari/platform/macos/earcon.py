@@ -18,6 +18,9 @@ _DEFAULTS = {
     "error_system":      "/System/Library/Sounds/Blow.aiff",   # "broke inside"
     # W7 permission expiry (spec §8): provisional asset, owner's ear-pass swaps it.
     "permission_expired": "/System/Library/Sounds/Purr.aiff",  # "it slipped away"
+    # D2 §6 silences: provisional assets — the owner's audition (ear-batch-2)
+    # may swap any of these (config-level, no code change).
+    "your_turn":  "/System/Library/Sounds/Pop.aiff",   # solo turn boundary (distinct from Tink)
 }
 
 

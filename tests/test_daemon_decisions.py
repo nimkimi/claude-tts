@@ -174,11 +174,11 @@ def test_jump_decision_drops_pending_and_marks_current_heard():
     assert queue.pop_next().text == "decide"
 
 
-def test_bare_earcon_message_suppressed_for_flowing_speaker():
+def test_bare_earcon_message_becomes_your_turn_for_flowing_speaker():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     daemon.handle_message(_msg(MsgType.EARCON, "fg", kind="turn_done"))
-    assert speaker.earcons == []                          # flowing speaker's turn_done suppressed
-    assert len(queue) == 0
+    assert speaker.earcons == ["your_turn"]               # D2 §6.1 solo boundary tone
+    assert len(queue) == 0                                # a transient queues nothing
 
 def test_bare_earcon_message_dings_for_non_speaker():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")

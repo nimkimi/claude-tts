@@ -19,6 +19,7 @@ class _FakeSpeaker:
     def speak(self, text=None, audio_path=None, cancel_epoch=None):
         self.spoken.append(text)
         return True
+    def transient(self, kind: str) -> None: pass
 
 
 def test_speech_item_forward_defaults_false():

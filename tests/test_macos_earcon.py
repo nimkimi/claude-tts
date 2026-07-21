@@ -19,5 +19,7 @@ def test_default_earcons_are_macos_system_sounds():
     d = MacEarconBackend().default_earcons()
     assert d["permission"] == "/System/Library/Sounds/Funk.aiff"
     assert set(d) == {"permission", "choice", "plan", "error", "turn_done",
-                       "error_misdirected", "error_system",   # W6 taxonomy
-                       "permission_expired"}                 # W7 expiry
+                      "error_misdirected", "error_system",   # W6 taxonomy
+                      "permission_expired",                  # W7 expiry
+                      "your_turn"}                           # D2 §6.1 solo boundary
+    assert d["your_turn"] == "/System/Library/Sounds/Pop.aiff"
