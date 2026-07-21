@@ -194,11 +194,15 @@ def on_answer_permission(ctx, msg):
         return None
     pd["behavior"] = behavior
     pd["event"].set()
-    host.speaker.pitch("up" if behavior == "allow" else "down")   # directional chirp first
     host.speaker.cancel()                     # barge-in: confirm immediately
+    # Owner ruling 3: the directional chirp is the confirm's PRELUDE — barge,
+    # then chirp, then the word, strictly ordered as one unit (the barge already
+    # cleared the channel, so binding costs no latency).
     host._enqueue(target, "prose",
                   "Approved." if behavior == "allow" else "Denied.",
-                  False, mute_exempt=True, pause_exempt=True, at_front=True)
+                  False, mute_exempt=True, pause_exempt=True, at_front=True,
+                  prelude=(host.speaker.pitch_asset(
+                      "up" if behavior == "allow" else "down"),))
     return None
 
 

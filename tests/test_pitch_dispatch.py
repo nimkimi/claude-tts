@@ -60,7 +60,9 @@ def test_nav_response_does_not_chirp():
     assert speaker.pitches == []
 
 
-def test_answer_allow_chirps_up_deny_chirps_down():
+def test_answer_allow_deny_do_not_call_pitch_directly():
+    # the directional chirp now binds as the confirm's prelude (see
+    # tests/test_decisions_answer.py), not a direct pitch() call
     import threading
     daemon, q, speaker, sessions, _ = make_daemon()
     sessions.set_foreground("S1", cwd="/x/a")
@@ -68,7 +70,7 @@ def test_answer_allow_chirps_up_deny_chirps_down():
     daemon.handle_message({"type": "answer_permission", "behavior": "allow"})
     daemon._pending_decisions["S1"] = {"event": threading.Event(), "behavior": None}
     daemon.handle_message({"type": "answer_permission", "behavior": "deny"})
-    assert speaker.pitches == ["up", "down"]
+    assert speaker.pitches == []
 
 
 def test_answer_with_no_pending_does_not_chirp():

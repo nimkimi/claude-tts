@@ -100,6 +100,38 @@ def test_handle_message_guarded_permission_request_raises_returns_fail_closed():
     assert result == {"decision": None}
 
 
+def test_answer_binds_the_chirp_as_the_confirms_prelude():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("S1", cwd="/x/alpha")
+    daemon._pending_decisions["S1"] = {"event": threading.Event(), "behavior": None}
+    _dispatch(daemon, {"type": MsgType.ANSWER_PERMISSION, "behavior": "allow"})
+    confirm = daemon._stream("S1").queue._items[0]           # at_front
+    assert confirm.text == "Approved."
+    assert confirm.prelude == ("/pitch/up.wav",)             # FakeSpeaker.pitch_asset
+    assert confirm.pause_exempt and confirm.mute_exempt      # flags unchanged
+    assert speaker.cancels > 0                               # barge cleared the channel
+
+
+def test_deny_binds_the_down_chirp():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("S1", cwd="/x/alpha")
+    daemon._pending_decisions["S1"] = {"event": threading.Event(), "behavior": None}
+    _dispatch(daemon, {"type": MsgType.ANSWER_PERMISSION, "behavior": "deny"})
+    confirm = daemon._stream("S1").queue._items[0]
+    assert confirm.text == "Denied."
+    assert confirm.prelude == ("/pitch/down.wav",)
+
+
+def test_barge_then_chirp_then_confirm_strictly_ordered():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("S1", cwd="/x/alpha")
+    daemon._pending_decisions["S1"] = {"event": threading.Event(), "behavior": None}
+    _dispatch(daemon, {"type": MsgType.ANSWER_PERMISSION, "behavior": "allow"})
+    daemon._speak_loop_once()
+    assert speaker.audio_paths == ["/pitch/up.wav", None]    # chirp, then the word
+    assert speaker.spoken[-1] == "Approved."
+
+
 def test_blocking_round_trip_request_then_answer():
     daemon, queue, speaker, sessions, config = make_daemon()
     sessions.set_foreground("S1", cwd="/x/alpha")
