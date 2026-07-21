@@ -910,11 +910,11 @@ class SpeechDaemon:
         HOLDS self._lock (the PersistenceWriter loop / flush() wraps this call),
         so every HistoryEntry field is read under the lock and a concurrent
         heard-flip can't tear the read (§7). Does NO I/O and acquires NO lock
-        itself. Only streams with a live frontier are serialized (the frontier is
-        a stream's sole durable field)."""
+        itself. Streams are serialized when they carry a durable fact: a live
+        frontier or a held stop."""
         streams = {sid: st.to_state()
                    for sid, st in self._state._streams.items()
-                   if st.frontier is not None}
+                   if st.frontier is not None or st.stopped}
         return {
             "version": STATE_VERSION,
             "saved_wall": time.time(),         # bounded-staleness reference (§4.4)

@@ -54,12 +54,17 @@ class SessionStream:
             self.frontier = key
 
     def to_state(self) -> dict:
-        """Serialize the durable frontier (list form — JSON has no tuple). Only
-        the frontier persists; every other field is transient (§4.2). PURE."""
-        return {"frontier": list(self.frontier) if self.frontier is not None else None}
+        """Serialize the durable fields: the frontier (list form — JSON has no
+        tuple) and the held stop (a mute SURVIVES restart, so muted content
+        piles durably instead of being buried — the E4b closure). Everything
+        else is transient (§4.2). PURE."""
+        return {"frontier": list(self.frontier) if self.frontier is not None else None,
+                "stopped": self.stopped}
 
     def load_state(self, data) -> None:
-        """Rehydrate the frontier, converting JSON's list back to a TUPLE so
-        `key > self.frontier` (tuple-vs-tuple) never raises TypeError (§6). PURE."""
+        """Rehydrate the frontier (JSON list back to a TUPLE so tuple-vs-tuple
+        compare never raises, §6) and the held stop; a pre-0.8.0 file without
+        the key loads unmuted. PURE."""
         f = data.get("frontier")
         self.frontier = tuple(f) if f is not None else None
+        self.stopped = bool(data.get("stopped", False))

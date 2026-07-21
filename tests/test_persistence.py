@@ -111,7 +111,7 @@ def test_session_stream_frontier_round_trip_via_json():
     from sonari.session_stream import SessionStream
     st = SessionStream(); st.advance_frontier((3, 0))
     state = json.loads(json.dumps(st.to_state()))       # tuple -> list over JSON
-    assert state == {"frontier": [3, 0]}
+    assert state == {"frontier": [3, 0], "stopped": False}
     st2 = SessionStream(); st2.load_state(state)
     assert st2.frontier == (3, 0) and isinstance(st2.frontier, tuple)
     assert (4, 0) > st2.frontier                         # tuple compare, no TypeError
@@ -250,8 +250,9 @@ def test_writer_stop_joins_a_started_thread():
 
 def test_snapshot_restore_round_trip_and_behavior_decisions():
     from tests.daemon_helpers import make_daemon
-    # Source daemon: a real pile, a partway frontier, a bumped id counter, and
-    # TRANSIENT state (a held stop + a global voice-state) that must NOT survive.
+    # Source daemon: a real pile, a partway frontier, a bumped id counter, a
+    # held stop (DURABLE — owner ruling 2026-07-21) and a global voice-state
+    # (still transient).
     src, *_ = make_daemon(foreground=None)
     src.sessions.register("s1", cwd="/x/repo")
     src.history.record("s1", "prose", "one"); src.history.end_message("s1")
@@ -272,9 +273,12 @@ def test_snapshot_restore_round_trip_and_behavior_decisions():
     assert dst._streams["s1"].frontier == (0, 0)
     assert dst._state._next_id == 41
     assert sessions.folder("s1") == "repo" and sessions.number("s1") == 1
-    # D1: a held stop does NOT survive restart.
+    # Owner ruling 2026-07-21 (flips the earlier D1 call, on the E4b
+    # silent-burial evidence): a held stop SURVIVES restart — the muted session
+    # stays stopped and new turns pile durably instead of advancing the
+    # frontier past muted content. The GLOBAL voice-state stays transient.
     assert dst.voice_state == "flowing"
-    assert dst._streams["s1"].stopped is False
+    assert dst._streams["s1"].stopped is True
     # D2 + §4.4: identity NOT restored; the session is provisional.
     assert sessions.identity("s1") is None
     assert sessions.is_provisional("s1") is True
@@ -485,3 +489,28 @@ def test_sigterm_handler_requests_clean_shutdown_so_flush_runs():
         assert daemon._wake.is_set()          # speak loop woken for a prompt join
     finally:
         signal.signal(signal.SIGTERM, old)    # restore pytest's handler
+
+
+def test_stopped_only_stream_is_serialized_and_restored():
+    # The widened _snapshot_state filter: a muted stream with NO frontier must
+    # still persist (the mute is its sole durable fact — E4b).
+    from tests.daemon_helpers import make_daemon
+    src, _q, _sp, _se, _c = make_daemon(foreground=None)
+    src.sessions.register("m1", cwd="/x/m")
+    src._stream("m1").stopped = True
+    with src._lock:
+        data = src._snapshot_state()
+    assert data["streams"]["m1"] == {"frontier": None, "stopped": True}
+    src._store.save(data)
+    dst, _q, speaker, sessions, _c = make_daemon(foreground=None)
+    dst._restore_state()
+    assert dst._streams["m1"].stopped is True
+    assert dst._streams["m1"].frontier is None
+
+
+def test_old_state_files_without_stopped_load_unmuted():
+    from sonari.session_stream import SessionStream
+    st = SessionStream()
+    st.load_state({"frontier": [3, 1]})                  # pre-0.8.0 stream shape
+    assert st.frontier == (3, 1)
+    assert st.stopped is False
