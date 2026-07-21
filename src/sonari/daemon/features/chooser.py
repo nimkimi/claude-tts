@@ -119,7 +119,8 @@ def _restore_and_clear(host):
         host._enqueue(c.session, c.kind, c.text, c.is_decision,
                       entry=st.captured_entry, mute_exempt=c.mute_exempt,
                       pause_exempt=c.pause_exempt, names_session=c.names_session,
-                      audio_path=c.audio_path, forward=c.forward, at_front=True)
+                      audio_path=c.audio_path, forward=c.forward, at_front=True,
+                      prelude=c.prelude)
     host._chooser = None
 
 

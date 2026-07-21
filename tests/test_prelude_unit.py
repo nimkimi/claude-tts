@@ -88,3 +88,17 @@ def test_stop_mid_prelude_requeues_the_whole_unit():
     item = stream_queue(daemon, "fg")._items[0]     # requeued at the head
     assert item.prelude == ("/sp/one.aiff",)
     assert item.text == "the content."
+
+
+def test_captured_in_flight_unit_restores_with_its_prelude():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon._state._last_utterance = ("earlier words.", None)
+    cur = SpeechItem(id=999, session="fg", kind="prose", text="mid-flight.",
+                     is_decision=False, prelude=("/sp/fg.aiff",))
+    daemon._state._current_item = cur
+    daemon.handle_message(_msg("repeat_last", "fg"))   # captures + re-enqueues cur
+    items = stream_queue(daemon, "fg")._items
+    assert items[0].text == "earlier words."           # the repeat itself, at head
+    assert items[0].prelude == ()                      # repeats never carry preludes
+    assert items[1].text == "mid-flight."              # the interrupted unit resumes
+    assert items[1].prelude == ("/sp/fg.aiff",)        # ...WHOLE (aria-atomic)

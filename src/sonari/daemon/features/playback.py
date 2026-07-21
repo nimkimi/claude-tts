@@ -280,7 +280,8 @@ def on_repeat_last(ctx, msg):
         host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
                       entry=entry, mute_exempt=cur.mute_exempt,
                       pause_exempt=cur.pause_exempt, names_session=cur.names_session,
-                      audio_path=cur.audio_path, forward=cur.forward, at_front=True)
+                      audio_path=cur.audio_path, forward=cur.forward, at_front=True,
+                      prelude=cur.prelude)
     # The repeat is mute_exempt: never re-captured (idempotence), never prefixed
     # (the captured text already carries any prefix). A spearcon-only last
     # utterance replays its audio file (audio_path passthrough). Preludes never

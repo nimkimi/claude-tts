@@ -359,7 +359,8 @@ def on_where_am_i(ctx, msg):
         host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
                       entry=entry, mute_exempt=cur.mute_exempt,
                       pause_exempt=cur.pause_exempt, names_session=cur.names_session,
-                      audio_path=cur.audio_path, forward=cur.forward, at_front=True)
+                      audio_path=cur.audio_path, forward=cur.forward, at_front=True,
+                      prelude=cur.prelude)
     host._enqueue(fg, "prose", text, False,
                   mute_exempt=True, pause_exempt=True, at_front=True)
     return None
