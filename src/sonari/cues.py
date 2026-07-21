@@ -61,6 +61,8 @@ CUES = {c.name: c for c in (
         "Falling chirp bound to the front of a denial"),
     Cue("callsign", "attribution", "prelude",
         "The asking session's spoken label, bound to its own utterance"),
+    Cue("crossing", "attribution", "prelude",
+        "A neutral marker where the voice crossed to a session whose call-sign is not cached yet"),
     Cue("speech", "content", "queued",
         "Spoken readout of session output"),
     Cue("summary_voice", "content", "queued",

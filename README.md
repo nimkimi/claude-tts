@@ -114,6 +114,7 @@ is bound to the sentence it decorates and plays with it as one unit.
 | `pitch_up` | prelude | Rising chirp bound to the front of an approval |
 | `pitch_down` | prelude | Falling chirp bound to the front of a denial |
 | `callsign` | prelude | The asking session's spoken label, bound to its own utterance |
+| `crossing` | prelude | A neutral marker where the voice crossed to a session whose call-sign is not cached yet |
 | `speech` | queued | Spoken readout of session output |
 | `summary_voice` | queued | The catch-up summary's island voice |
 <!-- sonari:generated:sounds:end -->

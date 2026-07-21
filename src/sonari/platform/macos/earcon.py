@@ -23,6 +23,7 @@ _DEFAULTS = {
     "your_turn":  "/System/Library/Sounds/Pop.aiff",   # solo turn boundary (distinct from Tink)
     "submit_ack": "/System/Library/Sounds/Morse.aiff",  # prompt-submit ack (dark by default)
     "repoint":    "/System/Library/Sounds/Bottle.aiff", # workspace repoint on click
+    "crossing":   "/System/Library/Sounds/Frog.aiff",   # keep-going miss marker (prelude)
 }
 
 

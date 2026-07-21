@@ -53,7 +53,11 @@ def test_where_am_i_none_speaker_with_workspace_reports_nothing_playing():
     assert sessions.speaker() is None and sessions.workspace() == "w"
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
     daemon._speak_loop_once()
-    assert speaker.spoken == ["Nothing playing. Keyboard: work 1."]
+    # Delivered via keep-going (speaker() was None): an uncached spearcon for
+    # "w" binds the neutral crossing marker ahead of the readout (D2 §6.6);
+    # the spoken text itself is unchanged.
+    assert speaker.audio_paths[-2:] == ["/System/Library/Sounds/Frog.aiff", None]
+    assert speaker.spoken == [None, "Nothing playing. Keyboard: work 1."]
 
 
 # --- STATUS surfaces the voice-state ---

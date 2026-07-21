@@ -16,6 +16,9 @@ _FALLBACK_EARCONS = {
     "error_misdirected": "/System/Library/Sounds/Basso.aiff",
     "error_system": "/System/Library/Sounds/Blow.aiff",
     "permission_expired": "/System/Library/Sounds/Purr.aiff",
+    # D2 §6.6 crossing prelude — resolved via host._asset_path (config-first),
+    # never through transient(). PROVISIONAL asset (ear-batch-2).
+    "crossing": "/System/Library/Sounds/Frog.aiff",
 }
 
 

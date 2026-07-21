@@ -23,7 +23,9 @@ def test_default_earcons_are_macos_system_sounds():
                       "permission_expired",                  # W7 expiry
                       "your_turn",                           # D2 §6.1 solo boundary
                       "submit_ack",                          # D2 §6.1 prompt-submit ack
-                      "repoint"}                             # D2 §6.2 workspace repoint
+                      "repoint",                             # D2 §6.2 workspace repoint
+                      "crossing"}                            # D2 §6.6 keep-going miss marker
     assert d["your_turn"] == "/System/Library/Sounds/Pop.aiff"
     assert d["submit_ack"] == "/System/Library/Sounds/Morse.aiff"
     assert d["repoint"] == "/System/Library/Sounds/Bottle.aiff"
+    assert d["crossing"] == "/System/Library/Sounds/Frog.aiff"

@@ -359,6 +359,20 @@ class SpeechDaemon:
             return None
         return self._spearcons.get(folder)
 
+    def _asset_path(self, kind: str) -> "str | None":
+        """Config-first + Python-fallback asset resolution for post-GA cue kinds
+        that must be resolvable OUTSIDE Speaker.transient() (the crossing
+        prelude; the witness alarms): the speaker.py _FALLBACK_EARCONS
+        discipline — a config entry always wins, the fallback means the kind can
+        never be silently unconfigured on an existing install. Pure lookup: no
+        lock, no I/O, no playback."""
+        earcons = self.config.get("earcons") or {}
+        path = earcons.get(kind)
+        if path is None:
+            from sonari.speaker import _FALLBACK_EARCONS
+            path = _FALLBACK_EARCONS.get(kind)
+        return path
+
     def cue(self, kind: str, *, word=None, session=None) -> None:
         """Fire a registered TRANSIENT cue (D8 law 4) — with enqueue-with-prelude,
         the only audio API feature code may use. An unknown or non-transient kind
@@ -822,6 +836,16 @@ class SpeechDaemon:
                             # overwritten with a session call-sign.
                             item.prelude = (sp,)
                             item.names_session = True
+                        elif sp is None and not item.prelude:
+                            # D2 §6.6 (RL1 residual): spearcon cache MISS. The
+                            # crossing still gets a NEUTRAL marker — a fixed asset
+                            # independent of the cache — bound atomically under
+                            # the same guard shape (an existing prelude is never
+                            # clobbered). names_session stays False: the folder
+                            # splice still names the destination.
+                            cp = self._asset_path("crossing")
+                            if cp is not None:
+                                item.prelude = (cp,)
             self._state._current_item = item
             # Capture the speaker's cancel baseline atomically with the claim, so a
             # cancel() arriving during speak() is detected (M2 — the pop->speak gap).

@@ -69,13 +69,16 @@ def test_every_registered_transient_is_reachable():
 def test_every_platform_default_and_fallback_kind_is_registered():
     from sonari.platform.macos.earcon import _DEFAULTS
     from sonari.speaker import _FALLBACK_EARCONS
-    assert set(_DEFAULTS) <= transient_kinds()
-    assert set(_FALLBACK_EARCONS) <= transient_kinds()
+    # Registered, not necessarily transient: the maps now also carry the
+    # crossing prelude (and later the alarm tier) — the registry is still the
+    # one namespace every asset key must live in.
+    assert set(_DEFAULTS) <= set(CUES)
+    assert set(_FALLBACK_EARCONS) <= set(CUES)
 
 
-def test_prelude_entries_cover_chirps_and_callsign():
+def test_prelude_entries_cover_chirps_callsign_and_crossing():
     assert {n for n, c in CUES.items() if c.tier == "prelude"} == {
-        "pitch_up", "pitch_down", "callsign"}
+        "pitch_up", "pitch_down", "callsign", "crossing"}
 
 
 # --- verbal exclusivity (law 1): runners reachable only via speak/transient ---

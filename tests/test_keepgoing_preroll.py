@@ -46,15 +46,35 @@ def test_hit_preserves_an_existing_prelude_never_clobbers_it():
     assert speaker.spoken[-1] == "Approved."
 
 
-def test_miss_keeps_todays_splice_byte_identically_and_kicks_generation():
+def test_miss_binds_the_neutral_crossing_marker_and_keeps_the_splice():
+    # D2 §6.6 (RL1): the most frequent voice-crossing gets a marker even when
+    # the spearcon is uncached — a fixed neutral asset, bound atomically (law
+    # 2), while the spoken splice still NAMES the destination (names_session
+    # stays False: the marker is neutral, not an attribution claim).
     daemon, queue, speaker, sessions, config = make_daemon()
     _prime(daemon)
     sessions.register("bg", cwd="/x/bg")           # no cached spearcon
     daemon._enqueue("bg", "prose", "bg content.", False)
     daemon._speak_loop_once()
+    assert speaker.audio_paths[-2:] == ["/System/Library/Sounds/Frog.aiff", None]
     assert speaker.spoken[-1] == "bg. bg content."   # the splice, unchanged
-    assert speaker.audio_paths[-1] is None
-    assert "bg" in daemon._spearcons.generated       # self-heals by next time
+    assert "bg" in daemon._spearcons.generated       # still self-heals by next time
+
+
+def test_miss_never_clobbers_an_existing_prelude():
+    """The D8 whole-branch Major, mirrored on the MISS side: a chirp-preluded
+    confirm delivered by keep-going with NO cached spearcon keeps its bound
+    chirp — the crossing marker never overwrites an atomic unit."""
+    daemon, queue, speaker, sessions, config = make_daemon()
+    _prime(daemon)
+    sessions.register("bg", cwd="/x/bg")           # cache MISS
+    daemon._enqueue("bg", "prose", "Approved.", False,
+                    mute_exempt=True, pause_exempt=True,
+                    prelude=("/pitch/up.wav",))
+    daemon._speak_loop_once()
+    assert sessions.speaker() == "bg"
+    assert speaker.audio_paths[-2:] == ["/pitch/up.wav", None]   # chirp kept, no Frog
+    assert speaker.spoken[-1] == "Approved."
 
 
 def test_selection_is_byte_identical_cache_state_never_biases_it():

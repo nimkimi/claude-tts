@@ -27,7 +27,7 @@ def test_the_complete_transient_set():
 
 def test_prelude_and_queued_entries():
     assert {n for n, c in CUES.items() if c.tier == "prelude"} == {
-        "pitch_up", "pitch_down", "callsign"}
+        "pitch_up", "pitch_down", "callsign", "crossing"}
     assert {n for n, c in CUES.items() if c.tier == "queued"} == {
         "speech", "summary_voice"}
 
