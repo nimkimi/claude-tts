@@ -21,6 +21,7 @@ _DEFAULTS = {
     # D2 §6 silences: provisional assets — the owner's audition (ear-batch-2)
     # may swap any of these (config-level, no code change).
     "your_turn":  "/System/Library/Sounds/Pop.aiff",   # solo turn boundary (distinct from Tink)
+    "submit_ack": "/System/Library/Sounds/Morse.aiff",  # prompt-submit ack (dark by default)
 }
 
 

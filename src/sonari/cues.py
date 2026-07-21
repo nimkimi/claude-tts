@@ -51,6 +51,8 @@ CUES = {c.name: c for c in (
     # ear-batch-2 audition; swaps are config-level, never code. ---
     Cue("your_turn", "status", "transient",
         "The turn you were hearing live just finished"),
+    Cue("submit_ack", "status", "transient",
+        "Your prompt was submitted (off by default)"),
     Cue("pitch_up", "feedback", "prelude",
         "Rising chirp bound to the front of an approval"),
     Cue("pitch_down", "feedback", "prelude",

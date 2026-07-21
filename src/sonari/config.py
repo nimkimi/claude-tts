@@ -21,6 +21,7 @@ DEFAULTS = {
     "summary_voice": "auto",     # LLM-body voice; auto=first curated say voice != main, else main
     "summary_model": "haiku",    # claude -p --model for the summary (owner override)
     "restore_max_age_hours": 24, # SP6: max age (h) of a restored pile before drop-on-load (§4.4)
+    "submit_ack_enabled": False, # D2 §6.1: prompt-submit ack tone, dark pending the owner's ear
 }
 
 

@@ -110,6 +110,12 @@ def on_earcon(ctx, msg):
 @handler(MsgType.FLUSH)
 def on_flush(ctx, msg):
     session = ctx.session                 # was: msg.get("session", "")
+    if ctx.host.config.get("submit_ack_enabled", False):
+        # D2 §6.1 submit-ack (the mirror boundary), built DARK: FLUSH is the
+        # daemon-side prompt-submit discriminator (only UserPromptSubmit sends
+        # it; SessionStart's SET_FOREGROUND leg never reaches here). A
+        # transient — the queue clear below cannot touch it.
+        ctx.host.cue("submit_ack")
     st = ctx.host._stream(session)
     ctx.host._drop_pending(st.queue.clear())
     cur = ctx.host._current_item

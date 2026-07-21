@@ -18,6 +18,7 @@ def test_defaults_has_documented_top_level_keys():
         "summary_voice",
         "summary_model",
         "restore_max_age_hours",
+        "submit_ack_enabled",
     }
 
 
