@@ -263,6 +263,12 @@ def on_status(ctx, msg):
         # first-class state surfaced here (per-stream st.stopped stays in "sessions").
         "current_item": host._state._current_item is not None,
         "voice_state": host.voice_state,
+        # §7 witness: age of the last hotkeyd WITNESS_PING; None before the
+        # first (the daemon-side alarm arms only after a first ping).
+        "witness_ping_age_s": (
+            time.monotonic() - host._witness_last_ping
+            if host._witness_last_ping is not None else None
+        ),
     }
 
 
@@ -368,4 +374,13 @@ def on_where_am_i(ctx, msg):
 
 @handler(MsgType.PING)
 def on_ping(ctx, msg):
+    return {"ok": True}
+
+
+@handler(MsgType.WITNESS_PING)
+def on_witness_ping(ctx, msg):
+    # §7 witness (hotkeyd-death direction): stamp the age the speak-loop tick
+    # checks; a ping is also the re-arm signal after a fired alarm.
+    ctx.host._witness_last_ping = time.monotonic()
+    ctx.host._witness_alarmed = False
     return {"ok": True}

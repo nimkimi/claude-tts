@@ -86,6 +86,7 @@ def test_msgtype_has_every_constant_with_exact_values():
         "CHOOSER_COMMIT": "chooser_commit",
         "CHOOSER_CANCEL": "chooser_cancel",
         "REPEAT_LAST": "repeat_last",
+        "WITNESS_PING": "witness_ping",
     }
     for name, value in expected.items():
         assert hasattr(MsgType, name), f"MsgType missing {name}"
@@ -139,6 +140,7 @@ def test_msgtype_defines_no_extra_string_constants():
         "CATCHUP_RESULT": "catchup_result",
         "LEARN_MODE": "learn_mode",
         "QUERY_ACTIONS": "query_actions",
+        "WITNESS_PING": "witness_ping",
     }
     assert actual == expected
 

@@ -49,6 +49,7 @@ assert_complete([
     MsgType.CATCHUP_RESULT,
     MsgType.LEARN_MODE,    # SP-D1 teaching handler at features/teaching.py
     MsgType.QUERY_ACTIONS,  # "what can I do" teaching handler at features/teaching.py
+    MsgType.WITNESS_PING,   # §7 witness handler at features/control.py
 ])
 
 __all__ = ["SpeechDaemon", "main", "ensure_running"]

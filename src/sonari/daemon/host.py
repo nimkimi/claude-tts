@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import queue
 import secrets
+import subprocess
 import threading
 import time
 
@@ -24,6 +25,7 @@ PERMISSION_WAIT_TIMEOUT = 120.0   # daemon's own wait; MUST be < the hook's clie
 # the queued clarification. Both PROVISIONAL pending the ear-batch-2 audition.
 EXPIRED_WORD = "That ask timed out — check the terminal."
 SPEAK_FAILURE_WORD = "Speech failed; kept unheard."
+ALARM_HOTKEYS_WORDS = "Hotkeys are down."   # §7 witness alarm — PROVISIONAL (ear-batch-2)
 # Side-effect imports: importing each feature module runs its @handler
 # decorators, populating the registry (assert_complete in __init__ guards it).
 from sonari.daemon.features import control  # noqa: F401
@@ -147,6 +149,16 @@ class SpeechDaemon:
         # every restored session was muted, so no playable stream existed at
         # boot. Delivered (once) by on_flush / the SESSION_START leg.
         self._restore_line = None
+        # §7 witness (hotkeyd-death direction): monotonic stamp of the last
+        # WITNESS_PING (None until the first — the alarm ARMS only after a
+        # first ping, so hotkey-less/harness runs stay alarm-free), the
+        # once-latch, and the raw-Popen seam. Queue-bypassing BY DESIGN: a
+        # wedged speak path must not suppress its own alarm. The stamp is a
+        # bare float write (handler thread) read lock-free on the speak thread
+        # — the _last_drain discipline.
+        self._witness_last_ping = None
+        self._witness_alarmed = False
+        self._alarm_popen = subprocess.Popen
 
     # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
     # (speak loop + kernel ops) goes through self._state._X directly; these
@@ -754,6 +766,37 @@ class SpeechDaemon:
         except Exception:  # noqa: BLE001 - logging failure must not wedge the loop
             pass
 
+    WITNESS_TIMEOUT_S = 15.0     # §7: fixed, not config (YAGNI); hotkeyd pings every ~5 s
+
+    def _check_witness(self) -> None:
+        """§7 hotkeyd-death direction, on the existing speak-loop tick. Armed
+        only after the first ping; past the timeout fire ONCE via the raw seam;
+        re-arm on ping recovery (the handler clears the latch, and an age back
+        under the bar clears it here too)."""
+        last = self._witness_last_ping
+        if last is None:
+            return
+        if (time.monotonic() - last) <= self.WITNESS_TIMEOUT_S:
+            self._witness_alarmed = False
+            return
+        if self._witness_alarmed:
+            return
+        self._witness_alarmed = True
+        self._fire_alarm("alarm_hotkeys_down", ALARM_HOTKEYS_WORDS)
+
+    def _fire_alarm(self, kind: str, words: str) -> None:
+        """Queue-bypassing alarm playback (§7): raw afplay + say spawns,
+        deliberately NOT Speaker/queue/arbiter — the alarm exists for when
+        those may be dead. Asset via _asset_path (config-first, Python
+        fallback). Never raises."""
+        try:
+            asset = self._asset_path(kind)
+            if asset:
+                self._alarm_popen(["afplay", asset])
+            self._alarm_popen(["say", words])
+        except Exception:  # noqa: BLE001 - the alarm must never wedge the loop
+            pass
+
     def _speak_loop_once(self) -> None:
         """One iteration of the speak loop. May raise; _speak_loop contains it.
 
@@ -765,6 +808,7 @@ class SpeechDaemon:
         SP1: speaker() == foreground(); SP2 keep-going advances speaker()
         independently."""
         self._drain_catchup_inbox()
+        self._check_witness()
         fg0 = self.sessions.speaker()
         st0 = self._state._streams.get(fg0)
         if st0 is not None and st0.stopped:

@@ -47,6 +47,7 @@ class MsgType:
     CATCHUP_RESULT = "catchup_result"   # SP5 internal: worker→daemon-loop delivery of a prepared summary
     LEARN_MODE = "learn_mode"           # SP-D1: toggle learn mode (keys speak their teach line instead of acting)
     QUERY_ACTIONS = "query_actions"     # "what can I do right now": speaks the context-relevant actions
+    WITNESS_PING = "witness_ping"       # hotkeyd -> daemon liveness ping (§7 witness; fire-and-forget)
 
 
 def encode(msg: dict) -> bytes:
