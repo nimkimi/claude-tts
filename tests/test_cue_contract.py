@@ -37,13 +37,15 @@ def test_transient_is_called_only_by_speaker_and_host_cue():
             "{0} bypasses host.cue".format(path)
 
 
-_CUE_LIT = re.compile(r'\.cue\(\s*"([^"]+)"')
+_CUE_LIT = re.compile(r'\.cue\(\s*([\'"])([^\'"]+)\1')
 
 
 def _cue_literals():
+    # Either quote style: a single-quoted host.cue('bogus') must not evade the
+    # registry-completeness check. Group 1 is the quote (backref), group 2 the kind.
     out = set()
     for path in _src_files():
-        out |= set(_CUE_LIT.findall(path.read_text(encoding="utf-8")))
+        out |= {m[1] for m in _CUE_LIT.findall(path.read_text(encoding="utf-8"))}
     return out
 
 
