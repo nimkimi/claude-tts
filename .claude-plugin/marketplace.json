@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "sonari",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "description": "Eyes-free cockpit for Claude Code (macOS): every session narrated in order and restart-safe, per-decision sounds, answer-by-number, global hotkeys to jump between sessions, and a catch-up summary of what you missed.",
       "author": {
         "name": "Nima Hakimi"
