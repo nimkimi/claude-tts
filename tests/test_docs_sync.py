@@ -80,3 +80,27 @@ def test_manifest_versions_agree():
     plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
     assert plugin["version"] == market["plugins"][0]["version"]
+
+
+def test_readme_sounds_island_is_current(mac):
+    gen = _load_gen_docs()
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "<!-- sonari:generated:sounds:begin -->" in text
+    assert gen.regenerate(text) == text, (
+        "README generated islands are stale — run: python scripts/gen_docs.py")
+
+
+def test_every_registered_cue_is_documented(mac):
+    from sonari.cues import CUES
+    gen = _load_gen_docs()
+    table = gen.render_sounds()
+    for name in CUES:
+        assert "`{0}`".format(name) in table, name
+
+
+def test_sounds_table_rows_are_well_formed(mac):
+    gen = _load_gen_docs()
+    lines = gen.render_sounds().splitlines()
+    header_cols = len(re.findall(r"(?<!\\)\|", lines[0]))
+    for line in lines[2:]:
+        assert len(re.findall(r"(?<!\\)\|", line)) == header_cols, line

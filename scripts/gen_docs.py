@@ -18,6 +18,7 @@ for p in (_ROOT, os.path.join(_ROOT, "src")):
         sys.path.insert(0, p)
 
 from sonari import keymap
+from sonari.cues import CUES
 
 README = os.path.join(_ROOT, "README.md")
 _CLI_EXCLUDE = {"daemon"}          # internal; not a user-facing verb
@@ -41,6 +42,15 @@ def render_hotkeys() -> str:
         for r in unbound:
             lines.append("| `{0}` | {1} | {2} |".format(
                 r["action"], r["doc"], r["proposed"] or "—"))
+    return "\n".join(lines)
+
+
+def render_sounds() -> str:
+    lines = ["| Sound | Plays as | When you hear it |", "|---|---|---|"]
+    for name, cue in CUES.items():
+        # escape literal '|' so a doc string can't split the GFM table row
+        lines.append("| `{0}` | {1} | {2} |".format(
+            name, cue.tier, cue.doc.replace("|", "\\|")))
     return "\n".join(lines)
 
 
@@ -89,7 +99,8 @@ def render_commands() -> str:
     return "\n".join(lines)
 
 
-_BLOCKS = {"hotkeys": render_hotkeys, "commands": render_commands}
+_BLOCKS = {"hotkeys": render_hotkeys, "commands": render_commands,
+           "sounds": render_sounds}
 
 
 def regenerate(text: str) -> str:

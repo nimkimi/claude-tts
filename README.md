@@ -93,6 +93,28 @@ You ask Claude to refactor a file and look away:
 
 A second session finishing in the background plays its own turn-done sound; press ⌃⌘J to jump the voice over to it, or ⌃⌘W anytime to hear where everything stands.
 
+Every sound Sonari makes comes from one registry (`src/sonari/cues.py`). A
+*transient* tone plays immediately and never stacks with another; a *prelude*
+is bound to the sentence it decorates and plays with it as one unit.
+
+<!-- sonari:generated:sounds:begin -->
+| Sound | Plays as | When you hear it |
+|---|---|---|
+| `turn_done` | transient | A session finished its turn |
+| `choice` | transient | A question with options is waiting |
+| `plan` | transient | A plan is ready for review |
+| `permission` | transient | A permission ask is waiting |
+| `error` | transient | That press had nothing to act on |
+| `error_misdirected` | transient | Valid answer, wrong session |
+| `error_system` | transient | Sonari itself failed; the content is preserved unheard |
+| `permission_expired` | transient | A permission ask timed out unanswered |
+| `pitch_up` | prelude | Rising chirp bound to the front of an approval |
+| `pitch_down` | prelude | Falling chirp bound to the front of a denial |
+| `callsign` | prelude | The asking session's spoken label, bound to its own utterance |
+| `speech` | queued | Spoken readout of session output |
+| `summary_voice` | queued | The catch-up summary's island voice |
+<!-- sonari:generated:sounds:end -->
+
 ## The cockpit
 
 Start with **⌃⌘W** — it's home base. It speaks a terse status of every session you have

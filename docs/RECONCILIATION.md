@@ -16,6 +16,14 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
      keep-going (host), prose gating
    - `_enqueue` delivery flags (`mute_exempt`/`pause_exempt`/`at_front`) — any
      new cue must state WHY each flag is set or not
+   - the cue registry (`src/sonari/cues.py`): every audible emission flows
+     through `host.cue(kind)` or an enqueued prelude/content item, and the
+     retired `earcon`/`earcon_then`/`pitch` APIs stay dead (the drift tests in
+     tests/test_cue_contract.py cover this — trust them, but a NEW sound needs
+     a registry entry + reachability before it needs an asset); every
+     registered cue stays reachable from a call site or socket kind; the
+     coupling law holds — every user-meaningful ledger operation maps to ONE
+     distinct sound, and no two operations share one
    - spoken session references ("this session" vs "another session"): the split
      is semantic — "this session" = the workspace you are currently at (the
      catch-up target), "another session" = some other workspace — so preserve it;
