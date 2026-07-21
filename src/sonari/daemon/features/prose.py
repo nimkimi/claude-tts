@@ -67,8 +67,9 @@ def on_earcon(ctx, msg):
     # The turn-completion ding is the "something landed" cue (SPEC §11): it fires for
     # non-speaking sessions AND the muted ex-speaker, and is SUPPRESSED only for the
     # session you are hearing live (session == speaker() AND voice is flowing). Branch
-    # on turn_done ONLY: choice/plan/permission EARCON msgs may carry a session since
-    # W9 (absent -> chime alone), so the session==speaker() test must never reach them.
+    # on turn_done ONLY: choice/plan/permission EARCON msgs may carry a session (the
+    # chime is sessionless either way — the call-sign binds where the decision CONTENT
+    # enqueues, never here), so the session==speaker() test must never reach them.
     if kind == "turn_done":
         host = ctx.host
         speaker = host.sessions.speaker()
@@ -92,19 +93,9 @@ def on_earcon(ctx, msg):
         # (a message below the minqueue threshold must still be read) — the flush
         # survives the earcon suppression above.
         host._flush_prose_buffer(session)
-    elif kind in ("choice", "plan", "permission") and session:
-        # W9 call-sign: the decision chime gains the ASKING session's spearcon,
-        # sequenced (chime, then the ~200ms folder label). Legacy hooks send
-        # these SESSIONLESS (session == "") -> chime alone, unchanged. A
-        # spearcon miss -> chime alone; get() kicks background generation
-        # (spearcon.py:76-83) — self-heals by next time.
-        host = ctx.host
-        sp = host._spearcon_path(host.sessions.folder(session))
-        if sp is not None:
-            host.speaker.earcon_then(kind, sp)
-        else:
-            host.speaker.earcon(kind)
     else:
+        # Arrival chime only (D8 ruling 1): this message is fire-and-forget and
+        # owns no utterance, so no verbal sound may ride it.
         ctx.host.cue(kind)
     return None
 

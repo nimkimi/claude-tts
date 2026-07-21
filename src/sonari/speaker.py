@@ -124,44 +124,6 @@ class Speaker:
         if proc is not None and hasattr(proc, "poll"):
             self._earcon_procs.append(proc)
 
-    def earcon_then(self, kind: str, audio_path) -> None:
-        """W9 call-sign sequencer: play the *kind* chime, THEN *audio_path* (the
-        asking session's spearcon), strictly ordered on ONE fire-and-forget
-        thread. Earcons are overlapping Popens by design, so ordering needs an
-        explicit wait between the spawns; neither blocks the caller. A missing
-        chime asset degrades to the spearcon alone (attribution wins). The
-        thread reaps its own procs by waiting on them — nothing joins
-        _earcon_procs. Not cancellable/barge-able, same as today's chimes."""
-        if self._earcon_player is None:
-            return
-        if audio_path is None:
-            self.earcon(kind)
-            return
-        chime = self._earcons.get(kind)
-        if chime is None:
-            chime = _FALLBACK_EARCONS.get(kind)
-        player = self._earcon_player
-
-        def _run() -> None:
-            try:
-                if chime:
-                    p = player(chime)
-                    if p is not None and hasattr(p, "wait"):
-                        try:
-                            p.wait(timeout=10)
-                        except Exception:  # noqa: BLE001 - a hung chime must not kill the call-sign
-                            pass
-                p2 = player(audio_path)
-                if p2 is not None and hasattr(p2, "wait"):
-                    try:
-                        p2.wait(timeout=10)
-                    except Exception:  # noqa: BLE001
-                        pass
-            except Exception:  # noqa: BLE001 - fire-and-forget: never raise off-thread
-                pass
-
-        threading.Thread(target=_run, daemon=True).start()
-
     def pitch(self, direction: str) -> None:
         """Play a pitch-direction chirp (up = next/yes, down = prev/no), fire-and-
         forget. The asset is resolved DIRECTLY from the package (not the configurable

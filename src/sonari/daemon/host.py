@@ -287,6 +287,17 @@ class SpeechDaemon:
             catchup_burn=catchup_burn,
             prelude=prelude,
         )
+        if is_decision and not item.prelude:
+            # D8 (owner ruling 1 + §5.5): the call-sign rides the decision's OWN
+            # item as a prelude — bound under the queue's ordering so it can never
+            # overlap speech (the W9 race). Attached HERE because every decision
+            # producer flows through this one chokepoint. A cache miss degrades to
+            # today's folder-prefix splice (names_session stays False); get()
+            # kicks background generation, so it self-heals by next time.
+            sp = self._spearcon_path(self.sessions.folder(session))
+            if sp is not None:
+                item.prelude = (sp,)
+                item.names_session = True
         st = self._stream(session)
         if entry is not None:
             self._state._pending_heard[item.id] = entry
