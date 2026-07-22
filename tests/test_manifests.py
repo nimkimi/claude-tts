@@ -85,7 +85,7 @@ def test_every_phase1_event_is_hooked():
 
 
 # The one version to bump; every surface below must carry it in lockstep.
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
 
 def test_plugin_json_version():

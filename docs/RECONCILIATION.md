@@ -24,6 +24,18 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
      registered cue stays reachable from a call site or socket kind; the
      coupling law holds — every user-meaningful ledger operation maps to ONE
      distinct sound, and no two operations share one
+   - the ALARM-TIER EXEMPTION (the witness): `alarm_daemon_down` /
+     `alarm_hotkeys_down` are contractually out-of-band — raw process spawn,
+     never `host.cue()` / the transient arbiter / the queue — because they
+     exist for when those may be dead. Law-1 sweeps treat them as the ONE
+     sanctioned exception. The alarm paths themselves are UNWATCHED (the
+     R1 half-open residual); a third launchd-scheduled checker is named
+     future work, deliberately not built.
+   - answerability (D7b): the directive signature == blocking permissions ==
+     the `_pending_decisions` registrants, pinned by tests/test_answerability.py.
+     A new decision producer must go through `_announce_decision` with an
+     explicit `answerable=`; every unanswerable announce carries the advisory
+     frame.
    - spoken session references ("this session" vs "another session"): the split
      is semantic — "this session" = the workspace you are currently at (the
      catch-up target), "another session" = some other workspace — so preserve it;
