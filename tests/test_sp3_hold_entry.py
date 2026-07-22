@@ -61,6 +61,30 @@ def test_session_end_lift_with_nothing_waiting_stays_wordless():
     assert all(len(st.queue) == 0 for st in daemon._streams.values())
 
 
+# --- Whole-branch F1: with TWO+ eligible backgrounds the lift must mark the
+# session the loop ACTUALLY adopts, not a handler-time pre-pick. Pre-picking and
+# front-enqueuing "Resumed." gave that stream the daemon-global max id, flipping
+# oldest_id() so the loop adopted the OTHER session — the real resumption went
+# unmarked and a stale word played before unrelated content. The handler now arms
+# a flag; the loop marks its own keep-going pick. ---
+def test_session_end_lift_marks_the_actual_adoptee_with_two_backgrounds():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    sessions.register("B", cwd="/x/B")
+    sessions.register("C", cwd="/x/C")
+    daemon._enqueue("B", "prose", "b backlog", False)             # oldest id -> the pick
+    daemon._enqueue("C", "prose", "c backlog", False)             # newer id
+    daemon.handle_message(_msg(MsgType.STOP_SESSION, "A"))         # quiet-hold on A
+    daemon.handle_message(_msg(MsgType.SESSION_END, "A"))          # muted speaker ends
+    daemon._speak_loop_once()                                     # keep-going adopts B
+    assert sessions.speaker() == "B"                             # the true oldest pick
+    spoken = [s for s in speaker.spoken if s]
+    assert spoken[0] == "Resumed."                              # marked ON the adoptee
+    for _ in range(6):                                           # drain B then C
+        daemon._speak_loop_once()
+    spoken = [s for s in speaker.spoken if s]
+    assert spoken.count("Resumed.") == 1                        # exactly one, no stale word
+
+
 # --- F1: SESSION_END under stopped-all STAYS stopped-all (others still muted) ---
 def test_session_end_under_stopped_all_stays_stopped_all():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")

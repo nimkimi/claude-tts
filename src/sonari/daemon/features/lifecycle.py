@@ -163,16 +163,15 @@ def on_session_end(ctx, msg):
     # stopped-all STAYS (the other sessions remain individually muted).
     if was_speaker and ctx.host.voice_state == "quiet-hold":
         ctx.host.voice_state = "flowing"
-        # D2 §6.3: the other implicit lift. Mark the resumption where the freed
-        # voice will actually land (the keep-going pick, same selection the loop
-        # makes under this same lock); with nothing waiting there is no audible
-        # resumption to mark. Import at call time: host imports this module at
-        # module load (the @handler side-effect imports).
-        from sonari.daemon.host import _select_keep_going
-        target = _select_keep_going(ctx.host._streams, ctx.host.sessions)
-        if target is not None:
-            ctx.host._enqueue(target, "prose", "Resumed.", False,
-                              mute_exempt=True, at_front=True)
+        # D2 §6.3: the other implicit lift. Arm a "mark the next keep-going
+        # adoption" flag rather than pre-picking the target here: the speak loop
+        # makes the real keep-going pick, and front-enqueuing "Resumed." on a
+        # handler-side pre-pick would flip that stream's oldest_id() and mis-mark
+        # with >=2 backgrounds (the loop would then adopt the OTHER session). The
+        # loop consumes the flag at the actual adoption and clears it either way,
+        # so a lift with nothing waiting stays wordless (old target-is-None
+        # semantics) instead of riding a later unrelated adoption.
+        ctx.host._mark_keep_going_resume = True
     st = ctx.host._streams.get(session)
     if st is not None:
         ctx.host._drop_pending(st.queue.clear())

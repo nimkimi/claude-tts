@@ -149,6 +149,12 @@ class SpeechDaemon:
         # every restored session was muted, so no playable stream existed at
         # boot. Delivered (once) by on_flush / the SESSION_START leg.
         self._restore_line = None
+        # D2 §6.3: the SESSION_END implicit lift arms this instead of pre-picking
+        # the keep-going target — a pre-pick's own front-enqueue would flip that
+        # stream's oldest_id() and mis-mark with >=2 backgrounds. The speak loop
+        # consumes it at the ACTUAL adoption (and clears it if nothing waits, so
+        # it can't ride a later unrelated adoption).
+        self._mark_keep_going_resume = False
         # §7 witness (hotkeyd-death direction): monotonic stamp of the last
         # WITNESS_PING (None until the first — the alarm ARMS only after a
         # first ping, so hotkey-less/harness runs stay alarm-free), the
@@ -865,9 +871,24 @@ class SpeechDaemon:
                 # (a deliberate quiet-hold / stopped-all suppresses it — R7 "lasting
                 # quiet"). Read directly off _state on the hot path.
                 next_sess = _select_keep_going(self._state._streams, self.sessions)
+                # D2 §6.3: consume the SESSION_END implicit-lift mark at the ACTUAL
+                # adoption (armed as a flag, not a handler pre-pick, so it never
+                # perturbed the selection above). Clear it either way — this first
+                # keep-going evaluation is the expiry point, so an empty-handed lift
+                # (no next_sess) stays wordless and the mark can't ride a later
+                # unrelated adoption.
+                mark_resume = self._mark_keep_going_resume
+                self._mark_keep_going_resume = False
                 if next_sess is not None:
                     self.sessions.set_speaker(next_sess)
                     st = self._state._streams.get(next_sess)
+                    if mark_resume:
+                        # The word rides the queue (D8 law 1) at the front of the
+                        # adopted stream, so it voices before the resumed backlog —
+                        # mute-exempt like the other lift sites (playback resume,
+                        # the Policy-A submit lift).
+                        self._enqueue(next_sess, "prose", "Resumed.", False,
+                                      mute_exempt=True, at_front=True)
                     # pop_next() is guaranteed non-None: _select_keep_going verified
                     # len(queue) > 0 for next_sess inside this same held lock.
                     item = st.queue.pop_next() if st is not None else None
