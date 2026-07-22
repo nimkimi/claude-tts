@@ -26,7 +26,13 @@ struct HotkeyEntry {
 }
 
 func sonariDir() -> String {
-    return (NSHomeDirectory() as NSString).appendingPathComponent(".sonari")
+    // NSHomeDirectory() resolves from the user record and ignores an
+    // overridden $HOME. Check the env first so this agrees with
+    // src/sonari/paths.py (Path.home(), which does honor $HOME) about what
+    // ~/.sonari means. launchd user agents set HOME normally, so live
+    // behavior is unchanged.
+    let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+    return (home as NSString).appendingPathComponent(".sonari")
 }
 
 func resolvedPath() -> String {
