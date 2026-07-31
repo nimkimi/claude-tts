@@ -142,12 +142,17 @@ def on_flush(ctx, msg):
         st.announce_resume = False
         ctx.host._enqueue(session, "prose", "Resumed.", False,
                           mute_exempt=True, at_front=True)
-    if ctx.host._restore_line is not None:
+    if ctx.host._restore_pending:
         # D2 §6.4/§6.5: the all-muted restart line deferred past boot — the
         # first submit is the first moment a reachable queue exists (a muted
-        # speaker's pause-exempt cue is voiced by the held branch).
-        ctx.host._enqueue(session, "prose", ctx.host._restore_line, False,
-                          mute_exempt=True, pause_exempt=True)
-        ctx.host._restore_line = None
+        # speaker's pause-exempt cue is voiced by the held branch). F2:
+        # RECOMPOSE now rather than replay the boot-time string — a restored
+        # session may have been ⌃⌘S-resumed (or a pile consumed) since boot,
+        # and the line must report what is still true, not what was.
+        line = ctx.host._compose_restore_line()
+        if line is not None:
+            ctx.host._enqueue(session, "prose", line, False,
+                              mute_exempt=True, pause_exempt=True)
+        ctx.host._restore_pending = False
     ctx.host._wake.set()
     return None

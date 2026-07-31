@@ -145,10 +145,14 @@ def on_set_foreground(ctx, msg):
             st.announce_resume = False
             ctx.host._enqueue(session, "prose", "Resumed.", False,
                               mute_exempt=True, at_front=True)
-        if ctx.host._restore_line is not None:
-            ctx.host._enqueue(session, "prose", ctx.host._restore_line, False,
-                              mute_exempt=True, pause_exempt=True)
-            ctx.host._restore_line = None
+        if ctx.host._restore_pending:
+            # F2: RECOMPOSE fresh at delivery — see prose.py's on_flush leg
+            # for why the boot-time string can't be replayed verbatim.
+            line = ctx.host._compose_restore_line()
+            if line is not None:
+                ctx.host._enqueue(session, "prose", line, False,
+                                  mute_exempt=True, pause_exempt=True)
+            ctx.host._restore_pending = False
     return None
 
 

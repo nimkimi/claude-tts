@@ -60,7 +60,7 @@ def test_nothing_restored_stays_silent():
     dst._announce_restored()
     dst._speak_loop_once()
     assert speaker.spoken == []
-    assert dst._restore_line is None
+    assert dst._restore_pending is False
 
 
 def test_restart_line_never_advances_a_restored_frontier():
@@ -77,17 +77,42 @@ def test_all_muted_defers_the_line_and_the_submit_delivers_it():
     src.sessions.register("ws", cwd="/x/ws")
     src._stream("ws").stopped = True
     dst, speaker, sessions = _restart(src)
-    assert dst._restore_line == "ws is muted."           # no playable stream at boot
+    assert dst._restore_pending is True                  # no playable stream at boot
     dst._speak_loop_once()
     assert speaker.spoken == []
     # First activity: the user submits ON the muted session (the E4b drive) —
     # the real hook pair, SET_FOREGROUND then FLUSH.
     dst.handle_message(_msg(MsgType.SET_FOREGROUND, "ws", cwd="/x/ws"))
     dst.handle_message(_msg(MsgType.FLUSH, "ws"))
-    assert dst._restore_line is None
+    assert dst._restore_pending is False
     dst._speak_loop_once()                               # held branch: pause-exempt line
     assert "ws is muted." in speaker.spoken
     assert dst._streams["ws"].stopped is True            # the mute itself held
+
+
+def test_all_muted_defer_omits_stale_claim_after_early_resume():
+    """F2 (whole-branch review, comprehensive lens): the DEFERRED line must be
+    RECOMPOSED at delivery, not replayed verbatim from boot. A muted session
+    that gets ⌃⌘S-resumed before its first submit must not have the daemon
+    speak a mute claim that is no longer true — empirically, the reviewer
+    observed ['Resumed.', 'ws is muted.'] spoken back to back after submit."""
+    src, *_ = make_daemon(foreground=None)
+    src.sessions.register("ws", cwd="/x/ws")
+    src._stream("ws").stopped = True
+    dst, speaker, sessions = _restart(src)
+    assert dst._restore_pending is True
+    # Navigate the workspace onto the muted session so ⌃⌘S's asymmetric
+    # target (host.py's on_stop_session) resolves to it, then resume it —
+    # BEFORE the first submit reaches on_flush.
+    dst.handle_message(_msg(MsgType.SET_FOREGROUND, "ws", cwd="/x/ws"))
+    dst.handle_message(_msg(MsgType.STOP_SESSION, "ws"))
+    assert dst._streams["ws"].stopped is False            # the resume landed
+    dst.handle_message(_msg(MsgType.FLUSH, "ws"))         # first submit
+    assert dst._restore_pending is False                  # delivery consumed the flag
+    dst._speak_loop_once()
+    # The only claim ever queued was the mute; it is no longer true, so
+    # recompose yields nothing at all to say (the empty-recompose case).
+    assert speaker.spoken == []
 
 
 def test_all_muted_line_also_delivers_on_session_start():
@@ -97,6 +122,6 @@ def test_all_muted_line_also_delivers_on_session_start():
     dst, speaker, sessions = _restart(src)
     dst.handle_message(_msg(MsgType.SET_FOREGROUND, "n1", cwd="/x/n1"))
     dst.handle_message(_msg(MsgType.SESSION_START, "n1", cwd="/x/n1"))
-    assert dst._restore_line is None
+    assert dst._restore_pending is False
     texts = [it.text for it in dst._stream("n1").queue._items]
     assert "ws is muted." in texts

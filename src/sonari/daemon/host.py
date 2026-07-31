@@ -145,10 +145,13 @@ class SpeechDaemon:
         # thread is NOT started here — run() starts it AFTER restore (§8).
         self._persistence = PersistenceWriter(
             self._store, self._snapshot_state, self._lock)
-        # D2 §6.4/§6.5: the composed restart line when it must be DEFERRED —
-        # every restored session was muted, so no playable stream existed at
-        # boot. Delivered (once) by on_flush / the SESSION_START leg.
-        self._restore_line = None
+        # D2 §6.4/§6.5: DEFER a restart-line delivery — every restored session
+        # was muted, so no playable stream existed at boot. A bool, not the
+        # composed string (F2): state can shift between boot and the first
+        # activity (e.g. a deferred session gets ⌃⌘S-resumed before its first
+        # submit), so on_flush / the SESSION_START leg RECOMPOSE fresh at
+        # delivery instead of replaying a claim that may have gone stale.
+        self._restore_pending = False
         # D2 §6.3: the SESSION_END implicit lift arms this instead of pre-picking
         # the keep-going target — a pre-pick's own front-enqueue would flip that
         # stream's oldest_id() and mis-mark with >=2 backgrounds. The speak loop
@@ -1161,7 +1164,7 @@ class SpeechDaemon:
         NON-stopped stream (keep-going adopts it right after boot), else the
         first non-muted pile session from history (its stream is created
         non-stopped); when EVERY restored session is muted there is no playable
-        stream yet — DEFER via _restore_line to the first lifecycle activity."""
+        stream yet — DEFER via _restore_pending to the first lifecycle activity."""
         line = self._compose_restore_line()
         if line is None:
             return
@@ -1175,7 +1178,7 @@ class SpeechDaemon:
             self._enqueue(target, "prose", line, False,
                           mute_exempt=True, pause_exempt=True)
         else:
-            self._restore_line = line
+            self._restore_pending = True
 
     def _on_shutdown_signal(self, signum, frame) -> None:
         """A graceful-teardown signal landed (SIGTERM from `launchctl unload`):
