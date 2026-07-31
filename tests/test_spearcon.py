@@ -33,17 +33,27 @@ def _fake_voice_lister():
     return "Samantha            en_US    # Hello, I'm Samantha.\nAlex                en_US    # Hi.\n"
 
 
-def _script(cache, label, *, voice=True):
-    """The exact sh script generate() spawns for *label* (tmp render + publish)."""
+def _tmp_in(script):
+    """The `-o <tmp>` target of a spawned render script."""
+    toks = shlex.split(script.split(" && ")[0])
+    return toks[toks.index("-o") + 1]
+
+
+def _script(cache, label, observed, *, voice=True):
+    """The exact sh script generate() spawns for *label* (tmp render + publish).
+    The tmp component is unique per render, so it is taken from the *observed*
+    script — after asserting its shape (<final>.<render-id>.part, so cleanup's
+    *.part sweep still collects it)."""
     final = cache.path_for(label)
-    tmp = final.parent / (final.name + ".part")
+    tmp = _tmp_in(observed)
+    assert tmp.startswith(str(final) + ".") and tmp.endswith(".part")
     cmd = ["say"]
     if voice:
         cmd += ["-v", "Samantha"]
-    cmd += ["-r", "525", "-o", str(tmp), spearcon_label(label)]
+    cmd += ["-r", "525", "-o", tmp, spearcon_label(label)]
     return "{0} && mv {1} {2}".format(
         " ".join(shlex.quote(c) for c in cmd),
-        shlex.quote(str(tmp)), shlex.quote(str(final)))
+        shlex.quote(tmp), shlex.quote(str(final)))
 
 
 def test_key_is_stable_and_voice_rate_sensitive(tmp_path):
@@ -62,7 +72,7 @@ def test_get_miss_kicks_background_generation_and_returns_none(tmp_path):
     assert cache.get("backend") is None                       # not generated yet
     # One spawned shell: render to the sibling temp path, atomic-rename on
     # success — a killed say can never leave a truncated cache hit (R1 rider).
-    assert calls == [["sh", "-c", _script(cache, "backend")]]
+    assert calls == [["sh", "-c", _script(cache, "backend", calls[0][2])]]
 
 
 def test_get_hit_returns_path_and_does_not_regenerate(tmp_path):
@@ -130,7 +140,7 @@ def test_generate_includes_voice_flag_when_voice_available(tmp_path):
     cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen,
                           voice_lister=lambda: _VOICE_LIST_WITH_SAMANTHA)
     cache.generate("backend")
-    assert calls[0] == ["sh", "-c", _script(cache, "backend")]
+    assert calls[0] == ["sh", "-c", _script(cache, "backend", calls[0][2])]
 
 
 def test_generate_omits_voice_flag_when_voice_not_in_list(tmp_path):
@@ -139,7 +149,7 @@ def test_generate_omits_voice_flag_when_voice_not_in_list(tmp_path):
     cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen,
                           voice_lister=lambda: _VOICE_LIST_WITHOUT_SAMANTHA)
     cache.generate("backend")
-    assert calls[0] == ["sh", "-c", _script(cache, "backend", voice=False)]
+    assert calls[0] == ["sh", "-c", _script(cache, "backend", calls[0][2], voice=False)]
 
 
 def test_generate_omits_voice_flag_when_voice_lister_raises(tmp_path):
@@ -150,7 +160,7 @@ def test_generate_omits_voice_flag_when_voice_lister_raises(tmp_path):
     cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen,
                           voice_lister=boom)
     cache.generate("backend")
-    assert calls[0] == ["sh", "-c", _script(cache, "backend", voice=False)]
+    assert calls[0] == ["sh", "-c", _script(cache, "backend", calls[0][2], voice=False)]
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +208,7 @@ def test_successful_render_publishes_the_final_file(tmp_path):
     proc.wait(timeout=10)
     final = cache.path_for("backend")
     assert final.exists() and final.read_bytes() == b"FORMAIFF"
-    assert not (final.parent / (final.name + ".part")).exists()   # tmp consumed
+    assert not list(final.parent.glob("*.part"))              # tmp consumed
     assert cache.get("backend") == str(final)                 # a real hit now
 
 
@@ -211,3 +221,19 @@ def test_cleanup_sweeps_stale_part_files(tmp_path):
     cache.cleanup(max_files=10)
     assert keep.exists()
     assert not stale.exists()                                 # stale render swept
+
+
+def test_concurrent_renders_of_one_label_use_distinct_tmp_files(tmp_path):
+    # Two in-window renders of one label sharing a single .part inode can
+    # publish a half-written file that get() then serves as a permanent cache
+    # hit. Unique tmps make the loser's mv the only casualty. The suffix stays
+    # ".part" so cleanup's stale sweep still collects dead renders.
+    calls, popen = _recording()
+    cache = SpearconCache(tmp_path, voice="Samantha", rate=525, popen=popen,
+                          voice_lister=_fake_voice_lister)
+    cache.generate("backend")
+    cache.generate("backend")
+
+    first, second = _tmp_in(calls[0][2]), _tmp_in(calls[1][2])
+    assert first != second
+    assert first.endswith(".part") and second.endswith(".part")

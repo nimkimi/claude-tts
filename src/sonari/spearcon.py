@@ -10,10 +10,16 @@ next time. Zero deps — system `say` only.
 from __future__ import annotations
 
 import hashlib
+import itertools
+import os
 import re
 import shlex
 import subprocess
 from pathlib import Path
+
+# Per-process render sequence: with the pid it makes every render's tmp file
+# unique, so concurrent renders can never share (and corrupt) one .part inode.
+_RENDER_SEQ = itertools.count()
 
 
 def _default_voice_lister() -> str:
@@ -85,12 +91,13 @@ class SpearconCache:
 
     def generate(self, label):
         """Spawn a non-blocking render of *label*'s short form. `say -o` writes a
-        SIBLING temp file (<final>.part) and an atomic same-directory rename
-        publishes it — one spawned shell so fire-and-forget is preserved, and a
-        killed/failed render can never leave a truncated file that get() would
-        treat as a permanent cache hit. Two concurrent renders of one label race
-        benignly (the loser's mv fails after the winner published; errors are
-        swallowed). Any spawn error is swallowed (the caller falls back to
+        SIBLING temp file (<final>.<render-id>.part) and an atomic same-directory
+        rename publishes it — one spawned shell so fire-and-forget is preserved,
+        and a killed/failed render can never leave a truncated file that get()
+        would treat as a permanent cache hit. The render id (pid + a process
+        counter) gives each render its own tmp inode, so two concurrent renders
+        of one label race benignly: each mv publishes a COMPLETE file, last
+        writer wins. Any spawn error is swallowed (the caller falls back to
         speech). Returns the proc, or None."""
         short = spearcon_label(label)
         if not short:
@@ -98,7 +105,8 @@ class SpearconCache:
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
             p = self.path_for(label)
-            tmp = p.parent / (p.name + ".part")
+            tmp = p.parent / "{}.{}-{}.part".format(p.name, os.getpid(),
+                                                    next(_RENDER_SEQ))
             cmd = ["say"]
             if self._voice_available:
                 cmd += ["-v", self._voice]
