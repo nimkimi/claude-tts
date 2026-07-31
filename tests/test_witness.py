@@ -96,3 +96,22 @@ def test_non_witness_messages_still_mark_persistence_dirty():
     daemon._persistence.mark_dirty = lambda: marks.append(1)
     daemon.handle_message(_msg(MsgType.STATUS))
     assert marks == [1]
+
+
+def test_alarm_word_survives_a_failing_tone_spawn():
+    # The word is the truth-critical half of a D7 alarm: a raising afplay
+    # spawn must not silence it. (The Swift side already decouples the two
+    # via independent shell-outs.)
+    daemon, queue, speaker, sessions, config = make_daemon()
+    calls = []
+
+    def popen(cmd):
+        if cmd[0] == "afplay":
+            raise OSError("afplay unavailable")
+        calls.append(cmd)
+
+    daemon._alarm_popen = popen
+    daemon.handle_message(_msg(MsgType.WITNESS_PING))
+    daemon._witness_last_ping = time.monotonic() - 16.0
+    daemon._check_witness()
+    assert calls == [["say", "Hotkeys are down."]]

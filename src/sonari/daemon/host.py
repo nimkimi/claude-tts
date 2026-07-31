@@ -798,11 +798,16 @@ class SpeechDaemon:
         """Queue-bypassing alarm playback (§7): raw afplay + say spawns,
         deliberately NOT Speaker/queue/arbiter — the alarm exists for when
         those may be dead. Asset via _asset_path (config-first, Python
-        fallback). Never raises."""
+        fallback). Never raises. The two spawns fail independently — the
+        spoken word is the truth-critical half, so a dead tone path must not
+        silence it (mirrors the Swift side's independent shell-outs)."""
         try:
             asset = self._asset_path(kind)
             if asset:
                 self._alarm_popen(["afplay", asset])
+        except Exception:  # noqa: BLE001 - the alarm must never wedge the loop
+            pass
+        try:
             self._alarm_popen(["say", words])
         except Exception:  # noqa: BLE001 - the alarm must never wedge the loop
             pass
