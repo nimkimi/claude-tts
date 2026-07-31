@@ -623,8 +623,12 @@ class SpeechDaemon:
         finally:
             # SP6: the single dispatch chokepoint (socket / hotkey / catch-up all
             # funnel here). mark_dirty is a non-blocking Event.set — safe under the
-            # transaction lock the three callers hold (§7).
-            self._persistence.mark_dirty()
+            # transaction lock the three callers hold (§7). The witness ping is
+            # exempt: it stamps only transient fields, and at one ping every ~5 s
+            # it would otherwise keep an idle 24/7 daemon writing state.json —
+            # and building the snapshot under the speak loop's lock — forever.
+            if msg.get("type") != MsgType.WITNESS_PING:
+                self._persistence.mark_dirty()
 
     def _summarizer(self):
         if self._summarizer_override is not None:

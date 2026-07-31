@@ -77,3 +77,22 @@ def test_status_exposes_witness_ping_age():
     daemon.handle_message(_msg(MsgType.WITNESS_PING))
     reply = daemon.handle_message(_msg(MsgType.STATUS))
     assert reply["witness_ping_age_s"] >= 0.0
+
+
+def test_witness_ping_does_not_mark_persistence_dirty():
+    # The ~5 s heartbeat changes no durable state; if it rode the dispatch
+    # chokepoint's mark_dirty, an idle 24/7 daemon would fsync state.json
+    # forever (and build the snapshot under the speak loop's lock each time).
+    daemon, queue, speaker, sessions, config = make_daemon()
+    marks = []
+    daemon._persistence.mark_dirty = lambda: marks.append(1)
+    daemon.handle_message(_msg(MsgType.WITNESS_PING))
+    assert marks == []
+
+
+def test_non_witness_messages_still_mark_persistence_dirty():
+    daemon, queue, speaker, sessions, config = make_daemon()
+    marks = []
+    daemon._persistence.mark_dirty = lambda: marks.append(1)
+    daemon.handle_message(_msg(MsgType.STATUS))
+    assert marks == [1]
