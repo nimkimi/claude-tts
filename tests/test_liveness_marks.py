@@ -4,13 +4,17 @@ T1's dead-tty lie). Also-map half: a pending session WITH content clauses is
 NAMED with a leading ", pending"; a dead one with ", closed". A clause-less
 pending session collapses into the aggregate "{Count} pending." tail — never
 a named phantom — and a clause-less dead session is dropped entirely (nothing
-to act on). Pointer half (Task 5): a dead Voice/Keyboard/unified pointer
-gains a trailing ", closed" marker clause after its state/number and before
-any content clause — "playing, closed" is deliberate honesty (the voice can
-still be reading a closed session's stored stream). A pending pointer is
-structurally impossible (recon §6) and stays unmarked. Live entries keep
-grammar v2 byte-for-byte; these strings are byte-exact for the same reason
-the grammar-v2 suites are."""
+to act on). Pointer half (Task 5 + F-D3-1): a dead Voice/Keyboard/unified
+pointer gains a trailing ", closed" marker clause after its state/number and
+before any content clause — "playing, closed" is deliberate honesty (the
+voice can still be reading a closed session's stored stream). The VOICE
+pointer can also be PENDING — keep-going may adopt a still-quarantined
+restored session — and gains the symmetric ", pending" marker the same way
+("playing, pending, decision."); the Keyboard/idle pointer (workspace())
+cannot resolve to a provisional session (recon §6, T10's guard test), so its
+pending leg stays a structural no-op. Live entries keep grammar v2
+byte-for-byte; these strings are byte-exact for the same reason the
+grammar-v2 suites are."""
 from sonari.protocol import PROTOCOL_VERSION
 from sonari import ttyutil
 from sonari.daemon.features import control
@@ -205,6 +209,34 @@ def test_dead_voice_with_decision_orders_closed_before_decision(monkeypatch):
     daemon._pending_decisions["api"] = {"text": "Bash: rm x"}
     out = _where(daemon, speaker, "api")
     assert out.startswith("Voice: api 2, playing, closed, decision.")
+
+
+def test_pending_voice_pointer_from_adoption_gains_pending_clause(monkeypatch):
+    """F-D3-1: unlike the Keyboard/idle pointer (workspace(), structurally never
+    pending — recon §6, T10's guard test), the VOICE pointer (speaker()) is NOT
+    pending-proof: keep-going's adoption calls set_speaker on a still-quarantined
+    restored session (host.py's _select_keep_going). ADOPTION recipe (pins the
+    CREATION PATH, not just the string): a daemon-authored item — never
+    session-authored, or R1 would clear the quarantine — is seeded under the
+    lock on a load_state'd session and adopted on one speak-loop turn, leaving
+    speaker() pending."""
+    _liveness(monkeypatch)
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    sessions.load_state({"s1": {"folder": "repo", "number": 1}})
+    assert sessions.is_provisional("s1") is True
+    with daemon._lock:
+        daemon._enqueue("s1", "prose", "Resumed.", False,
+                        mute_exempt=True, pause_exempt=True)
+    daemon._speak_loop_once()                       # adopts s1
+    assert sessions.speaker() == "s1"
+    assert sessions.liveness("s1") == "pending"
+    # session="" (no session field): a real ⌃⌘W hotkey message carries none
+    # (wb-runtime.md's R1 audit); the "" here must NOT clear s1's own quarantine.
+    daemon.handle_message(_msg("where_am_i", ""))
+    daemon._speak_loop_once()
+    out = speaker.spoken[-1]
+    assert out.startswith("Voice and keyboard: repo 1, playing, pending.")
+    assert sessions.liveness("s1") == "pending"      # the press itself proves nothing
 
 
 def test_live_pointers_unchanged(monkeypatch):

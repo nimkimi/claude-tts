@@ -40,13 +40,17 @@ CLOSED_WORD = "That session closed."
 _LIVENESS_MARKS = {"pending": ", pending", "dead": ", closed"}
 
 
-def _closed_mark(host, session):
-    # PROVISIONAL (ear-batch-3): spec D3 §4a — the dead tier's ONE word, on
-    # the pointer clauses (Also-map half lives in _also_clause/_LIVENESS_MARKS).
-    # A pending pointer is structurally impossible today (recon §6:
-    # workspace() cannot resolve to an identity-less provisional session) so
-    # only "dead" is checked here — unmarked-by-design is not a bug.
-    return ", closed" if host.sessions.liveness(session) == "dead" else ""
+def _pointer_mark(host, session):
+    # PROVISIONAL (ear-batch-3): spec D3 §4a/F-D3-1 — the pointer clauses'
+    # tier marker, over the SAME _LIVENESS_MARKS lookup the Also-map half
+    # already uses (whole-branch review: generalized from a dead-only check).
+    # The Keyboard/idle pointer (workspace()) can never resolve to "pending"
+    # (recon §6, T10's guard test: test_catchup_press.py::
+    # test_workspace_never_resolves_to_a_pending_session), so that leg stays a
+    # structural no-op. The VOICE pointer (speaker()) is not pending-proof —
+    # keep-going's adoption can set it on a still-quarantined restored session
+    # (host.py's _select_keep_going) — so "playing, pending." is reachable.
+    return _LIVENESS_MARKS.get(host.sessions.liveness(session), "")
 
 
 def _has_decision(host, session):
@@ -360,7 +364,7 @@ def on_where_am_i(ctx, msg):
                    else "On hold." if vs == "quiet-hold"
                    else "Nothing playing.")
             cue += " Keyboard: {0}{1}{2}.".format(
-                _numbered(host, ws), _closed_mark(host, ws), _entry_clauses(host, ws))
+                _numbered(host, ws), _pointer_mark(host, ws), _entry_clauses(host, ws))
             cue += _also_clause(host, exclude=(ws,))
             host._enqueue(ws, "prose", cue, False, mute_exempt=True, pause_exempt=True)
             # D3 §4d seam (WB-C1): the delivery note above predates T9. Keep-going
@@ -397,16 +401,18 @@ def on_where_am_i(ctx, msg):
     diverged = ws is not None and ws != fg
     voice_dec = ", decision" if _has_decision(host, fg) else ""
     if diverged:
-        # D3 §4a: each pointer gets its OWN closed mark — voice and keyboard
-        # can die independently. The Keyboard clause's pending tier stays
-        # unmarked by design (recon §6: workspace() cannot resolve to a
-        # provisional session, so a pending pointer never occurs).
+        # D3 §4a: each pointer gets its OWN mark — voice and keyboard can die
+        # independently, and (F-D3-1) the Voice pointer can be pending too.
+        # The Keyboard clause's pending tier stays unmarked in practice:
+        # workspace() cannot resolve to a provisional session (recon §6,
+        # T10's guard test), so that leg of the shared helper is a
+        # structural no-op — only Voice below can ever show ", pending".
         lead = "Voice: {0}, {1}{2}{3}. Keyboard: {4}{5}{6}.".format(
-            voice_folder, state, _closed_mark(host, fg), voice_dec,
-            _numbered(host, ws), _closed_mark(host, ws), _entry_clauses(host, ws))
+            voice_folder, state, _pointer_mark(host, fg), voice_dec,
+            _numbered(host, ws), _pointer_mark(host, ws), _entry_clauses(host, ws))
     else:
         lead = "Voice and keyboard: {0}, {1}{2}{3}.".format(
-            voice_folder, state, _closed_mark(host, fg), voice_dec)
+            voice_folder, state, _pointer_mark(host, fg), voice_dec)
     # The Also-map excludes the voice session and, when diverged, the keyboard
     # session — both are already named by their own clauses (§7).
     exclude = (fg, ws) if diverged else (fg,)
