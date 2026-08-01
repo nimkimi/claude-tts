@@ -7,9 +7,11 @@ from sonari.daemon.features import teaching
 
 @handler(MsgType.PROSE)
 def on_prose(ctx, msg):
-    # No liveness gate here by design (D3 spec §4e): R1 clears quarantine at
-    # the handle_message dispatch chokepoint before this handler ever runs,
-    # so an inbound PROSE only ever buffers for a session already live.
+    # No liveness gate here by design (D3 spec §4e): R1 clears the PENDING
+    # tier at the handle_message dispatch chokepoint, so an inbound PROSE
+    # never buffers into a *quarantined* stream. A dead session's prose still
+    # buffers, by design: the pile stays discoverable via where-am-I's closed
+    # mark and readable via catch-up, and keep-going (§4d) will not voice it.
     session = ctx.session                 # was: msg.get("session", "")
     verbosity = ctx.verbosity             # was: self.config.get("verbosity", "everything")
     final = msg.get("final", False)

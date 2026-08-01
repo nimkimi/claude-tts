@@ -20,17 +20,28 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
      module reaches past the composed predicate. R1: any inbound message
      whose session is quarantined (`pending`) clears that quarantine at the
      `handle_message` dispatch chokepoint, not per-handler (WITNESS_PING is
-     excepted — it carries no session). Per-consumer dispositions:
+     excepted by TYPE — not because it carries no session — the check is
+     `msg.get("type") != MsgType.WITNESS_PING`, and
+     `test_witness_ping_never_clears_quarantine` pins the type exemption
+     itself by sending a forged session field). Per-consumer dispositions:
      - **chooser** (`chooser.py`) — candidates are `is_live`-filtered (hiding
        a non-live session is correct for the HANDS: you cannot dial into a
        session you cannot reach). Both the chord-release commit and a digit
        press re-check liveness at commit time and speak the shared word
        ("That session closed.") on a target that died mid-browse.
      - **jump-waiting** (`focus.py`) — candidates are `is_live`-filtered; a
-       commit-time re-check closes the selection-to-focus gap (a target that
-       died between selection and commit is never focused). The empty case
-       ("No session waiting.") gains a truthful tail counting backlog-holding
-       non-live sessions, e.g. "No session waiting. Two pending."
+       commit-time re-check (`liveness(target) == "dead"`) closes the
+       selection-to-focus gap. This is narrower than the chooser's two-shape
+       check (`_commit` also tests `target not in sessions.session_ids()`,
+       for a candidate snapshot that can outlive a real SESSION_END between
+       separate messages) — not a parity with it. The narrower check is safe
+       here because SESSION_END pops `_streams` (`lifecycle.py:183`), and
+       both selection (`_waiting_target`) and the recheck require the target
+       to hold a stream: a fully unregistered session can never become
+       `target` in the first place, within one handler dispatch. The empty
+       case ("No session waiting.") gains a truthful tail counting
+       backlog-holding non-live sessions, e.g. "No session waiting. Two
+       pending."
      - **where-am-I** (`control.py`) — the MARK surface. A dead voice or
        keyboard pointer gains a marker clause, e.g. "Keyboard: web 1,
        closed." The Also-map names any pending-or-dead session that still
@@ -38,16 +49,25 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
        clause-less pending sessions into an aggregate tail ("Two pending."),
        and drops clause-less dead sessions entirely — nothing to act on.
      - **keep-going** (`host.py` `_select_keep_going`) — skips dead sessions:
-       a dead session's backlog is never auto-voiced onto the ear. Pending
-       sessions stay adoptable — post-R1 the only content a pending stream
-       can hold is the daemon-authored restart line, whose delivery
+       a dead session's backlog is never auto-voiced onto the ear, and a
+       speaker that dies MID-DRAIN is released (`_release_dead_speaker`, at
+       the pop boundary) rather than read to the end of its pile (R-1). One
+       exception: a deliberate press — idle ⌃⌘W, ⌃⌘W on a dead speaker, or
+       ⌃⌘L catch-up — may sanction ONE dead stream
+       (`host._sanction_dead_read`) and drains it whole, backlog included;
+       the sanction is one-shot and never automatic (fix-wave A's model).
+       Pending sessions stay adoptable — post-R1 the only content a pending
+       stream can hold is the daemon-authored restart line, whose delivery
        deliberately rides this exact path (`tests/test_restart_line.py` pins
-       it).
-     - **prose gating** (`prose.py`) — no gate in the handler. Liveness is
-       enforced upstream at the dispatch chokepoint by R1: an inbound PROSE
-       message proves its session is alive and clears quarantine before
-       `on_prose` ever runs, so the handler only ever buffers for live
-       sessions.
+       it). Idle-⌃⌘W and catch-up delivery DEPEND on this adoption/sanction
+       machinery: any campaign touching `_select_keep_going` must also sweep
+       `_release_dead_speaker` and the three `_sanction_dead_read` call
+       sites.
+     - **prose gating** (`prose.py`) — no gate in the handler. R1 clears the
+       pending tier at the dispatch chokepoint, so `on_prose` never buffers
+       into a quarantined stream. A dead session's prose still buffers, by
+       design: the pile stays discoverable via where-am-I's closed mark and
+       readable via catch-up, and keep-going never voices it.
      - **catch-up** (`catchup.py`) — proceeds on any registered workspace
        target; reading a closed session's stored pile is a legitimate
        recovery act, so it is never blocked. A dead target's acknowledgment
@@ -59,10 +79,15 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
        workspace pointer itself going stale on a dead session is separate
        hygiene work, out of this pass's scope.)
      - **jump-decision** (`playback.py` `on_jump_decision`) — the crossed
-       path, which moves the voice via `sessions.focus`, is guarded like the
-       chooser: a dead target speaks the closed word and the move is
-       refused. The non-crossed path (acting within the current workspace)
-       is deliberate reading, like navigation, and stays unguarded.
+       path, which moves the voice via `sessions.focus`, checks
+       `liveness(target) == "dead"` only — a dead target speaks the closed
+       word and the move is refused. Same guard shape (and same safety
+       reasoning) as jump-waiting, not the chooser's two-shape check: this
+       path only reaches the recheck when the target's stream still holds a
+       queued decision, and SESSION_END popping `_streams` means an
+       unregistered target can never arrive here. The non-crossed path
+       (acting within the current workspace) is deliberate reading, like
+       navigation, and stays unguarded.
      - **restart line** (`host.py` `_compose_restore_line`) — every restored
        session is uniformly pending at delivery, so the line stays
        content-only by design (a liveness qualifier there would carry zero

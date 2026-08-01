@@ -189,7 +189,8 @@ live.
 Press **⌃⌘J** to jump the voice straight to whichever background session is waiting, or
 hold **⌃⌘Tab** and tap through the chooser to browse the fleet by number. Left alone,
 Sonari's keep-going behavior also advances the voice to the longest-waiting background
-session once the current one runs out of queued speech.
+session once the current one runs out of queued speech — closed sessions are skipped;
+their backlog stays discoverable via **⌃⌘W** and readable via catch-up (**⌃⌘L**).
 
 Wherever you answer a question or approve a permission is simply whatever terminal you're
 typing in — your response always goes there, whether or not that session currently has the

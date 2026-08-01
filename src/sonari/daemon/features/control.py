@@ -34,9 +34,15 @@ _COUNT_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
 CLOSED_WORD = "That session closed."
 
 # D3 §4a/§5 slots 1-2: the marker clause a non-live session's Also-map entry
-# leads with. One word per tier, fleet-wide vocabulary. PROVISIONAL
-# (ear-batch-3) — the owner's ear may flip mark->hide, so the marks stay
-# trivially removable: delete this map, its lookup, and the pending tail.
+# leads with, reused by _pointer_mark for both pointer clauses. One word per
+# tier, fleet-wide vocabulary. PROVISIONAL (ear-batch-3) — the owner's ear
+# may flip mark->hide. This map + its two lookups (the Also-map's own
+# composition and _pointer_mark) is only HALF that revert: the
+# "That session closed." word (chooser.py's commit/digit sites, focus.py's
+# jump-waiting commit, playback.py's jump-decision crossed path, catchup.py's
+# ack marker) and focus.py's _empty_case_tail count-tail are separate marked
+# clauses that would need to come out in the same pass. See spec.md §4 for
+# the complete per-surface clause list.
 _LIVENESS_MARKS = {"pending": ", pending", "dead": ", closed"}
 
 
