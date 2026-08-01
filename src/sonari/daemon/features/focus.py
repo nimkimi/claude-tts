@@ -4,6 +4,7 @@ import sys
 
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
+from sonari.daemon.features.control import CLOSED_WORD, _COUNT_WORDS
 
 
 def _waiting_target(ctx, exclude):
@@ -24,6 +25,34 @@ def _waiting_target(ctx, exclude):
         (blocked if st.queue.has_decision() else prose).append(sess)
     ordered = blocked + prose
     return ordered[0] if ordered else None
+
+
+def _empty_case_tail(ctx, exclude):
+    """D3 spec §4c(2): when nothing is offered, distinguish a bare fleet from
+    one where non-live sessions are sitting on unreachable backlog — the old
+    plain 'No session waiting.' was identical for both (the empty-case lie).
+    Mirrors _waiting_target's stream criteria minus the liveness clause (same
+    sessions that WOULD have been offered but for liveness), tallied by tier.
+    Returns '' for a bare fleet (byte-exact plain string preserved)."""
+    sessions = ctx.host.sessions
+    spk = sessions.speaker()
+    pending = dead = 0
+    for sess, st in ctx.host._streams.items():
+        if sess == exclude or sess == spk or st.stopped or len(st.queue) == 0:
+            continue
+        lv = sessions.liveness(sess)
+        if lv == "pending":
+            pending += 1
+        elif lv == "dead":
+            dead += 1
+    tail = ""
+    # PROVISIONAL (ear-batch-3), D3 §5 slot 4: pending sentence first, then
+    # closed — same digit-free-above-nine degrade as the also-map's tails.
+    if pending:
+        tail += " {0} pending.".format(_COUNT_WORDS.get(pending, "many").capitalize())
+    if dead:
+        tail += " {0} closed.".format(_COUNT_WORDS.get(dead, "many").capitalize())
+    return tail
 
 
 @handler(MsgType.OS_FOCUS)
@@ -60,10 +89,19 @@ def on_jump_waiting(ctx, msg):
         # fall back to an error earcon.
         tgt = ctx.host.sessions.speaker() or ws
         if tgt is not None:
-            ctx.host._enqueue(tgt, "prose", "No session waiting.", False,
+            text = "No session waiting." + _empty_case_tail(ctx, ws)
+            ctx.host._enqueue(tgt, "prose", text, False,
                               mute_exempt=True, pause_exempt=True, at_front=True)
         else:
             ctx.host.cue("error")
+        return None
+    # The selection→focus gap (D3 spec §4c): _waiting_target's candidates are
+    # is_live-filtered at SELECTION time only — a target that died mid-flight
+    # (between selection and this commit) must not be focused. Mirrors the
+    # commit-time re-check the chooser already has (chooser.py _commit).
+    if ctx.host.sessions.liveness(target) == "dead":
+        dest = ctx.host.sessions.speaker() or ws
+        ctx.host.cue("error", word=CLOSED_WORD, session=dest)   # D7a word, never silent
         return None
     # Explicit move: switch the VOICE (not OS focus) to the
     # target, cut the current utterance so the switch is immediate, and lead

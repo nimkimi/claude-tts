@@ -12,13 +12,26 @@ false.
 After the fix, the cue goes to speaker() or foreground() (matching the T2/F3
 pattern), so it lands in the stream the loop actually reads.
 """
+import sonari.ttyutil as ttyutil
 from sonari.protocol import MsgType
+from sonari.sessions import Identity
+from sonari.daemon.features import focus
 from tests.daemon_helpers import make_daemon
 
 
 def _msg(t, session, **kw):
     from sonari.protocol import PROTOCOL_VERSION
     return {"v": PROTOCOL_VERSION, "type": t, "session": session, **kw}
+
+
+def _liveness(monkeypatch, dead):
+    """Fake tty_alive: empty tty -> live (fail-open); else live iff not in `dead`."""
+    monkeypatch.setattr(ttyutil, "tty_alive",
+                        lambda tty: True if not tty else tty not in dead)
+
+
+def _ident(sessions, sid, tty):
+    sessions.set_identity(sid, Identity(term_program="Apple_Terminal", tty=tty))
 
 
 def test_no_session_waiting_cue_routes_to_speaker_not_foreground():
@@ -76,3 +89,88 @@ def test_no_session_waiting_earcon_when_both_none():
     # No sessions registered; speaker() and foreground() are both None.
     daemon.handle_message(_msg(MsgType.JUMP_WAITING, ""))
     assert "error" in speaker.earcons
+
+
+# --- D3 §4c: commit-time re-check + truthful empty tails (Task 7) -----------
+
+
+def test_jump_commit_onto_dead_target_errors_and_does_not_move(monkeypatch):
+    """The selection→focus gap: _waiting_target's candidates are is_live-filtered
+    at SELECTION, but nothing re-checked liveness before the focus move (the race
+    the chooser's _commit already closes, chooser.py:184-191). Simulate died-
+    mid-flight by monkeypatching _waiting_target to hand back a target that is
+    dead BY THE TIME on_jump_waiting acts on it (the public path can't otherwise
+    reach this: selection and focus share one dispatch). Must error-tone +
+    CLOSED_WORD, and touch nothing else."""
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    _ident(sessions, "A", "/dev/ttysA")
+    sessions.register("B", cwd="/x/bravo")
+    _ident(sessions, "B", "/dev/ttysB")
+    _liveness(monkeypatch, dead={"/dev/ttysB"})   # B died after selection, before commit
+    monkeypatch.setattr(focus, "_waiting_target", lambda ctx, exclude: "B")
+    daemon.voice_state = "quiet-hold"             # a value the fix must NOT touch
+
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, ""))
+
+    assert speaker.earcons == ["error"]
+    texts = [it.text for it in daemon._stream("A").queue._items]
+    assert "That session closed." in texts        # D7a word, speaker()-or-workspace
+    assert sessions.speaker() == "A"               # no focus move
+    assert sessions.foreground() == "A"
+    assert daemon.voice_state == "quiet-hold"      # no voice_state write
+    assert speaker.cancels == 0                    # no cancel
+
+
+def test_no_session_waiting_gains_pending_tail():
+    """A restored session holding queued content (pending, no live candidate)
+    makes the empty cue truthful: 'No session waiting.' gains an aggregate tail."""
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    sessions.load_state({"P": {"folder": "/x/p", "number": 5}})   # -> pending
+    daemon._enqueue("P", "prose", "restored backlog", False)      # seeds the queue only
+
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, ""))
+
+    texts = [it.text for it in daemon._stream("A").queue._items]
+    assert "No session waiting. One pending." in texts
+
+
+def test_no_session_waiting_gains_closed_tail(monkeypatch):
+    """A dead-tty session holding queued content makes the empty cue truthful
+    with the closed tail instead of the pending one."""
+    _liveness(monkeypatch, dead={"/dev/ttys404"})
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    sessions.register("D", cwd="/x/etl")
+    _ident(sessions, "D", "/dev/ttys404")          # captured node is gone -> dead
+    daemon._enqueue("D", "prose", "orphan backlog", False)
+
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, ""))
+
+    texts = [it.text for it in daemon._stream("A").queue._items]
+    assert "No session waiting. One closed." in texts
+
+
+def test_no_session_waiting_both_tails_pending_first(monkeypatch):
+    """One pending + one dead backlog-holder: both tails, pending sentence first."""
+    _liveness(monkeypatch, dead={"/dev/ttys404"})
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    sessions.load_state({"P": {"folder": "/x/p", "number": 5}})
+    daemon._enqueue("P", "prose", "restored backlog", False)
+    sessions.register("D", cwd="/x/etl")
+    _ident(sessions, "D", "/dev/ttys404")
+    daemon._enqueue("D", "prose", "orphan backlog", False)
+
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, ""))
+
+    texts = [it.text for it in daemon._stream("A").queue._items]
+    assert "No session waiting. One pending. One closed." in texts
+
+
+def test_bare_empty_fleet_keeps_the_plain_string():
+    """Regression pin: a fleet with no other sessions at all keeps the plain
+    string byte-exact — no tail, nothing to append."""
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+
+    daemon.handle_message(_msg(MsgType.JUMP_WAITING, ""))
+
+    texts = [it.text for it in daemon._stream("A").queue._items]
+    assert texts == ["No session waiting."]
