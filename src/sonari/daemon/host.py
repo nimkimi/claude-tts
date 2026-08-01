@@ -22,10 +22,10 @@ from sonari.daemon.persistence import StateStore, PersistenceWriter, STATE_VERSI
 
 PERMISSION_WAIT_TIMEOUT = 120.0   # daemon's own wait; MUST be < the hook's client send timeout (130s)
 # D7a (§4) spontaneous-failure words — the tone is the instant part, the word is
-# the queued clarification. Both PROVISIONAL pending the ear-batch-2 audition.
+# the queued clarification. Both ratified (ear-batch-2, 2026-08-01).
 EXPIRED_WORD = "That ask timed out — check the terminal."
 SPEAK_FAILURE_WORD = "Speech failed; kept unheard."
-ALARM_HOTKEYS_WORDS = "Hotkeys are down."   # §7 witness alarm — PROVISIONAL (ear-batch-2)
+ALARM_HOTKEYS_WORDS = "Hotkeys are down."   # §7 witness alarm — ratified (ear-batch-2)
 # Side-effect imports: importing each feature module runs its @handler
 # decorators, populating the registry (assert_complete in __init__ guards it).
 from sonari.daemon.features import control  # noqa: F401

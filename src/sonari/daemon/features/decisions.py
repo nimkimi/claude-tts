@@ -8,14 +8,14 @@ from sonari.daemon.features import teaching
 from sonari.spearcon import spearcon_label
 
 
-# D7a (§4) misdirected-answer words (the RL5 false-remedy heal) — PROVISIONAL
-# pending the ear-batch-2 audition.
+# D7a (§4) misdirected-answer words (the RL5 false-remedy heal) — ratified
+# (ear-batch-2, 2026-08-01).
 MISDIRECT_ROUTE_WORD = "No ask here — {0} is asking."
 MISDIRECT_EMPTY_WORD = "Nothing to answer."
 
 # D7b (§5) the advisory frame: an UNANSWERABLE decision keeps its distinct
 # arrival timbre + callsign but its spoken frame says where it is serviceable.
-# PROVISIONAL wording (ear-batch-2 slot); attachment point = end of the full
+# Wording ratified (ear-batch-2, 2026-08-01); attachment point = end of the full
 # composed announce, inside the one chokepoint below.
 ADVISORY_SUFFIX = " — at the terminal."
 

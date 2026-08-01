@@ -411,7 +411,7 @@ def _witness_entry() -> dict:
     new binary reads it by action name. The asset resolves config-first with the
     Python fallback (never silently unconfigured); hotkeyd's compiled-in
     defaults are the last resort, so a STALE resolved file cannot disable the
-    alarm either. Words PROVISIONAL (ear-batch-2)."""
+    alarm either. Words ratified (ear-batch-2, 2026-08-01)."""
     from sonari.config import load_config
     from sonari.speaker import _FALLBACK_EARCONS
     earcons = load_config().get("earcons") or {}

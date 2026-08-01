@@ -64,9 +64,9 @@ def on_tool(ctx, msg):
 def on_earcon(ctx, msg):
     session = ctx.session
     kind = msg.get("kind", "")
-    # The turn-completion ding is the "something landed" cue (SPEC §11): it fires for
-    # non-speaking sessions AND the muted ex-speaker, and is SUPPRESSED only for the
-    # session you are hearing live (session == speaker() AND voice is flowing). Branch
+    # The turn-completion ding is the "something landed" cue (SPEC §11): it fires
+    # at EVERY turn boundary — solo speaker, background, muted ex-speaker alike
+    # (one boundary sound, owner ear ruling below). Branch
     # on turn_done ONLY: choice/plan/permission EARCON msgs may carry a session (the
     # chime is sessionless either way — the call-sign binds where the decision CONTENT
     # enqueues, never here), so the session==speaker() test must never reach them.
@@ -88,9 +88,8 @@ def on_earcon(ctx, msg):
         # the finished session's own stream, or the hint would sit unheard.
         if session != speaker:
             teaching.maybe_hint(host, "background_turn", speaker)
-        # End-of-turn boundary: flush any sub-threshold buffered prose UNCONDITIONALLY
-        # (a message below the minqueue threshold must still be read) — the flush
-        # survives the earcon suppression above.
+        # End-of-turn boundary: flush any sub-threshold buffered prose
+        # (a message below the minqueue threshold must still be read).
         host._flush_prose_buffer(session)
     else:
         # Arrival chime only (D8 ruling 1): this message is fire-and-forget and
