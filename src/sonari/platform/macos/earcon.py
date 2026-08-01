@@ -19,14 +19,13 @@ _DEFAULTS = {
     "error_misdirected": "/System/Library/Sounds/Sosumi.aiff",
     "error_system":      "/System/Library/Sounds/Sosumi.aiff",
     "permission_expired": "/System/Library/Sounds/Sosumi.aiff",
-    # D2 §6 silences: provisional assets — the owner's audition (ear-batch-2)
-    # may swap any of these (config-level, no code change).
-    "your_turn":  "/System/Library/Sounds/Pop.aiff",   # solo turn boundary (distinct from Tink)
+    # D2 §6 silences (assets ratified by the ear-batch-2 audition 2026-08-01;
+    # swaps stay config-level).
     "submit_ack": "/System/Library/Sounds/Morse.aiff",  # prompt-submit ack (dark by default)
     "repoint":    "/System/Library/Sounds/Bottle.aiff", # workspace repoint on click
     "crossing":   "/System/Library/Sounds/Frog.aiff",   # keep-going miss marker (prelude)
     # §7 witness alarms — played via raw spawn (hotkeyd / the daemon), never
-    # the transient arbiter. PROVISIONAL assets (ear-batch-2).
+    # the transient arbiter. Assets ratified (ear-batch-2, 2026-08-01).
     "alarm_daemon_down":  "/System/Library/Sounds/Hero.aiff",
     # Basso not Glass (ear-batch-2 slot 11): Glass doubles as the owner's
     # out-of-band chat attention chime, so the alarm gets its own timbre.

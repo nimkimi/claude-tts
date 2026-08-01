@@ -17,7 +17,7 @@ Tiers:
   fired through host.cue() (it rejects the tier) nor the transient arbiter.
 
 D2/D7 delivered their reserved cues (failure words ride cue(word=); the
-silences are your_turn/submit_ack/repoint/crossing; the witness owns the alarm
+silences are submit_ack/repoint/crossing; the witness owns the alarm
 tier). Still deliberately NOT entries (YAGNI): a watcher for the alarm paths
 themselves (the disclosed residual), and the off-queue boot cue's future
 home."""
@@ -53,10 +53,10 @@ CUES = {c.name: c for c in (
         "Sonari itself failed; the content is preserved unheard"),
     Cue("permission_expired", "failure", "transient",
         "A permission ask timed out unanswered"),
-    # --- D2 §6 silences (2026-07-21). Assets PROVISIONAL pending the owner's
-    # ear-batch-2 audition; swaps are config-level, never code. ---
-    Cue("your_turn", "status", "transient",
-        "The turn you were hearing live just finished"),
+    # --- D2 §6 silences (2026-07-21; assets ratified by the ear-batch-2
+    # audition 2026-08-01). No distinct solo-boundary kind: the owner's ear
+    # ruling collapsed your_turn into turn_done — one sound at every turn
+    # boundary; re-splitting needs a new ear ruling. ---
     Cue("submit_ack", "status", "transient",
         "Your prompt was submitted (off by default)"),
     Cue("repoint", "status", "transient",
@@ -73,7 +73,7 @@ CUES = {c.name: c for c in (
         "Spoken readout of session output"),
     Cue("summary_voice", "content", "queued",
         "The catch-up summary's island voice"),
-    # --- §7 witness alarm tier (out-of-band). Assets PROVISIONAL (ear-batch-2);
+    # --- §7 witness alarm tier (out-of-band). Assets ratified (ear-batch-2);
     # Python-level fallbacks in speaker._FALLBACK_EARCONS keep them from ever
     # being silently unconfigured; playback is a raw spawn, never the arbiter. ---
     Cue("alarm_daemon_down", "failure", "alarm",

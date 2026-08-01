@@ -156,7 +156,7 @@ def test_prose_ordering_decision_earcon_fires_before_fifo_text():
         ("text", "Applying the change now."),
         ("text", "Run: pytest -q Press the option's number to choose, "
                  "or Escape to cancel. — at the terminal."),
-        ("earcon", "your_turn"),
+        ("earcon", "turn_done"),
     ]
 
 
@@ -225,7 +225,7 @@ def test_turn_done_earcon_flushes_sub_threshold_prose():
     assert log == []  # final alone does NOT flush; prose is held below threshold
     daemon.handle_message(msg(MsgType.EARCON, "fg", kind="turn_done"))
     drain(daemon)
-    assert log == [("earcon", "your_turn"), ("text", "Only one.")]
+    assert log == [("earcon", "turn_done"), ("text", "Only one.")]
 
 
 # ---------------------------------------------------------------------------

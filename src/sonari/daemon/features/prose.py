@@ -72,30 +72,22 @@ def on_earcon(ctx, msg):
     # enqueues, never here), so the session==speaker() test must never reach them.
     if kind == "turn_done":
         host = ctx.host
+        # speaker() is read at earcon-ARRIVAL time; it only gates the hint
+        # below, so keep-going advancing the voice in the hook-latency window
+        # can at worst mis-skip one hint.
         speaker = host.sessions.speaker()
-        # Known edge (accepted): speaker() is read at earcon-ARRIVAL time, so if
-        # keep-going advances the voice off the just-finished session in the
-        # hook-latency window, a turn heard live to completion gets one extra ding.
-        # Rare (the finishing speaker usually still holds backlog) and self-limiting.
-        if not (session == speaker and host.voice_state == "flowing"):
-            host.cue(kind)
-            # The hint is about a BACKGROUND session finishing, so fire it only when
-            # the finished session is NOT the speaker. The earcon branch above also
-            # covers the speaker's OWN session finishing under quiet-hold/stopped-all
-            # (still a "something landed" ding) -- but that is not a background turn,
-            # so hinting there would speak false content into a stopped stream and
-            # burn the once-per-run key unheard. When it IS a background turn, target
-            # the SPEAKER's stream (the only stream the speak loop pops), not the
-            # finished session's own stream, or the hint would sit unheard.
-            if session != speaker:
-                teaching.maybe_hint(host, "background_turn", speaker)
-        else:
-            # D2 §6.1 (T3): the SOLO boundary. This is the session you were
-            # hearing live and its turn just ended — the old silence here made
-            # "done" and "stack died" identical, so quiet was never a warranted
-            # claim. Distinct kind (and asset) from the background landed ding
-            # so solo-done and background-done can differ by ear.
-            host.cue("your_turn")
+        # ONE boundary sound for every case, solo or background (owner ear
+        # ruling, ear-batch-2 slot 4, 2026-08-01: the solo/background split was
+        # "confusing" — do not re-introduce a distinct solo kind without a new
+        # ear ruling). D2 §6.1's warrant still holds: the boundary is never
+        # silent, so "done" and "stack died" stay distinguishable.
+        host.cue(kind)
+        # The hint is about a BACKGROUND session finishing, so fire it only when
+        # the finished session is NOT the speaker. When it IS a background turn,
+        # target the SPEAKER's stream (the only stream the speak loop pops), not
+        # the finished session's own stream, or the hint would sit unheard.
+        if session != speaker:
+            teaching.maybe_hint(host, "background_turn", speaker)
         # End-of-turn boundary: flush any sub-threshold buffered prose UNCONDITIONALLY
         # (a message below the minqueue threshold must still be read) — the flush
         # survives the earcon suppression above.

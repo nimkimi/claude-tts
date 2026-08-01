@@ -108,7 +108,6 @@ is bound to the sentence it decorates and plays with it as one unit.
 | `error_misdirected` | transient | Valid answer, wrong session |
 | `error_system` | transient | Sonari itself failed; the content is preserved unheard |
 | `permission_expired` | transient | A permission ask timed out unanswered |
-| `your_turn` | transient | The turn you were hearing live just finished |
 | `submit_ack` | transient | Your prompt was submitted (off by default) |
 | `repoint` | transient | Your click moved the workspace to a different session |
 | `pitch_up` | prelude | Rising chirp bound to the front of an approval |

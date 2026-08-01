@@ -42,9 +42,9 @@ def test_ding_gate_uses_speaker_not_foreground():
     sessions.register("B", cwd="/x/B")
     sessions.set_speaker("B")                            # voice=B, workspace=A
     daemon.handle_message(_msg(MsgType.EARCON, "B", kind="turn_done"))
-    assert speaker.earcons == ["your_turn"]              # the speaker's own solo boundary (D2 §6.1)
+    assert speaker.earcons == ["turn_done"]              # one boundary sound, owner ear ruling (ear-batch-2 slot 4)
     daemon.handle_message(_msg(MsgType.EARCON, "A", kind="turn_done"))
-    assert speaker.earcons == ["your_turn", "turn_done"]  # A is NOT the speaker -> landed ding
+    assert speaker.earcons == ["turn_done", "turn_done"]  # A is NOT the speaker -> landed ding
 
 
 # --- CHANGE 2 / F1: on_flush cuts only the speaker's own / same-session readout ---

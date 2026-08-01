@@ -22,7 +22,7 @@ def test_the_complete_transient_set():
     assert transient_kinds() == {
         "turn_done", "choice", "plan", "permission",
         "error", "error_misdirected", "error_system", "permission_expired",
-        "your_turn", "submit_ack", "repoint"}
+        "submit_ack", "repoint"}
 
 
 def test_prelude_and_queued_entries():

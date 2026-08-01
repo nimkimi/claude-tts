@@ -21,12 +21,10 @@ def test_default_earcons_are_macos_system_sounds():
     assert set(d) == {"permission", "choice", "plan", "error", "turn_done",
                       "error_misdirected", "error_system",   # W6 taxonomy
                       "permission_expired",                  # W7 expiry
-                      "your_turn",                           # D2 §6.1 solo boundary
                       "submit_ack",                          # D2 §6.1 prompt-submit ack
                       "repoint",                             # D2 §6.2 workspace repoint
                       "crossing",                            # D2 §6.6 keep-going miss marker
                       "alarm_daemon_down", "alarm_hotkeys_down"}  # §7 witness alarms
-    assert d["your_turn"] == "/System/Library/Sounds/Pop.aiff"
     assert d["submit_ack"] == "/System/Library/Sounds/Morse.aiff"
     assert d["repoint"] == "/System/Library/Sounds/Bottle.aiff"
     assert d["crossing"] == "/System/Library/Sounds/Frog.aiff"

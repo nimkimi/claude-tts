@@ -7,12 +7,12 @@ def _msg(t, session, **kw):
     return {"v": PROTOCOL_VERSION, "type": t, "session": session, **kw}
 
 
-# --- D2 §6.1 (T3): the FLOWING speaker's turn boundary now SPEAKS — your_turn
-#     (the old silence made "done" and "stack died" identical; req 18 superseded) ---
-def test_flowing_speaker_turn_done_becomes_your_turn():
+# --- Turn boundary: ONE sound at every boundary, solo or background (owner ear
+#     ruling, ear-batch-2 slot 4); the boundary itself is never silent ---
+def test_flowing_speaker_turn_done_stays_turn_done():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     daemon.handle_message(_msg(MsgType.EARCON, "fg", kind="turn_done"))
-    assert speaker.earcons == ["your_turn"]
+    assert speaker.earcons == ["turn_done"]
 
 
 # --- a NON-speaker's turn_done DINGS ("something landed", req 16) ---
@@ -40,7 +40,7 @@ def test_turn_done_flush_survives_earcon_suppression():
     daemon.handle_message(_msg(MsgType.PROSE, "fg", delta="Only one. ", index=0, final=True))
     assert len(daemon._stream("fg").queue) == 0                 # held below threshold
     daemon.handle_message(_msg(MsgType.EARCON, "fg", kind="turn_done"))
-    assert speaker.earcons == ["your_turn"]                     # solo boundary tone (D2 §6.1)
+    assert speaker.earcons == ["turn_done"]                     # same sound solo or background
     assert len(daemon._stream("fg").queue) > 0                 # ... but the flush STILL ran
 
 
