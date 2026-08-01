@@ -165,6 +165,10 @@ class SpeechDaemon:
         # consumes it at the ACTUAL adoption (and clears it if nothing waits, so
         # it can't ride a later unrelated adoption).
         self._mark_keep_going_resume = False
+        # D3 §4d: the session whose DEAD stream a deliberate press re-opened, or
+        # None. See _sanction_dead_read (the only writer besides the speak loop's
+        # one-shot clear). Mutated under self._lock like _mark_keep_going_resume.
+        self._deliberate_dead_read = None
         # §7 witness (hotkeyd-death direction): monotonic stamp of the last
         # WITNESS_PING (None until the first — the alarm ARMS only after a
         # first ping, so hotkey-less/harness runs stay alarm-free), the
@@ -297,6 +301,37 @@ class SpeechDaemon:
             if not _stream_quiescent(st):
                 return True                   # the voice owner still has speech to deliver
         return False
+
+    def _sanction_dead_read(self, session) -> None:
+        """Mark *session*'s DEAD stream as consciously re-opened by a deliberate press.
+
+        §4d keeps the voice off a dead session's backlog automatically:
+        _select_keep_going never adopts one and _release_dead_speaker drops the
+        voice the moment a speaker dies. But a deliberate press composes its
+        answer INTO that stream — idle ⌃⌘W and catch-up (§4f) route their cues to
+        the workspace when speaker() is None — so without this the correct,
+        correctly-marked answer is composed and never voiced (WB-C1/WB-C2). The
+        press re-opened THIS stream on purpose, so while the mark names the
+        speaker the loop drains it normally, backlog included (the deliberate
+        read is the whole stream — pinned in test_dead_stream_voice.py). Nothing
+        is re-opened for any OTHER dead stream, and nothing automatic.
+
+        A no-op unless *session* is genuinely dead, so live and pending
+        destinations keep today's path untouched. When the voice is idle the
+        press also TAKES it, since keep-going never will — the same "the idle
+        voice landing where you already are, not a steal" reasoning the idle ⌃⌘W
+        branch already states, and set_speaker's chooser.py:214 idiom.
+
+        One-shot: cleared when the sanctioned stream runs dry or the voice leaves
+        it by any path (both in _release_dead_speaker). CALLER MUST HOLD
+        self._lock — every call site is a handler under the dispatch transaction,
+        the same contract cue(word=...) states.
+        """
+        if session is None or self.sessions.liveness(session) != "dead":
+            return
+        self._deliberate_dead_read = session
+        if self.sessions.speaker() is None:
+            self.sessions.set_speaker(session)
 
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
                  entry=None, mute_exempt: bool = False,

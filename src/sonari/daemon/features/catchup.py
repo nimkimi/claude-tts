@@ -16,11 +16,28 @@ def _result_msg(request_id, result):
             "text": result.text, "reason": result.reason}
 
 
-def _cue_dest(sessions, target):
-    # Route audible cues to the SPEAKER when it diverges from the caught-up target
-    # (the SP4 skip-cue lesson: a diverged target's stream isn't heard). Else target.
+def _cue_dest(host, target):
+    """The stream this catch-up's cues must land in — resolved AND made audible.
+
+    Route audible cues to the SPEAKER when it diverges from the caught-up target
+    (the SP4 skip-cue lesson: a diverged target's stream isn't heard). Else target.
+
+    D3 §4d seam (WB-C2): when the destination resolves to a DEAD session, claim
+    the voice for it (host._sanction_dead_read). §4f rules catch-up on a closed
+    session a legitimate recovery act that PROCEEDS — but post-T9 keep-going
+    refuses dead streams, so with speaker() None the ack and the render landed
+    in a stream nothing would ever adopt: the frontier work happened and the
+    user heard nothing. The claim lives HERE, not at the three call sites, so
+    every present and future cue destination in this file is audible by
+    construction — the one-chokepoint discipline D3 is built on. All three
+    callers are handlers under the dispatch transaction, which is the lock
+    _sanction_dead_read requires.
+    """
+    sessions = host.sessions
     spk = sessions.speaker()
-    return spk if (spk is not None and spk != target) else target
+    dest = spk if (spk is not None and spk != target) else target
+    host._sanction_dead_read(dest)
+    return dest
 
 
 @handler(MsgType.CATCH_UP)
@@ -37,7 +54,7 @@ def on_catch_up(ctx, msg):
     st = host._stream(target)
     entries, aged_out = host.history.unheard_from_frontier(target, st.frontier)
     folder = sessions.folder(target)
-    dest = _cue_dest(sessions, target)
+    dest = _cue_dest(host, target)
     if not entries:
         host._enqueue(dest, "prose", "Nothing to catch up.", False,
                       mute_exempt=True, pause_exempt=True, at_front=True)
@@ -102,7 +119,7 @@ def _cancel_catchup(host):
         if cur is not None and getattr(cur, "render_id", None) == rid:
             host.speaker.cancel()
     host._catchup = None                     # no burn on cancel (§2.9)
-    dest = _cue_dest(host.sessions, cu["target"])
+    dest = _cue_dest(host, cu["target"])
     if dest is not None:
         host._enqueue(dest, "prose", "Cancelled.", False,
                       mute_exempt=True, pause_exempt=True, at_front=True)
@@ -144,7 +161,7 @@ def on_catchup_result(ctx, msg):
     cu["render_id"] = render_id
     cu["phase"] = "rendering"
     cu["ended"] = ended
-    dest = _cue_dest(sessions, target)
+    dest = _cue_dest(host, target)
     if dest is None:
         host._catchup = None                         # nowhere audible (last session gone)
         return None

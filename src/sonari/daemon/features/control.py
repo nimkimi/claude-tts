@@ -363,6 +363,14 @@ def on_where_am_i(ctx, msg):
                 _numbered(host, ws), _closed_mark(host, ws), _entry_clauses(host, ws))
             cue += _also_clause(host, exclude=(ws,))
             host._enqueue(ws, "prose", cue, False, mute_exempt=True, pause_exempt=True)
+            # D3 §4d seam (WB-C1): the delivery note above predates T9. Keep-going
+            # now SKIPS dead streams, so on a dead workspace the cue it just
+            # composed — correctly marked ", closed" — would sit here forever:
+            # no speech, no tone, from the primary status verb. This press is
+            # deliberate, so it sanctions reading that stream (and takes the idle
+            # voice itself, which is what "adoption on the next loop turn" above
+            # relied on keep-going to do).
+            host._sanction_dead_read(ws)
         else:
             host.cue("error")
         return None
