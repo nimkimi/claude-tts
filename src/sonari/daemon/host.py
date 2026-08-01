@@ -1136,7 +1136,9 @@ class SpeechDaemon:
         was restored. A PILE = a restored session whose history extends past its
         frontier (catch-up-reachable; frontier None == everything unheard).
         Content-only — no session-liveness claims (D3's hide-vs-mark untouched).
-        Strings PROVISIONAL pending the ear-batch-2 audition."""
+        Wording per the owner's ear ruling (ear-batch-2 slot 9): counts SESSIONS
+        with unheard output, a present-state claim — which is exactly what the
+        recompose-at-delivery path computes."""
         piles = 0
         for sid in self.history.session_ids():
             st = self._state._streams.get(sid)
@@ -1147,8 +1149,8 @@ class SpeechDaemon:
         parts = []
         if piles:
             count = self._RESTORE_COUNT_WORDS.get(piles, str(piles))
-            parts.append("{0} {1} restored.".format(
-                count, "pile" if piles == 1 else "piles"))
+            parts.append("{0} {1} unheard output.".format(
+                count, "session has" if piles == 1 else "sessions have"))
         for sid, st in self._state._streams.items():
             if st.stopped:
                 folder = self.sessions.folder(sid) or "Another session"

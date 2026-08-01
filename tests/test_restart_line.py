@@ -40,7 +40,7 @@ def test_one_pile_restored_line_speaks_after_restore():
     _seed_pile(src, "s1")
     dst, speaker, sessions = _restart(src)
     dst._speak_loop_once()                               # keep-going adopts the line
-    assert _texts(speaker) == ["One pile restored."]
+    assert _texts(speaker) == ["One session has unheard output."]
 
 
 def test_two_piles_and_a_muted_session_compose():
@@ -51,7 +51,7 @@ def test_two_piles_and_a_muted_session_compose():
     src._stream("ws").stopped = True
     dst, speaker, sessions = _restart(src)
     dst._speak_loop_once()
-    assert _texts(speaker) == ["Two piles restored. ws is muted."]
+    assert _texts(speaker) == ["Two sessions have unheard output. ws is muted."]
 
 
 def test_nothing_restored_stays_silent():
@@ -68,7 +68,7 @@ def test_restart_line_never_advances_a_restored_frontier():
     _seed_pile(src, "s1")
     dst, speaker, sessions = _restart(src)
     dst._speak_loop_once()
-    assert _texts(speaker) == ["One pile restored."]
+    assert _texts(speaker) == ["One session has unheard output."]
     assert dst._streams["s1"].frontier == (0, 0)         # content-only: untouched
 
 
