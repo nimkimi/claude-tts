@@ -102,12 +102,26 @@ def _nav_response(ctx, session: str, direction: str) -> None:
 def on_nav(ctx, msg):
     # Sanctioned unguarded (D3 spec §4g; RECONCILIATION has the ruling): this
     # is deliberate re-reading of already-stored transcript content, not a
-    # live voice hand-off, so no liveness check runs here.
+    # live voice hand-off, so nothing here BLOCKS on liveness. The sanction
+    # below consults it for the opposite reason — to keep a dead workspace's
+    # read audible (RR-1) — and never refuses the press.
     sessions = ctx.host.sessions
     target = sessions.workspace()
     if target is None:
         return None
     crossed = target != sessions.speaker()        # compute BEFORE focus() moves it; SP2: speaker() advances independently of workspace()
+    # D3 §4d seam (RR-1): nav is the FOURTH deliberate dead-read site, and the
+    # only press that takes the voice itself (crossed nav calls focus() on the
+    # unguarded workspace) instead of relying on keep-going adoption. It
+    # delivered on a dead workspace only because the pop had no liveness check;
+    # _release_dead_speaker closes that, so without this the read is composed,
+    # the voice lands on the dead session, and the next pop hands it back —
+    # everything strands, and workspace() stays dead indefinitely (recon §6).
+    # WHOLE grain: _nav/_nav_response CLEAR the queue before enqueueing, so the
+    # sanctioned drain is exactly the requested seek-and-play content. Placed
+    # AFTER `crossed` — sanctioning first would claim an idle voice and flip
+    # `crossed` to False, dropping the folder cue this press must lead with.
+    ctx.host._sanction_dead_read(target)
     if crossed:
         sessions.focus(target)                     # move the voice to the navigated session
         ctx.host.voice_state = "flowing"           # cross-nav is a deliberate re-engage; within-nav is not

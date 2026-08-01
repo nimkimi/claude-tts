@@ -191,3 +191,57 @@ def test_sanctioned_read_survives_until_its_stream_empties_then_releases(monkeyp
     daemon._speak_loop_once()                            # the tick after it runs dry
     assert sessions.speaker() is None
     assert daemon._deliberate_dead_read is None          # one-shot: never a standing licence
+
+
+def _seed_transcript(daemon, session="ws"):
+    """Three navigable messages in *session*'s stored transcript — what ⌃⌘← is
+    for on a closed session: "read me what that session said"."""
+    h = daemon.history
+    h.record(session, "prose", "hist 0"); h.end_message(session)
+    h.record(session, "prose", "hist 1"); h.end_message(session)
+    h.record(session, "prose", "hist 2")
+
+
+# --- RR-1 (CRITICAL): the release silenced NAVIGATION on a dead workspace ---
+def test_nav_on_a_dead_workspace_is_voiced(monkeypatch):
+    """Nav is the fourth deliberate site, and the only press that TAKES the voice
+    itself (crossed nav calls sessions.focus() on the unguarded workspace) rather
+    than relying on keep-going adoption. Pre-release it delivered BECAUSE the pop
+    had no liveness check; the release closes that gap, so with no sanction here
+    the read composes, the voice lands on the dead session, and the next pop
+    hands it back — everything strands. §4g rules nav deliberate transcript
+    reading, and workspace() stays on a dead session indefinitely (recon §6), so
+    this is the morning-after gesture answered by permanent silence.
+
+    Byte-exact against the pre-release measurement at 2bd7c38 (folder cue first,
+    then the seek-and-play transcript)."""
+    daemon, speaker, sessions = _dead_workspace(monkeypatch)
+    _seed_transcript(daemon)
+    daemon.handle_message(_msg("nav", "ws", to="first"))
+    _drain(daemon, 6)
+    assert [s for s in speaker.spoken if s] == ["web.", "hist 0", "hist 1", "hist 2"]
+
+
+def test_nav_on_a_dead_workspace_cuts_the_live_read_not_the_nav_read(monkeypatch):
+    """The second measured variant: a LIVE session holds the voice when ⌃⌘← lands
+    on the dead workspace. Post-release both reads were lost — _nav's cancel cut
+    the live one and the release dropped the nav one. Base parity is that the
+    live read is the one cut (that is what a deliberate jump means) and the nav
+    read is delivered; never both-silent. The live session's remaining backlog
+    resumes afterwards via keep-going, so nothing is destroyed either."""
+    _liveness(monkeypatch, dead={"/dev/ttysW"})
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    sessions.register("ws", cwd="/x/web"); _ident(sessions, "ws", "/dev/ttysW")
+    sessions.register("S", cwd="/x/api"); _ident(sessions, "S", "/dev/ttysS")
+    sessions.set_foreground("ws")                        # workspace() -> the dead session
+    sessions.set_speaker("S")                            # ... while a LIVE session speaks
+    daemon._enqueue("S", "prose", "s-live-1", False)
+    daemon._enqueue("S", "prose", "s-live-2", False)
+    daemon._speak_loop_once()
+    assert "s-live-1" in speaker.spoken
+    _seed_transcript(daemon)
+    daemon.handle_message(_msg("nav", "ws", to="first"))
+    _drain(daemon, 8)
+    assert [s for s in speaker.spoken if s] == [
+        "s-live-1", "web.", "hist 0", "hist 1", "hist 2", "api. s-live-2"]
+    assert speaker.cancels == 1                          # _nav cut S; nothing cut the nav read
