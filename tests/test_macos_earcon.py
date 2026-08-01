@@ -31,4 +31,4 @@ def test_default_earcons_are_macos_system_sounds():
     assert d["repoint"] == "/System/Library/Sounds/Bottle.aiff"
     assert d["crossing"] == "/System/Library/Sounds/Frog.aiff"
     assert d["alarm_daemon_down"] == "/System/Library/Sounds/Hero.aiff"
-    assert d["alarm_hotkeys_down"] == "/System/Library/Sounds/Glass.aiff"
+    assert d["alarm_hotkeys_down"] == "/System/Library/Sounds/Basso.aiff"

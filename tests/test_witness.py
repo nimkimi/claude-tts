@@ -40,7 +40,7 @@ def test_alarm_fires_once_past_the_timeout_queue_bypassing():
     daemon.handle_message(_msg(MsgType.WITNESS_PING))
     daemon._witness_last_ping = time.monotonic() - 16.0
     daemon._check_witness()
-    assert calls == [["afplay", "/System/Library/Sounds/Glass.aiff"],
+    assert calls == [["afplay", "/System/Library/Sounds/Basso.aiff"],
                      ["say", "Hotkeys are down."]]
     daemon._check_witness()                        # once-latch: no re-fire
     assert len(calls) == 2

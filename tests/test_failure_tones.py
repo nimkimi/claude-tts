@@ -43,8 +43,8 @@ def test_new_kinds_fall_back_on_an_existing_installs_config():
                  earcons={"error": "/System/Library/Sounds/Sosumi.aiff"})
     sp.transient("error_misdirected")
     sp.transient("error_system")
-    assert played == ["/System/Library/Sounds/Basso.aiff",
-                      "/System/Library/Sounds/Blow.aiff"]
+    assert played == ["/System/Library/Sounds/Sosumi.aiff",
+                      "/System/Library/Sounds/Sosumi.aiff"]
 
 
 def test_config_entry_wins_and_old_kinds_keep_silent_noop():
@@ -58,8 +58,8 @@ def test_config_entry_wins_and_old_kinds_keep_silent_noop():
 
 def test_macos_defaults_gain_the_new_kinds():
     from sonari.platform.macos.earcon import _DEFAULTS
-    assert _DEFAULTS["error_misdirected"] == "/System/Library/Sounds/Basso.aiff"
-    assert _DEFAULTS["error_system"] == "/System/Library/Sounds/Blow.aiff"
+    assert _DEFAULTS["error_misdirected"] == "/System/Library/Sounds/Sosumi.aiff"
+    assert _DEFAULTS["error_system"] == "/System/Library/Sounds/Sosumi.aiff"
     assert _DEFAULTS["error"] == "/System/Library/Sounds/Sosumi.aiff"  # unchanged
 
 
@@ -142,4 +142,4 @@ def test_crossing_fallback_can_never_be_silently_unconfigured():
 def test_alarm_assets_can_never_be_silently_unconfigured():
     from sonari.speaker import _FALLBACK_EARCONS
     assert _FALLBACK_EARCONS["alarm_daemon_down"] == "/System/Library/Sounds/Hero.aiff"
-    assert _FALLBACK_EARCONS["alarm_hotkeys_down"] == "/System/Library/Sounds/Glass.aiff"
+    assert _FALLBACK_EARCONS["alarm_hotkeys_down"] == "/System/Library/Sounds/Basso.aiff"

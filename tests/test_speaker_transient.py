@@ -79,7 +79,7 @@ def test_new_failure_kinds_fall_back_to_builtin_assets():
     player = RecordingPlayer()
     sp = Speaker(earcon_player=player, earcons={})
     sp.transient("error_system")
-    assert player.paths == ["/System/Library/Sounds/Blow.aiff"]
+    assert player.paths == ["/System/Library/Sounds/Sosumi.aiff"]
 
 
 def test_config_entry_wins_over_the_fallback():

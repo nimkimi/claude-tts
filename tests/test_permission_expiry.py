@@ -80,4 +80,4 @@ def test_in_flight_at_expiry_is_left_to_finish():
 
 def test_macos_defaults_gain_permission_expired():
     from sonari.platform.macos.earcon import _DEFAULTS
-    assert _DEFAULTS["permission_expired"] == "/System/Library/Sounds/Purr.aiff"
+    assert _DEFAULTS["permission_expired"] == "/System/Library/Sounds/Sosumi.aiff"

@@ -13,14 +13,16 @@ _DEFAULT_WAIT_TIMEOUT = 120  # seconds; generous upper bound for even long TTS
 # always wins, so the owner swaps assets without a code change. Old kinds keep
 # today's silent-no-op semantics when unconfigured.
 _FALLBACK_EARCONS = {
-    "error_misdirected": "/System/Library/Sounds/Basso.aiff",
-    "error_system": "/System/Library/Sounds/Blow.aiff",
-    "permission_expired": "/System/Library/Sounds/Purr.aiff",
+    # One failure tone by owner ear ruling (ear-batch-2 slot 1): kinds stay
+    # distinct, the paired word carries the class.
+    "error_misdirected": "/System/Library/Sounds/Sosumi.aiff",
+    "error_system": "/System/Library/Sounds/Sosumi.aiff",
+    "permission_expired": "/System/Library/Sounds/Sosumi.aiff",
     # D2 §6.6 crossing prelude — resolved via host._asset_path (config-first),
-    # never through transient(). PROVISIONAL asset (ear-batch-2).
+    # never through transient().
     "crossing": "/System/Library/Sounds/Frog.aiff",
     "alarm_daemon_down": "/System/Library/Sounds/Hero.aiff",
-    "alarm_hotkeys_down": "/System/Library/Sounds/Glass.aiff",
+    "alarm_hotkeys_down": "/System/Library/Sounds/Basso.aiff",
 }
 
 
