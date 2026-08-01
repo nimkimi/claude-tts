@@ -1,9 +1,18 @@
+import sonari.ttyutil as ttyutil
+from sonari.sessions import Identity
 from sonari.summarizer import SummarizeResult
 from tests.daemon_helpers import make_daemon, FakeSummarizer
 
 
 def _catch_up(session="fg"):
     return {"v": 1, "type": "catch_up", "session": session}
+
+
+def _liveness(monkeypatch, dead):
+    """Fake tty_alive: empty tty -> live (fail-open); else live iff not in `dead`
+    (the test_chooser.py idiom)."""
+    monkeypatch.setattr(ttyutil, "tty_alive",
+                        lambda tty: True if not tty else tty not in dead)
 
 
 def test_empty_pile_says_nothing_to_catch_up_and_no_worker():
@@ -124,3 +133,61 @@ def test_render_lands_after_ack_when_ack_queued_behind_a_busy_item():
     ack = "Catching up 1 item in r."
     digest = "Summary unavailable. Last: a."
     assert speaker.spoken.index(ack) < speaker.spoken.index(digest)
+
+
+def test_catchup_ack_on_dead_workspace_gains_the_closed_marker(monkeypatch):
+    # D3 spec §4f: catch-up still PROCEEDS on a dead target (reading a closed
+    # session's pile is a legitimate recovery act) — only the ack gains the marker.
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=FakeSummarizer())
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    _liveness(monkeypatch, dead={"/dev/ttysX"})
+    sessions.set_identity("fg", Identity(term_program="Apple_Terminal", tty="/dev/ttysX"))
+    for i in range(2):
+        daemon.history.record("fg", "prose", "line {0}.".format(i))
+    daemon.handle_message(_catch_up())
+    daemon._speak_loop_once()
+    assert speaker.spoken[-1] == "Catching up 2 items in myrepo. That session closed."
+
+
+def test_catchup_aged_out_prefix_keeps_marker_last(monkeypatch):
+    # The marker is the FINAL sentence, after the aged-out prefix when present.
+    daemon, queue, speaker, sessions, config = make_daemon(summarizer=FakeSummarizer())
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    _liveness(monkeypatch, dead={"/dev/ttysX"})
+    sessions.set_identity("fg", Identity(term_program="Apple_Terminal", tty="/dev/ttysX"))
+    daemon.history.record("fg", "prose", "a.")
+    daemon._stream("fg").frontier = (-1, -1)   # behind the oldest entry -> aged_out
+    daemon.handle_message(_catch_up())
+    daemon._speak_loop_once()
+    assert speaker.spoken[-1] == \
+        "Earlier output aged out. Catching up 1 item in myrepo. That session closed."
+
+
+def test_catchup_nothing_branch_unmarked_on_dead_workspace(monkeypatch):
+    # Spec marks only the counting ack — "Nothing to catch up." stays byte-exact
+    # even on a dead workspace.
+    daemon, queue, speaker, sessions, config = make_daemon()
+    sessions.set_foreground("fg", cwd="/x/myrepo")
+    _liveness(monkeypatch, dead={"/dev/ttysX"})
+    sessions.set_identity("fg", Identity(term_program="Apple_Terminal", tty="/dev/ttysX"))
+    daemon.handle_message(_catch_up())
+    daemon._speak_loop_once()
+    assert speaker.spoken[-1] == "Nothing to catch up."
+
+
+def test_workspace_never_resolves_to_a_pending_session():
+    # The guard: `sessions.workspace()` cannot resolve to an identity-less
+    # provisional session, so on_catch_up's marker never needs a pending leg. The
+    # only path that could name a restored session is SET_FOREGROUND, and the
+    # dispatch chokepoint (host.handle_message) clears quarantine BEFORE the
+    # handler runs — so by the time workspace() returns the session, it is no
+    # longer pending.
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    sessions.load_state({"s1": {"folder": "repo", "number": 1}})
+    assert sessions.is_provisional("s1") is True
+    assert sessions.workspace() is None
+    daemon.handle_message({"v": 1, "type": "set_foreground", "session": "s1",
+                           "cwd": "/x/repo"})
+    ws = sessions.workspace()
+    assert ws == "s1"
+    assert sessions.liveness(ws) != "pending"

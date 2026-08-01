@@ -6,7 +6,7 @@ import threading
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 from sonari.daemon.registry import handler
 from sonari.catchup import render_slice, build_digest, sanitize_summary, resolve_summary_voice
-from sonari.daemon.features.control import _has_decision
+from sonari.daemon.features.control import _has_decision, CLOSED_WORD
 from sonari.daemon.features import teaching
 
 
@@ -50,6 +50,15 @@ def on_catch_up(ctx, msg):
     ack = "Catching up {0} {1} {2}.".format(n, "item" if n == 1 else "items", where)
     if aged_out:
         ack = "Earlier output aged out. " + ack
+    # D3 spec §4f: reading a closed session's pile is a legitimate recovery act, so
+    # catch-up still PROCEEDS on a dead target — only the ack gains the marker,
+    # last so it always trails the aged-out prefix. `== "dead"` EXACTLY, never
+    # `!= "live"`: pending is structurally unreachable here (workspace() cannot
+    # resolve to a quarantined session — see the guard test), so this stays a
+    # closed two-state branch and any future invariant break falls back to
+    # today's unmarked ack rather than speaking a lie.
+    if sessions.liveness(target) == "dead":
+        ack += " " + CLOSED_WORD
     ack_id = host._enqueue(dest, "prose", ack, False,
                            mute_exempt=True, pause_exempt=True, at_front=True)
     last = entries[-1]

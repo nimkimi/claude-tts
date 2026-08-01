@@ -476,8 +476,11 @@ def test_restore_pile_becomes_catchable_and_provisional_until_reidentified(monke
     with dst._state.transaction():
         dst.handle_message({"v": PROTOCOL_VERSION, "type": MsgType.CATCH_UP,
                             "session": "s1"})
+    # The tty this session re-captured (/dev/ttys404) is a node that never
+    # existed, so post-clear the session is DEAD (D3 §4a's closed tier above) —
+    # the ack now carries the marker too (D3 §4f).
     acks = [it.text for it in dst._stream("s1").queue._items if "Catching up" in it.text]
-    assert acks == ["Catching up 2 items in repo."]
+    assert acks == ["Catching up 2 items in repo. That session closed."]
 
     # WHERE_AM_I now reflects the restored unheard for the (now non-provisional) session.
     assert "unheard" in control._entry_clauses(dst, "s1")
