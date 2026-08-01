@@ -75,11 +75,27 @@ def _release_dead_speaker(host, fg, st) -> bool:
     expires here when its stream runs dry or when the voice has left it by any
     path (a commit, a jump, SESSION_END's unregister), so it can never become a
     standing licence to auto-voice that session.
+
+    A SINGLE-ITEM mark (RR-2 — a confirmation or fallback that merely landed in
+    a dead stream) is spent one step earlier: the pop this boundary guards IS
+    its whole delivery, so the mark is cleared on the way through and the next
+    boundary releases. Without that, answering "Rate 250." would drag the closed
+    session's backlog along behind it.
     """
     sanctioned = host._deliberate_dead_read
     if sanctioned is not None and (sanctioned != fg or _stream_quiescent(st)):
         host._deliberate_dead_read = sanctioned = None
-    if fg is None or fg == sanctioned or host.sessions.liveness(fg) != "dead":
+    if fg is None:
+        return False
+    if fg == sanctioned:
+        if not host._deliberate_dead_whole and len(st.queue) > 0:
+            # Spent by the pop below. Guarded on a non-empty queue so a stream
+            # holding only buffered prose (non-quiescent, nothing to pop) cannot
+            # burn the mark on a turn that delivers nothing. st is non-None here:
+            # a quiescent/absent stream already cleared the mark above.
+            host._deliberate_dead_read = None
+        return False
+    if host.sessions.liveness(fg) != "dead":
         return False
     host.sessions.set_speaker(None)
     return True
@@ -200,9 +216,14 @@ class SpeechDaemon:
         # it can't ride a later unrelated adoption).
         self._mark_keep_going_resume = False
         # D3 §4d: the session whose DEAD stream a deliberate press re-opened, or
-        # None. See _sanction_dead_read (the only writer besides the speak loop's
-        # one-shot clear). Mutated under self._lock like _mark_keep_going_resume.
+        # None, and that press's GRAIN — True == the whole stream (a read of the
+        # session), False == its one front item (an answer that merely landed
+        # there). See _sanction_dead_read (the only writer besides the speak
+        # loop's one-shot clear). The grain is meaningful only while the mark is
+        # set; every mark writes it. Mutated under self._lock like
+        # _mark_keep_going_resume.
         self._deliberate_dead_read = None
+        self._deliberate_dead_whole = True
         # §7 witness (hotkeyd-death direction): monotonic stamp of the last
         # WITNESS_PING (None until the first — the alarm ARMS only after a
         # first ping, so hotkey-less/harness runs stay alarm-free), the
@@ -336,38 +357,63 @@ class SpeechDaemon:
                 return True                   # the voice owner still has speech to deliver
         return False
 
-    def _sanction_dead_read(self, session) -> None:
+    def _sanction_dead_read(self, session, whole: bool = True) -> bool:
         """Mark *session*'s DEAD stream as consciously re-opened by a deliberate press.
 
         §4d keeps the voice off a dead session's backlog automatically:
         _select_keep_going never adopts one and _release_dead_speaker drops the
         voice the moment a speaker dies. But a deliberate press composes its
-        answer INTO that stream — the three sites are idle ⌃⌘W and catch-up
-        (§4f), which route their cues to the workspace when speaker() is None,
-        and a ⌃⌘W readout about a dead speaker, which lands in the speaker's own
-        stream — so without this the correct, correctly-marked answer is
-        composed and never voiced (WB-C1/WB-C2, and R-1's release). The
-        press re-opened THIS stream on purpose, so while the mark names the
-        speaker the loop drains it normally, backlog included (the deliberate
-        read is the whole stream — pinned in test_dead_stream_voice.py). Nothing
-        is re-opened for any OTHER dead stream, and nothing automatic.
+        answer INTO that stream, so without this the correct, correctly-marked
+        answer is composed and never voiced (WB-C1/WB-C2, R-1's release, RR-1).
+        Nothing is re-opened for any OTHER dead stream, and nothing automatic.
+
+        *whole* is the GRAIN, and it matches what the press asked for:
+
+        - True — a read OF that session, so the mark drains the stream normally,
+          backlog included. Idle ⌃⌘W and ⌃⌘W on a dead speaker (control.py),
+          catch-up (catchup.py _cue_dest), and navigation (navigation.py on_nav,
+          which clears the queue before its seek-and-play, so the whole stream IS
+          the requested content).
+        - False — a confirmation or fallback that merely LANDED there because its
+          destination falls back to workspace(): the settings readbacks, the
+          jump-waiting empty case, repeat/skip/jump-decision fallbacks, the
+          chooser preview (RR-2). Exactly the front item is delivered, then the
+          mark is spent (_release_dead_speaker). A rate nudge is not a request to
+          be read a closed session's pile.
+
+        Re-sanctioning the SAME stream keeps the wider grain: a readback arriving
+        mid-⌃⌘W must not truncate the whole read already running.
 
         A no-op unless *session* is genuinely dead, so live and pending
-        destinations keep today's path untouched. When the voice is idle the
-        press also TAKES it, since keep-going never will — the same "the idle
-        voice landing where you already are, not a steal" reasoning the idle ⌃⌘W
-        branch already states, and set_speaker's chooser.py:214 idiom.
+        destinations keep today's path untouched; returns True iff it sanctioned,
+        which the settings readbacks use to enqueue at_front (their cue is a
+        back-append, and the one item delivered must be the answer, not whatever
+        the dead pile happens to start with). When the voice is idle the press
+        also TAKES it, since keep-going never will — the same "the idle voice
+        landing where you already are, not a steal" reasoning the idle ⌃⌘W branch
+        already states, and set_speaker's chooser.py:214 idiom. A single-item
+        press never takes it onto a STOPPED stream: the held branch returns above
+        the pop boundary, so the mark could never be spent and the voice would
+        wedge there — and a muted stream is equally unvoiceable when it is alive,
+        which is the line this sanction must not cross.
 
-        One-shot: cleared when the sanctioned stream runs dry or the voice leaves
-        it by any path (both in _release_dead_speaker). CALLER MUST HOLD
-        self._lock — every call site is a handler under the dispatch transaction,
-        the same contract cue(word=...) states.
+        One-shot: cleared when the sanctioned stream runs dry, when its one item
+        is delivered, or when the voice leaves it by any path (all in
+        _release_dead_speaker). CALLER MUST HOLD self._lock — every call site is
+        a handler under the dispatch transaction, the same contract
+        cue(word=...) states.
         """
         if session is None or self.sessions.liveness(session) != "dead":
-            return
+            return False
+        if self._deliberate_dead_read == session:
+            whole = whole or self._deliberate_dead_whole      # never NARROW a live mark
         self._deliberate_dead_read = session
+        self._deliberate_dead_whole = whole
         if self.sessions.speaker() is None:
-            self.sessions.set_speaker(session)
+            st = self._state._streams.get(session)
+            if whole or not (st is not None and st.stopped):
+                self.sessions.set_speaker(session)
+        return True
 
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
                  entry=None, mute_exempt: bool = False,

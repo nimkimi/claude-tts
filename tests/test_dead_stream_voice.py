@@ -245,3 +245,112 @@ def test_nav_on_a_dead_workspace_cuts_the_live_read_not_the_nav_read(monkeypatch
     assert [s for s in speaker.spoken if s] == [
         "s-live-1", "web.", "hist 0", "hist 1", "hist 2", "api. s-live-2"]
     assert speaker.cancels == 1                          # _nav cut S; nothing cut the nav read
+
+
+# --- RR-2: the SINGLE-ITEM grain — an answer is not a request for the pile ---
+def test_settings_readback_on_a_dead_workspace_is_voiced_without_its_backlog(monkeypatch):
+    """The grain pin. A rate press on the dead conjunction must be HEARD — the
+    confirmation targets workspace() unconditionally (W11: the terminal you're at
+    hears its own confirmation), and post-T9 nothing adopts that stream, so it was
+    composed into silence. But it must be heard ALONE: a settings press is not the
+    deliberate "read me that closed session" act ⌃⌘W/⌃⌘L/nav are, so the whole-
+    stream wrinkle would turn a rate nudge into an unrequested backlog reading."""
+    daemon, speaker, sessions = _dead_workspace(monkeypatch)
+    daemon._enqueue("ws", "prose", "backlog one", False)
+    daemon._enqueue("ws", "prose", "backlog two", False)
+    daemon.handle_message(_msg("set_rate", "ws", delta=50))
+    _drain(daemon, 6)
+    assert "Rate 250." in speaker.spoken
+    assert not any(s and "backlog" in s for s in speaker.spoken)
+    assert len(daemon._stream("ws").queue) == 2           # kept, never destroyed
+    assert sessions.speaker() is None                     # released at the next boundary
+    assert daemon._deliberate_dead_read is None           # spent by its one item
+
+
+def test_single_item_grain_never_truncates_a_sanctioned_whole_read(monkeypatch):
+    """The two grains compose on one stream. A readback arriving mid-⌃⌘W must not
+    narrow the whole read that is already running to a single item — re-sanctioning
+    the same stream keeps the WIDER grain."""
+    daemon, speaker, sessions = _dead_workspace(monkeypatch)
+    daemon._enqueue("ws", "prose", "backlog one", False)
+    daemon._enqueue("ws", "prose", "backlog two", False)
+    daemon.handle_message(_msg("where_am_i", "ws"))        # whole sanction
+    daemon._speak_loop_once()                              # the readout
+    daemon.handle_message(_msg("set_rate", "ws", delta=50))  # single, mid-drain
+    _drain(daemon, 6)
+    assert any(s and "backlog one" in s for s in speaker.spoken)
+    assert any(s and "backlog two" in s for s in speaker.spoken)
+    assert "Rate 250." in speaker.spoken
+
+
+def test_a_readback_never_parks_the_voice_on_a_dead_muted_workspace(monkeypatch):
+    """Anti-wedge (probe G's shape, one grain over). The single-item sanction takes
+    the IDLE voice, and a stopped stream never reaches the pop boundary at all —
+    the held branch returns above it — so claiming the voice for a dead MUTED
+    workspace would strand it there forever while live sessions wait. A muted
+    workspace has nothing voiceable whether it is live or dead: the sanction must
+    never make a dead stream more audible than the same stream would be alive."""
+    _liveness(monkeypatch, dead={"/dev/ttysW"})
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    sessions.register("ws", cwd="/x/web"); _ident(sessions, "ws", "/dev/ttysW")
+    sessions.register("L", cwd="/x/live"); _ident(sessions, "L", "/dev/ttysL")
+    sessions.set_foreground("ws")
+    sessions.set_speaker(None)
+    daemon._stream("ws").stopped = True                   # muted AND dead
+    daemon._enqueue("L", "prose", "l-item", False)
+    daemon.handle_message(_msg("set_rate", "ws", delta=50))
+    _drain(daemon, 4)
+    assert sessions.speaker() == "L"
+    assert any(s and "l-item" in s for s in speaker.spoken)
+
+
+# --- RR-2: one representative per remaining site family ---
+def test_verbosity_confirmation_on_a_dead_workspace_is_voiced(monkeypatch):
+    daemon, speaker, sessions = _dead_workspace(monkeypatch)
+    daemon.handle_message(_msg("cycle_verbosity", "ws"))
+    _drain(daemon, 3)
+    assert "Verbosity medium." in speaker.spoken
+
+
+def test_jump_waiting_empty_case_on_a_dead_workspace_is_voiced(monkeypatch):
+    daemon, speaker, sessions = _dead_workspace(monkeypatch)
+    daemon.handle_message(_msg("jump_waiting", "ws"))
+    _drain(daemon, 3)
+    assert "No session waiting." in speaker.spoken
+
+
+def test_repeat_last_on_a_dead_workspace_is_voiced(monkeypatch):
+    daemon, speaker, sessions = _dead_workspace(monkeypatch)
+    daemon._last_utterance = ("the last line.", None)
+    daemon.handle_message(_msg("repeat_last", "ws"))
+    _drain(daemon, 3)
+    assert "the last line." in speaker.spoken
+
+
+def test_skip_pile_empty_cue_on_a_dead_workspace_is_voiced(monkeypatch):
+    daemon, speaker, sessions = _dead_workspace(monkeypatch)
+    daemon.handle_message(_msg("skip_pile", "ws"))
+    _drain(daemon, 3)
+    assert "Nothing to skip." in speaker.spoken
+
+
+def test_jump_decision_miss_on_a_dead_workspace_is_voiced(monkeypatch):
+    daemon, speaker, sessions = _dead_workspace(monkeypatch)
+    daemon.handle_message(_msg("jump_decision", "ws"))
+    _drain(daemon, 3)
+    assert "No decision here." in speaker.spoken
+
+
+def test_chooser_preview_fallback_on_a_dead_workspace_is_voiced(monkeypatch):
+    """_deliver_preview's playable-workspace leg: the browse gesture needs a LIVE
+    candidate to open at all, but its preview still falls back to the (dead)
+    workspace stream when the voice is idle."""
+    _liveness(monkeypatch, dead={"/dev/ttysW"})
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    sessions.register("ws", cwd="/x/web"); _ident(sessions, "ws", "/dev/ttysW")
+    sessions.register("api", cwd="/x/api"); _ident(sessions, "api", "/dev/ttysA")
+    sessions.set_foreground("ws")
+    sessions.set_speaker(None)
+    daemon.handle_message(_msg("chooser_step", "ws", direction="next"))
+    _drain(daemon, 3)
+    assert "2, api." in speaker.spoken

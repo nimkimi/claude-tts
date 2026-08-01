@@ -72,6 +72,9 @@ def on_skip_pile(ctx, msg):
         if cue_target is None:
             host.cue("error")
             return None
+        # RR-2 (single-item grain): a dead workspace is adopted by nothing, so
+        # this answer was composed into silence. One cue, not the closed pile.
+        host._sanction_dead_read(cue_target, whole=False)
         # Nothing ahead of the frontier — do NOT nag "skipped 0" (B3 rejected).
         host._enqueue(cue_target, "prose", "Nothing to skip.", False,
                       mute_exempt=True, pause_exempt=True, at_front=True)
@@ -102,6 +105,7 @@ def on_skip_pile(ctx, msg):
     # also keeps it — keep-going adopts a playable workspace cue immediately (see
     # on_where_am_i's idle branch, control.py).
     cue_dest = spk if (spk is not None and spk != target) else target
+    host._sanction_dead_read(cue_dest, whole=False)      # RR-2: same seam, same grain
     host._enqueue(cue_dest, "prose", "Skipping {0} {1} {2}.".format(count, noun, where), False,
                   mute_exempt=True, pause_exempt=True, at_front=True)
     return None
@@ -198,6 +202,11 @@ def on_jump_decision(ctx, msg):
     has_queued = st_t is not None and st_t.queue.has_decision()
     if not has_queued:
         tgt = sessions.speaker() or target
+        # RR-2 (single-item grain): the miss answers — the re-spoken prompt and
+        # "No decision here." — fall back to a workspace that can be dead, where
+        # nothing would ever adopt them. Fork-2 still holds: the stream is only
+        # made audible for this one cue, never drained or otherwise touched.
+        ctx.host._sanction_dead_read(tgt, whole=False)
         if pending is not None:
             # Answerable-but-already-narrated (inside the ~120s window):
             # re-speak the STORED prompt; the queue holds nothing to drain to.
@@ -275,6 +284,11 @@ def on_repeat_last(ctx, msg):
             host.cue("error")
             return None
         tgt = ws
+    # RR-2 (single-item grain), covering both answers below: a dead tgt is
+    # adopted by nothing, so the repeat — and "Nothing to repeat." — were
+    # composed into silence. ⌃⌘R asks for ONE utterance; the interrupted item
+    # re-queued behind it stays behind the §4d rule, unread.
+    host._sanction_dead_read(tgt, whole=False)
     last = host._last_utterance
     if last is None:
         # Spoken cue, not an error tone — an empty repeat is not a mis-press.

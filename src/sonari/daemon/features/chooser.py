@@ -172,6 +172,11 @@ def _deliver_preview(host, st):
             host.cue("error")   # nowhere voiceable; browse stays open
             return
         tgt = ws
+    # RR-2 (single-item grain): browsing is one of the few gestures that still
+    # works with every terminal but one gone, and its preview falls back to the
+    # workspace — which can be the dead one, adopted by nothing. Each step
+    # re-sanctions for its own preview; the grain keeps the dead pile out of it.
+    host._sanction_dead_read(tgt, whole=False)
     host._enqueue(tgt, "prose", _preview_text(host, st), False,
                   mute_exempt=True, pause_exempt=True, at_front=True)
     st.preview_id = host._next_id          # the id _enqueue just allocated

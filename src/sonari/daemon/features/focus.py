@@ -90,6 +90,10 @@ def on_jump_waiting(ctx, msg):
         tgt = ctx.host.sessions.speaker() or ws
         if tgt is not None:
             text = "No session waiting." + _empty_case_tail(ctx, ws)
+            # RR-2: that fallback can resolve to a DEAD workspace, which post-T9
+            # nothing adopts — the answer, tail and all, was composed into
+            # silence. Single-item grain: this cue, not the closed pile behind it.
+            ctx.host._sanction_dead_read(tgt, whole=False)
             ctx.host._enqueue(tgt, "prose", text, False,
                               mute_exempt=True, pause_exempt=True, at_front=True)
         else:

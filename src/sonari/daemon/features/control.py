@@ -170,6 +170,27 @@ def _also_clause(host, exclude=()):
     return out + pending_tail
 
 
+def _readback(host, text, **kw):
+    """Voice a settings confirmation on the WORKSPACE — W11: the terminal you're
+    at hears its own confirmation, not the session you may not be listening to.
+
+    One helper for all three readbacks (rate delta, set-verbosity, cycle-
+    verbosity), which had three copies of this shape: this file's own drift is
+    exactly the disease D3 is about. RR-2 seam — post-T9 keep-going refuses a
+    dead stream, so with the voice idle these were composed into a stream nothing
+    would ever adopt. The SINGLE-ITEM sanction claims the idle voice for exactly
+    this cue; at_front so the delivered item is the answer rather than whatever
+    the closed session's pile starts with (these are back-appends, unlike the
+    barge-in-class cues elsewhere). Live workspaces keep today's path
+    byte-for-byte — the sanction returns False and at_front stays off.
+    """
+    ws = host.sessions.workspace()
+    if ws is None:
+        return
+    host._enqueue(ws, "prose", text, False,
+                  at_front=host._sanction_dead_read(ws, whole=False), **kw)
+
+
 def _clamp_int(raw, lo, hi):
     """Return int(raw) clamped to [lo, hi], or None if raw is not a valid int."""
     try:
@@ -211,11 +232,7 @@ def on_set_rate(ctx, msg):
     ctx.host.speaker.set_rate(rate)
     save_config(ctx.host.config)
     if is_delta:
-        # W11: the terminal you're at hears its own confirmation ("Rate 250."
-        # used to land on foreground() — a session you may not be hearing).
-        ws = ctx.host.sessions.workspace()
-        if ws is not None:
-            ctx.host._enqueue(ws, "prose", "Rate {0}.".format(rate), False)
+        _readback(ctx.host, "Rate {0}.".format(rate))
     return None
 
 
@@ -238,16 +255,13 @@ def on_set_verbosity(ctx, msg):
     ctx.host.config["verbosity"] = v
     save_config(ctx.host.config)
     # W3: confirm on the LIVE path (the built confirmation was stranded on the
-    # dead CYCLE_VERBOSITY handler, 0 senders). Targets workspace() (W11's
-    # collapsed pointer — the terminal you're at hears its own confirmation);
-    # mute_exempt+pause_exempt so a settings readback can never be silently
-    # swallowed while the voice is held — "Verbosity quiet." IS the last thing
-    # you hear (direct _enqueue cues bypass the on_prose quiet gate).
-    # Idempotent by design: setting the same value re-confirms (readback).
-    ws = ctx.host.sessions.workspace()
-    if ws is not None:
-        ctx.host._enqueue(ws, "prose", "Verbosity {0}.".format(v), False,
-                          mute_exempt=True, pause_exempt=True)
+    # dead CYCLE_VERBOSITY handler, 0 senders). mute_exempt+pause_exempt so a
+    # settings readback can never be silently swallowed while the voice is held
+    # — "Verbosity quiet." IS the last thing you hear (direct _enqueue cues
+    # bypass the on_prose quiet gate). Idempotent by design: setting the same
+    # value re-confirms (readback).
+    _readback(ctx.host, "Verbosity {0}.".format(v),
+              mute_exempt=True, pause_exempt=True)
     return None
 
 
@@ -274,13 +288,10 @@ def on_cycle_verbosity(ctx, msg):
     ctx.host.config["verbosity"] = nxt
     save_config(ctx.host.config)
     # Aligned with the live SET_VERBOSITY confirmation (on_set_verbosity, W3):
-    # targets workspace() (W11's collapsed pointer — the terminal you're at
-    # hears its own confirmation), mute_exempt+pause_exempt so the readback
-    # can never be silently swallowed while the voice is held.
-    ws = ctx.host.sessions.workspace()
-    if ws is not None:
-        ctx.host._enqueue(ws, "prose", "Verbosity {0}.".format(nxt), False,
-                          mute_exempt=True, pause_exempt=True)
+    # mute_exempt+pause_exempt so the readback can never be silently swallowed
+    # while the voice is held.
+    _readback(ctx.host, "Verbosity {0}.".format(nxt),
+              mute_exempt=True, pause_exempt=True)
     return None
 
 
