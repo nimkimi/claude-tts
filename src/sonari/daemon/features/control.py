@@ -27,6 +27,12 @@ _STALE_AFTER_S = 900.0
 _COUNT_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
                 6: "six", 7: "seven", 8: "eight", 9: "nine"}
 
+# D3 §4a/§5 slots 1-2: the marker clause a non-live session's Also-map entry
+# leads with. One word per tier, fleet-wide vocabulary. PROVISIONAL
+# (ear-batch-3) — the owner's ear may flip mark->hide, so the marks stay
+# trivially removable: delete this map, its lookup, and the pending tail.
+_LIVENESS_MARKS = {"pending": ", pending", "dead": ", closed"}
+
 
 def _has_decision(host, session):
     """The ⌃⌘D hit predicate verbatim (W4): a queued decision item OR a live
@@ -83,21 +89,39 @@ def _also_clause(host, exclude=()):
     always cuts on the most actionable prefix. Sessions with nothing to report
     collapse into a digit-free terminal 'Plus {word} quiet.'; when everything
     else is quiet the map is the positive 'All quiet.'; zero other sessions
-    keeps the trained absent landmark."""
+    keeps the trained absent landmark.
+
+    D3 §4a — the map is the fleet's truth-teller, so it consults liveness() per
+    session and MARKS the two non-live tiers rather than hiding or mis-narrating
+    them (the old `is_provisional` exclusion made a restored pile invisible and
+    let a dead-tty session speak exactly like a live one). A pending or dead
+    session WITH content clauses is named as usual, its entry leading with the
+    tier's marker clause ('1 repo, pending, 2 unheard.'). A clause-less pending
+    session is never named — naming a phantom you cannot act on is noise — and
+    collapses into its own terminal 'Two pending.' after the quiet tail. A
+    clause-less dead session is dropped entirely: nothing to act on, nothing to
+    recover."""
     sessions = host.sessions
-    ids = sorted((s for s in sessions.session_ids()
-                  if s not in exclude and not sessions.is_provisional(s)),
+    ids = sorted((s for s in sessions.session_ids() if s not in exclude),
                  key=lambda s: sessions.number(s) or 0)
     decisions, piles, muted_only = [], [], []
     quiet = 0
+    pending_quiet = 0
     for s in ids:
+        lv = sessions.liveness(s)
+        # PURE content clauses: the tier keys on these and the pointer clauses
+        # reuse them, so the marker is composed here, never in _entry_clauses.
         clauses = _entry_clauses(host, s)
         if not clauses:
-            quiet += 1
+            if lv == "pending":
+                pending_quiet += 1
+            elif lv == "live":
+                quiet += 1
             continue
-        entry = "{0} {1}{2}".format(sessions.number(s),
-                                    sessions.folder(s) or "another session",
-                                    clauses)
+        entry = "{0} {1}{2}{3}".format(sessions.number(s),
+                                       sessions.folder(s) or "another session",
+                                       _LIVENESS_MARKS.get(lv, ""),
+                                       clauses)
         if clauses.startswith(", decision"):
             decisions.append(entry)
         elif "waiting" in clauses or "unheard" in clauses:
@@ -105,15 +129,20 @@ def _also_clause(host, exclude=()):
         else:
             muted_only.append(entry)
     parts = decisions + piles + muted_only
+    # PROVISIONAL (ear-batch-3), D3 §5 slot 1: the clause-less pending count,
+    # a separate terminal sentence so it survives a barge-in cut of the map.
+    pending_tail = (" {0} pending.".format(
+        _COUNT_WORDS.get(pending_quiet, "many").capitalize())
+        if pending_quiet else "")
     if not parts:
-        return " All quiet." if quiet else ""
+        return (" All quiet." + pending_tail) if quiet else pending_tail
     out = " Also: {0}.".format(". ".join(parts))
     if quiet:
         # Digit-free ALWAYS: above the word map the count degrades to "many"
         # rather than reviving a spoken digit (the blur this grammar kills).
         # Precision is worthless up there — "many quiet" is the whole signal.
         out += " Plus {0} quiet.".format(_COUNT_WORDS.get(quiet, "many"))
-    return out
+    return out + pending_tail
 
 
 def _clamp_int(raw, lo, hi):

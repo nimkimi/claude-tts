@@ -11,6 +11,14 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "sonari"
 _RAW = re.compile(r"\b_provisional\b|\b_tty_evicted\b|\btty_alive\b")
 ALLOWED = {"sessions.py", "ttyutil.py"}
 
+# D3 §3 second half: is_provisional() is a SessionManager-internal reporter (and
+# a test/roster affordance), not a consumer predicate — a call site that asks
+# "is this session provisional?" is asking a liveness question with one of the
+# three states missing, which is exactly the drift that made where-am-I hide
+# restored piles and narrate dead ones. Consumers consult liveness()/is_live().
+_PROVISIONAL_CALL = re.compile(r"\bis_provisional\s*\(")
+PROVISIONAL_ALLOWED = {"sessions.py"}
+
 
 def _src_files():
     return sorted(SRC.rglob("*.py"))
@@ -24,6 +32,17 @@ def test_raw_liveness_signals_stay_private_to_sessions():
                 enumerate(path.read_text(encoding="utf-8").splitlines())
                 if _RAW.search(ln)]
         assert not hits, "{0} references a raw liveness signal: {1}".format(
+            path.name, hits[:3])
+
+
+def test_no_src_consumer_asks_is_provisional():
+    for path in _src_files():
+        if path.name in PROVISIONAL_ALLOWED:
+            continue
+        hits = [(i + 1, ln) for i, ln in
+                enumerate(path.read_text(encoding="utf-8").splitlines())
+                if _PROVISIONAL_CALL.search(ln)]
+        assert not hits, "{0} calls is_provisional instead of liveness(): {1}".format(
             path.name, hits[:3])
 
 

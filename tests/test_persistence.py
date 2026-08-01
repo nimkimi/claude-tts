@@ -154,7 +154,7 @@ def test_set_identity_clears_provisional_and_restores_liveness():
     assert sm.is_live("s1") is True                      # empty tty -> fail-OPEN again
 
 
-def test_provisional_session_absent_from_where_am_i_also_map():
+def test_provisional_session_named_pending_in_where_am_i_also_map():
     from sonari.sessions import Identity
     from sonari.daemon.features import control
     from tests.daemon_helpers import make_daemon
@@ -162,7 +162,9 @@ def test_provisional_session_absent_from_where_am_i_also_map():
     daemon.sessions.load_state({"s1": {"folder": "repo", "number": 1}})  # provisional
     daemon._stream("s1")                                  # create its stream (frontier None)
     daemon.history.record("s1", "prose", "unheard pile")  # non-empty clause otherwise
-    assert control._also_clause(daemon) == ""             # provisional -> excluded entirely
+    # D3 §4a supersedes SP6's silent quarantine: a restored session holding
+    # content is NAMED and MARKED, so a recovered pile is never invisible.
+    assert control._also_clause(daemon) == " Also: 1 repo, pending, 1 unheard."
     daemon.sessions.set_identity("s1", Identity())        # clears provisional
     out = control._also_clause(daemon)
     assert "repo" in out and "unheard" in out             # now visible, named + counted
@@ -425,10 +427,15 @@ def test_flush_persists_the_last_delta():
     assert data["history"]["s1"]["entries"][0]["text"] == "hello"
 
 
-def test_restore_pile_becomes_catchable_and_provisional_until_reidentified():
+def test_restore_pile_becomes_catchable_and_provisional_until_reidentified(monkeypatch):
+    from sonari import ttyutil
     from sonari.protocol import MsgType, PROTOCOL_VERSION
     from sonari.daemon.features import control
     from tests.daemon_helpers import make_daemon
+
+    # /dev/ttys404 is a node that does not exist — pinned here rather than left
+    # to the host filesystem so the dead-tty leg below is hermetic.
+    monkeypatch.setattr(ttyutil, "tty_alive", lambda tty: tty != "/dev/ttys404")
 
     # Source: session s1 with a 4-message pile; frontier dealt-with through msg 1,
     # so the catch-up tail is msg 2 + msg 3 (2 items), never the whole 4.
@@ -448,8 +455,9 @@ def test_restore_pile_becomes_catchable_and_provisional_until_reidentified():
     assert sessions.is_provisional("s1") is True
     assert sessions.identity("s1") is None                 # D2
 
-    # Provisional => invisible to the ⌃⌘W Also-map.
-    assert "repo" not in control._also_clause(dst)
+    # Provisional => NAMED and marked pending in the ⌃⌘W Also-map (D3 §4a):
+    # the restored pile is discoverable before the session ever comes back.
+    assert control._also_clause(dst) == " Also: 1 repo, pending, 2 unheard."
 
     # The session's next prompt: SET_FOREGROUND WITH a tty (the provisional-clear
     # trigger) — sets the workspace pointer AND re-captures identity.
@@ -458,6 +466,11 @@ def test_restore_pile_becomes_catchable_and_provisional_until_reidentified():
                             "session": "s1", "cwd": "/x/repo", "tty": "/dev/ttys404"})
     assert sessions.is_provisional("s1") is False
     assert sessions.workspace() == "s1"
+
+    # Quarantine lifted, but the tty it captured is a node that never existed:
+    # the map re-tiers it from pending to closed (D3 §4a), still named because
+    # it still holds content.
+    assert control._also_clause(dst) == " Also: 1 repo, closed, 2 unheard."
 
     # Catch-up reads the FRONTIER'd tail (2 items), not the whole restored pile.
     with dst._state.transaction():
