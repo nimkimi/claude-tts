@@ -162,6 +162,7 @@ class SessionManager:
         self._sessions.pop(session, None)
         self._identities.pop(session, None)
         self._tty_evicted.discard(session)
+        self._provisional.discard(session)
         self._numbers.pop(session, None)
         if session in self._mru:
             self._mru.remove(session)
@@ -240,23 +241,32 @@ class SessionManager:
     def identity(self, session: str) -> "Identity | None":
         return self._identities.get(session)
 
-    def is_live(self, session: str) -> bool:
-        """True if *session*'s terminal is still open (its captured tty device node
-        exists). A provisional (SP6-restored, not-yet-reconfirmed) session fails
-        CLOSED (§4.4). Otherwise fail-open: an unknown identity or empty tty -> live
-        (never hide a live session). Pure read over _identities; writes nothing."""
+    def liveness(self, session: str) -> str:
+        """The ONE composition of the three liveness signals (D3 spec §2):
+        'live' | 'pending' | 'dead'. Precedence: pending (SP6-restored, not yet
+        reconfirmed this lifetime) -> evicted (positive tty-steal evidence) ->
+        dead-tty (captured node no longer exists) -> live. Fail-open on an
+        unknown identity / empty tty is UNCHANGED throughout — never hide a
+        live session. Pure read over _identities; writes nothing."""
         if session in self._provisional:
-            # SP6 (§4.4): fail-CLOSED while provisional — narrowly here, so a
-            # terminal that closed during downtime is never a ghost the chooser or
-            # ⌃⌘W could raise. The fail-OPEN below (normally-registered, no
-            # identity yet) is unchanged.
-            return False
+            return "pending"
         if session in self._tty_evicted:
             # Positive steal evidence beats fail-open: its recorded terminal is
             # someone else's now, and it has not re-asserted one of its own.
-            return False
+            return "dead"
         ident = self._identities.get(session)
-        return ttyutil.tty_alive(ident.tty if ident is not None else "")
+        tty = ident.tty if ident is not None else ""
+        if tty and not ttyutil.tty_alive(tty):
+            return "dead"
+        return "live"
+
+    def is_live(self, session: str) -> bool:
+        """True iff *session*'s liveness() is 'live'. Delegates to liveness() —
+        the one composition (D3 spec §2) — so pending (SP6-restored,
+        not-yet-reconfirmed) fails CLOSED and a tty-evicted or dead-tty session
+        fails CLOSED, while an unknown identity / empty tty stays fail-OPEN
+        (never hide a live session)."""
+        return self.liveness(session) == "live"
 
     def focus(self, session: str, cwd=None) -> None:
         """Explicitly move the voice to *session* (the jump-to-waiting hotkey):
