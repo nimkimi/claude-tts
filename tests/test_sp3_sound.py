@@ -33,8 +33,8 @@ def test_muted_ex_speaker_dings_under_hold():
     assert speaker.earcons == ["turn_done"]                     # R7:192-193 muted piles + dings
 
 
-# --- the flush side-effect at turn_done is UNCONDITIONAL (survives suppression) ---
-def test_turn_done_flush_survives_earcon_suppression():
+# --- the flush side-effect at turn_done is UNCONDITIONAL ---
+def test_turn_done_flush_is_unconditional():
     daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
     config["minqueue"] = 5
     daemon.handle_message(_msg(MsgType.PROSE, "fg", delta="Only one. ", index=0, final=True))

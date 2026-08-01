@@ -33,11 +33,10 @@ def test_voice_busy_predicate_parity_when_aligned():
     assert daemon._voice_busy_elsewhere("A") is False  # A is the speaker -> not "elsewhere"
 
 
-# --- CHANGE 4 / F5: the ding gate suppresses for the SPEAKER, not foreground ---
+# --- turn boundary under divergence: ONE sound regardless of who finished ---
 def test_ding_gate_uses_speaker_not_foreground():
-    # SP3: the "landed" ding is turn_done at completion, suppressed for the flowing
-    # SPEAKER (not the foreground). Under divergence (speaker=B, workspace=A) B's
-    # turn_done is suppressed; the non-speaker A's dings.
+    # turn_done dings at EVERY boundary (ear-batch-2 slot 4); under divergence
+    # (speaker=B, workspace=A) both B's and A's boundaries sound the same.
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     sessions.register("B", cwd="/x/B")
     sessions.set_speaker("B")                            # voice=B, workspace=A
