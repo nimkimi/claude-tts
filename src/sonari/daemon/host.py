@@ -51,6 +51,40 @@ def _stream_quiescent(st) -> bool:
                           and not st.assembler.has_pending())
 
 
+def _release_dead_speaker(host, fg, st) -> bool:
+    """Drop the voice when it is holding a DEAD speaker unsanctioned. True if released.
+
+    D3 §4d ("a dead session's backlog is never auto-voiced") was enforced only at
+    SELECTION: once _select_keep_going adopted a session, the pop branch drained
+    its queue with no liveness re-check, so a terminal closing MID-READ was read
+    to the end of its pile — up to the full backlog_cap. Runs at the pop boundary,
+    inside the speak-loop lock, before the pop it guards.
+
+    RELEASE, not skip. Skipping the pop leaves the dead stream non-empty, so
+    _stream_quiescent stays False, so the keep-going gate below never opens and
+    the voice wedges on a dead session forever while live ones wait (measured).
+    Handing the voice back — set_speaker(None), queue untouched — lets this same
+    turn bootstrap from None onto a live session, and the dead pile stays
+    discoverable via where-am-I (§4a) and readable via catch-up (§4f). This is
+    the release chooser.py:214 already performs for commit-onto-muted, not a new
+    idiom.
+
+    The one exception is a stream a deliberate press re-opened
+    (_sanction_dead_read): that read is the act §4d's automatic rule exists to
+    make room for, so it is never cut off mid-pile. The mark is one-shot — it
+    expires here when its stream runs dry or when the voice has left it by any
+    path (a commit, a jump, SESSION_END's unregister), so it can never become a
+    standing licence to auto-voice that session.
+    """
+    sanctioned = host._deliberate_dead_read
+    if sanctioned is not None and (sanctioned != fg or _stream_quiescent(st)):
+        host._deliberate_dead_read = sanctioned = None
+    if fg is None or fg == sanctioned or host.sessions.liveness(fg) != "dead":
+        return False
+    host.sessions.set_speaker(None)
+    return True
+
+
 def _select_keep_going(streams, sessions) -> "str | None":
     """The longest-waiting eligible background session, or None. Eligible = a
     registered session other than the current speaker whose stream exists, is not
@@ -925,6 +959,12 @@ class SpeechDaemon:
         with self._lock:
             fg = self.sessions.speaker()
             st = self._state._streams.get(fg)
+            if _release_dead_speaker(self, fg, st):
+                # The voice was on a dead session with no deliberate press behind
+                # it. Fall through with no speaker, so the keep-going branch below
+                # bootstraps from None onto a live session in THIS turn — the dead
+                # stream is left exactly as it was.
+                fg, st = None, None
             item = st.queue.pop_next() if st is not None else None
             if item is None and _stream_quiescent(st) and self._state._voice_state == "flowing":
                 # KEEP-GOING (M1): the speaker is at its live edge and fully idle.

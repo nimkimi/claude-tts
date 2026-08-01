@@ -107,3 +107,87 @@ def test_catchup_on_a_dead_workspace_with_idle_voice_is_voiced(monkeypatch):
     # summarizer=None -> straight to the digest floor; the RENDER must be voiced
     # too, not just the ack (it lands on the same stream one tick later).
     assert any(s and s.startswith("Summary unavailable.") for s in speaker.spoken)
+
+
+# --- the third deliberate site, forced out by rule 3 (see the module docstring) ---
+def test_whereami_on_a_dead_speaker_is_voiced(monkeypatch):
+    """The readout about a dead VOICE session lands in that session's own stream,
+    so rule 3 would hand the voice back and strand it — WB-C1's silence one
+    branch over. ⌃⌘W is exactly when the user is asking about a fleet in this
+    state, so the press sanctions the read; "playing, closed" is the answer.
+    Task 5's pointer-mark tests pin the string; this pins that it is HEARD."""
+    _liveness(monkeypatch, dead={"/dev/ttysA"})
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    sessions.register("api", cwd="/x/api")
+    sessions.set_foreground("api")
+    sessions.set_speaker("api")
+    _ident(sessions, "api", "/dev/ttysA")
+    daemon.handle_message(_msg("where_am_i", "api"))
+    _drain(daemon, 3)
+    assert "Voice and keyboard: api 1, playing, closed." in speaker.spoken
+
+
+def _dying_fleet(monkeypatch):
+    """A live session auto-adopted by keep-going, mid-drain, with a live third
+    session holding its own backlog — the shape R-1 measured. Returns the set the
+    test mutates to close B's terminal between two turns."""
+    dead = set()
+    _liveness(monkeypatch, dead)
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    sessions.register("B", cwd="/x/B"); _ident(sessions, "B", "/dev/ttysB")
+    sessions.register("C", cwd="/x/C"); _ident(sessions, "C", "/dev/ttysC")
+    for i in range(5):
+        daemon._enqueue("B", "prose", "b-item-{0}".format(i), False)
+    daemon._enqueue("C", "prose", "c-item", False)      # younger -> B is adopted first
+    daemon._speak_loop_once()                            # A idle -> adopt B, speak b-item-0
+    assert sessions.speaker() == "B"
+    assert any(s and "b-item-0" in s for s in speaker.spoken)
+    dead.add("/dev/ttysB")                               # the terminal closes MID-READ
+    return daemon, speaker, sessions
+
+
+# --- R-1 (probe H): §4d was selection-time only; a mid-drain death kept reading ---
+def test_speaker_dying_mid_drain_is_silenced_and_its_queue_preserved(monkeypatch):
+    """Spec §4d promises "a dead session's backlog is never auto-voiced", but the
+    guard only ran at SELECTION: once adopted, the pop branch drained the whole
+    pile with no liveness re-check — up to the full backlog_cap of 200 items read
+    into an empty room. "I closed the terminal while it was still reading to me"
+    is the likelier shape than "it was already closed"."""
+    daemon, speaker, sessions = _dying_fleet(monkeypatch)
+    _drain(daemon, 6)
+    for i in range(1, 5):
+        assert not any(s and "b-item-{0}".format(i) in s for s in speaker.spoken)
+    # The pile is KEPT, not dropped: it stays discoverable via where-am-I (§4a)
+    # and readable via catch-up (§4f) — the release silences, it never destroys.
+    assert len(daemon._stream("B").queue) == 4
+    assert sessions.speaker() == "C"                     # the live fleet keeps flowing
+    assert any(s and "c-item" in s for s in speaker.spoken)
+
+
+# --- R-1 (probe G): the naive "skip the pop" fix WEDGES the voice; release doesn't ---
+def test_release_never_wedges_the_voice_on_a_dead_speaker(monkeypatch):
+    """Skipping the pop leaves the dead stream non-empty, so _stream_quiescent stays
+    False, so the keep-going gate never opens and the voice is stuck on a dead
+    session forever while a live one waits. The voice must leave within one turn."""
+    daemon, speaker, sessions = _dying_fleet(monkeypatch)
+    daemon._speak_loop_once()                            # exactly ONE turn
+    assert sessions.speaker() != "B"
+    assert not any(s and "b-item-1" in s for s in speaker.spoken)
+
+
+# --- composition: sanction beats release while it holds, and only while it holds ---
+def test_sanctioned_read_survives_until_its_stream_empties_then_releases(monkeypatch):
+    """The two halves meet here. A sanctioned dead read must NOT be cut off
+    mid-way by rule 3 (it is the deliberate act rule 3 exists to protect), and
+    the sanction must not outlive it — one press re-opens one stream once."""
+    daemon, speaker, sessions = _dead_workspace(monkeypatch)
+    daemon._enqueue("ws", "prose", "backlog one", False)
+    daemon._enqueue("ws", "prose", "backlog two", False)
+    daemon.handle_message(_msg("where_am_i", "ws"))
+    assert sessions.speaker() == "ws"                    # the press took the idle voice
+    for _ in range(3):                                   # backlog one, backlog two, readout
+        daemon._speak_loop_once()
+        assert sessions.speaker() == "ws", "a sanctioned read was cut off mid-pile"
+    daemon._speak_loop_once()                            # the tick after it runs dry
+    assert sessions.speaker() is None
+    assert daemon._deliberate_dead_read is None          # one-shot: never a standing licence

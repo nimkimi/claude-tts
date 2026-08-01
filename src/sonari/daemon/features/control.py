@@ -425,6 +425,12 @@ def on_where_am_i(ctx, msg):
                       prelude=cur.prelude)
     host._enqueue(fg, "prose", text, False,
                   mute_exempt=True, pause_exempt=True, at_front=True)
+    # Same deliberate-press rule as the idle branch above, for the case where the
+    # VOICE session is the dead one: this readout (and the item barge-in just
+    # re-queued) live in its stream, which the speak loop would otherwise hand
+    # back rather than drain (§4d). ⌃⌘W is exactly when the user is asking about
+    # a fleet in this state — answering "playing, closed" out loud is the point.
+    host._sanction_dead_read(fg)
     return None
 
 
