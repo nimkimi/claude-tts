@@ -16,6 +16,7 @@ import time
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
 from sonari.daemon.features import teaching
+from sonari.daemon.features.control import CLOSED_WORD
 
 # Injectable clock: tests monkeypatch chooser._now to drive the stale window.
 _now = time.monotonic
@@ -186,7 +187,8 @@ def _commit(host, st, target):
         return
     sessions = host.sessions
     if target not in sessions.session_ids() or not sessions.is_live(target):
-        host.cue("error")   # audible failed landing (eyes-free), never silent
+        dest = sessions.speaker() or sessions.workspace()
+        host.cue("error", word=CLOSED_WORD, session=dest)   # audible failed landing (eyes-free) + D7a word, never silent
         _restore_and_clear(host)       # resume the captured item, move nothing
         return None
     _remove_preview(host, st)
@@ -253,7 +255,8 @@ def on_chooser_digit(ctx, msg):
         digit = None
     target = host.sessions.session_for_number(digit) if digit is not None else None
     if target is None or not host.sessions.is_live(target):
-        host.cue("error")       # unknown/dead number: browse stays open (§3)
+        dest = host.sessions.speaker() or host.sessions.workspace()
+        host.cue("error", word=CLOSED_WORD, session=dest)  # unknown/dead number: browse stays open (§3) + D7a word
         return None
     _commit(host, st, target)
     return None

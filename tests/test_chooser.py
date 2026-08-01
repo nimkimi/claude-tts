@@ -275,6 +275,25 @@ def test_commit_onto_dead_tty_mid_browse_errors_and_does_not_reregister(monkeypa
     assert head.text == "mid sentence two"         # captured item resumed (re-enqueued)
 
 
+def test_commit_onto_dead_tty_speaks_the_closed_word(monkeypatch):
+    # D7a word channel (spec §4b/§5 slot 3): the mid-browse-death error tone
+    # gains its paired word, routed to speaker-or-workspace (never the dead
+    # target's own stream).
+    dead = set()
+    _liveness(monkeypatch, dead=dead)
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    _ident(sessions, "A", "/dev/ttysA")
+    sessions.register("B", cwd="/x/bravo"); _ident(sessions, "B", "/dev/ttysB")
+    daemon._current_item = SpeechItem(id=913, session="A", kind="prose",
+                                      text="mid sentence three", is_decision=False)
+    _step(daemon)                                  # A(0) -> B(1): live at open, captures + cuts
+    dead.add("/dev/ttysB")                          # B's terminal dies mid-browse (crash, not SESSION_END)
+    daemon.handle_message(_msg(MsgType.CHOOSER_COMMIT, ""))
+    assert speaker.earcons == ["error"]
+    texts = [it.text for it in daemon._stream("A").queue._items]
+    assert "That session closed." in texts          # word lands in speaker()-or-workspace() stream
+
+
 def test_preview_no_none_for_candidate_that_died_mid_browse():
     # MINOR A: sessions.number() returns None post-unregister, so the naive
     # "{0}, {1}".format(number, folder) speaks the literal word "None". Once a
@@ -394,6 +413,20 @@ def test_digit_to_dead_session_errors(monkeypatch):
     daemon.handle_message(_msg(MsgType.CHOOSER_DIGIT, "", digit=2))
     assert speaker.earcons[-1] == "error"          # W1 also guards the teleport
     assert sessions.foreground() == "A"
+
+
+def test_digit_to_dead_session_speaks_the_closed_word(monkeypatch):
+    # D7a word channel (spec §4b/§5 slot 3): same word as the commit path
+    # (identity across both death shapes/sites is the point).
+    _liveness(monkeypatch, dead={"/dev/ttysB"})
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    _ident(sessions, "A", "/dev/ttysA")
+    sessions.register("B", cwd="/x/B"); _ident(sessions, "B", "/dev/ttysB")
+    _step(daemon)
+    daemon.handle_message(_msg(MsgType.CHOOSER_DIGIT, "", digit=2))
+    assert speaker.earcons[-1] == "error"
+    texts = [it.text for it in daemon._stream("A").queue._items]
+    assert "That session closed." in texts          # word lands in speaker()-or-workspace() stream
 
 
 def test_digit_of_current_session_is_the_noop_landing():

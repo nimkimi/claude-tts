@@ -27,6 +27,12 @@ _STALE_AFTER_S = 900.0
 _COUNT_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
                 6: "six", 7: "seven", 8: "eight", 9: "nine"}
 
+# PROVISIONAL (ear-batch-3): spec D3 §5 slot 3 — ONE word, four sites
+# (chooser commit/digit, jump commit, jump-decision crossed) + the
+# catch-up ack marker. Rides the existing `error` tone via the D7a
+# word channel.
+CLOSED_WORD = "That session closed."
+
 # D3 §4a/§5 slots 1-2: the marker clause a non-live session's Also-map entry
 # leads with. One word per tier, fleet-wide vocabulary. PROVISIONAL
 # (ear-batch-3) — the owner's ear may flip mark->hide, so the marks stay
