@@ -81,6 +81,16 @@ def _release_dead_speaker(host, fg, st) -> bool:
     its whole delivery, so the mark is cleared on the way through and the next
     boundary releases. Without that, answering "Rate 250." would drag the closed
     session's backlog along behind it.
+
+    M-D note: the `len(st.queue) > 0` guard on that spend is unpinned by
+    mutation — fix-wave D's delta re-review found its guarded state (single
+    mark on the speaker, empty queue, non-empty prose buffer) unreachable
+    through every shipped single-item site, since each one enqueues its
+    answer into the sanctioned stream inside the same dispatch transaction
+    that sets the mark, and FLUSH (the only queue-emptier) clears the prose
+    buffer too. Defensive dead code in practice, kept for the day a future
+    single-item site buffers prose before enqueueing; note-grade, not a
+    blocker, no pin.
     """
     sanctioned = host._deliberate_dead_read
     if sanctioned is not None and (sanctioned != fg or _stream_quiescent(st)):
@@ -377,9 +387,15 @@ class SpeechDaemon:
         - False — a confirmation or fallback that merely LANDED there because its
           destination falls back to workspace(): the settings readbacks, the
           jump-waiting empty case, repeat/skip/jump-decision fallbacks, the
-          chooser preview (RR-2). Exactly the front item is delivered, then the
-          mark is spent (_release_dead_speaker). A rate nudge is not a request to
-          be read a closed session's pile.
+          chooser preview (RR-2), the answer-permission approve/deny confirm
+          (decisions.py, RR-3 — fix-wave E), and ⌃⌘S-start's "Resumed." on a
+          dead MUTED workspace (playback.py, RR-4 — fix-wave E, re-adjudicated
+          from a false "pre-existing" label to the A-release regression it
+          measurably was: the start branch TAKES the voice itself, so R-1's
+          release strands it same as any other dead fg). Exactly the front
+          item is delivered, then the mark is spent (_release_dead_speaker). A
+          rate nudge is not a request to be read a closed session's pile, and
+          neither is un-muting one.
 
         Re-sanctioning the SAME stream keeps the wider grain: a readback arriving
         mid-⌃⌘W must not truncate the whole read already running.

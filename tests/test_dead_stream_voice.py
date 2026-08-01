@@ -1,4 +1,4 @@
-"""D3 fix-waves A and D: who may voice a DEAD session's stream, and how much.
+"""D3 fix-waves A, D, and E: who may voice a DEAD session's stream, and how much.
 
 §4d keeps the voice off a dead session's backlog AUTOMATICALLY — keep-going
 never adopts one. Three rules compose that, and the whole-branch review plus
@@ -28,8 +28,15 @@ are different questions (fix-wave D):
 - ONE front item when the press merely LANDED an answer there because its
   destination falls back to workspace(): the settings readbacks, jump-waiting's
   empty case, the repeat/skip/jump-decision fallbacks, the chooser preview
-  (RR-2). A rate nudge is not a request to be read a closed session's pile.
+  (RR-2), the answer-permission approve/deny confirm, and ⌃⌘S-start's
+  "Resumed." on a dead MUTED workspace (RR-3/RR-4, fix-wave E — nine wired
+  single-item call sites now; three siblings — learn mode, query actions,
+  re-read options — still match the rule and stay deliberately unwired). A
+  rate nudge is not a request to be read a closed session's pile, and neither
+  is un-muting one.
 """
+import threading
+
 from sonari import ttyutil
 from sonari.protocol import PROTOCOL_VERSION
 from sonari.sessions import Identity
@@ -365,3 +372,56 @@ def test_chooser_preview_fallback_on_a_dead_workspace_is_voiced(monkeypatch):
     daemon.handle_message(_msg("chooser_step", "ws", direction="next"))
     _drain(daemon, 3)
     assert "2, api." in speaker.spoken
+
+
+# --- RR-3 (fix-wave E): the eighth single-item site, unnamed anywhere in D's own sweep ---
+def test_answer_permission_confirmation_on_a_dead_workspace_is_voiced_without_its_backlog(monkeypatch):
+    """approve/deny targets workspace() unconditionally (W6/D7a), with no liveness
+    consult on the path — an eyes-free approval on the dead conjunction landed
+    (behavior set, event fired) but its confirm stranded: an eyes-free approval
+    answered by nothing is WB-C1's own argument for wiring ⌃⌘O, one step
+    earlier in the same flow. Same grain as the settings readbacks: at_front is
+    already unconditional here (a barge-in cue), so the sanction call only
+    needs to arm the mark — confirm heard, backlog kept unread."""
+    daemon, speaker, sessions = _dead_workspace(monkeypatch)
+    daemon._enqueue("ws", "prose", "backlog one", False)
+    daemon._enqueue("ws", "prose", "backlog two", False)
+    daemon._pending_decisions["ws"] = {"event": threading.Event(), "behavior": None}
+    daemon.handle_message(_msg("answer_permission", "ws", behavior="allow"))
+    _drain(daemon, 6)
+    assert "Approved." in speaker.spoken
+    assert not any(s and "backlog" in s for s in speaker.spoken)
+    assert len(daemon._stream("ws").queue) == 2           # kept, never destroyed
+    assert sessions.speaker() is None                     # released at the next boundary
+    assert daemon._deliberate_dead_read is None           # spent by its one item
+
+
+# --- RR-4 (fix-wave E, re-adjudicated): ⌃⌘S-start on a dead MUTED workspace ---
+def test_stop_session_resume_on_a_dead_muted_workspace_is_voiced_single_item(monkeypatch):
+    """⌃⌘S-start is a fix-wave-A RELEASE regression, not pre-existing (the
+    re-review measured it byte-identical to base pre-release): the start branch
+    TAKES the voice itself (sessions.set_speaker(fg)), so R-1's release now
+    strands "Resumed." the instant it lands on a dead stream. Single-item, not
+    the whole-stream restore-base the controller rejected — proven by seeding a
+    second item AFTER the press (content arriving right after the un-mute, the
+    same outlived-tty shape RR-3/RR-4 both need): a whole mark would keep
+    draining ws and never reach L; the single-item mark releases after
+    "Resumed." alone, so it goes unheard, kept, and the voice moves on."""
+    _liveness(monkeypatch, dead={"/dev/ttysW"})
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    sessions.register("ws", cwd="/x/web"); _ident(sessions, "ws", "/dev/ttysW")
+    sessions.register("L", cwd="/x/live"); _ident(sessions, "L", "/dev/ttysL")
+    sessions.set_foreground("ws")
+    sessions.set_speaker(None)
+    daemon._stream("ws").stopped = True                   # muted AND dead
+    daemon._enqueue("ws", "prose", "pre-start pile", False)
+    daemon._enqueue("L", "prose", "l-item", False)
+    daemon.handle_message(_msg("stop_session", "ws"))
+    daemon._enqueue("ws", "prose", "fresh output after unmute", False)
+    _drain(daemon, 6)
+    assert "Resumed." in speaker.spoken
+    assert not any(s and "pre-start pile" in s for s in speaker.spoken)
+    assert not any(s and "fresh output" in s for s in speaker.spoken)
+    assert sessions.speaker() == "L"                      # released, not wedged
+    assert any(s and "l-item" in s for s in speaker.spoken)
+    assert daemon._deliberate_dead_read is None           # spent by its one item

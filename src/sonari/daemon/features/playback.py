@@ -148,6 +148,12 @@ def on_stop_session(ctx, msg):
         sessions.set_speaker(fg)
         ctx.host._drop_pending(st.queue.clear())
         st.prose_buffer = []
+        # RR-4 (fix-wave E, re-adjudicated): this branch TAKES the voice itself
+        # (set_speaker above), unlike the enqueue-only single-item sites — so on
+        # a DEAD fg, R-1's release now strands "Resumed." the instant it lands.
+        # Single-item, not the whole-stream restore-base the controller
+        # rejected: the resumed stream is un-muted, not a request to be read.
+        ctx.host._sanction_dead_read(fg, whole=False)
         ctx.host._enqueue(fg, "prose", "Resumed.", False, mute_exempt=True, at_front=True)
     else:
         # Stopping -> quiet-hold (SPEC §6). Cancel only if THIS session is in flight.

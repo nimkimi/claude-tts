@@ -233,6 +233,12 @@ def on_answer_permission(ctx, msg):
     # Owner ruling 3: the directional chirp is the confirm's PRELUDE — barge,
     # then chirp, then the word, strictly ordered as one unit (the barge already
     # cleared the channel, so binding costs no latency).
+    # RR-3 (fix-wave E): same seam as the settings readbacks — target falls
+    # back to workspace() unconditionally, so a dead workspace strands this
+    # confirm unless a deliberate press sanctions it. at_front below is
+    # already unconditional (barge-in), so the sanction call is only needed
+    # for its marking side effect; live destinations are untouched.
+    host._sanction_dead_read(target, whole=False)
     host._enqueue(target, "prose",
                   "Approved." if behavior == "allow" else "Denied.",
                   False, mute_exempt=True, pause_exempt=True, at_front=True,

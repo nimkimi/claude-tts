@@ -53,9 +53,14 @@ def test_rate_confirmation_lands_on_the_workspace(monkeypatch):
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     sessions.register("C", cwd="/x/C")
     _focus_on(sessions, "C", "/dev/ttysC")
+    daemon._enqueue("C", "prose", "already waiting.", False)
     daemon.handle_message(_msg("set_rate", "A", delta=25))
     assert any("Rate " in it.text for it in stream_queue(daemon, "C")._items)
     assert len(stream_queue(daemon, "A")._items) == 0
+    # M-E: a LIVE destination gets at_front=False — today's path, back-append
+    # behind whatever was already queued, never jumping the line.
+    items = [it.text for it in stream_queue(daemon, "C")._items]
+    assert items[0] == "already waiting."
 
 
 def test_degenerate_no_focus_case_is_byte_identical(monkeypatch):

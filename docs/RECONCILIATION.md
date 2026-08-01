@@ -64,23 +64,33 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
          its destination falls back to `workspace()`: the rate/verbosity
          readbacks (`control.py _readback`), jump-waiting's empty case
          (`focus.py`), the repeat/skip-pile/jump-decision fallbacks
-         (`playback.py`), and the chooser preview (`chooser.py
-         _deliver_preview`). A settings nudge must never read out a closed
-         session's pile. A single-item press also never claims the voice for
-         a STOPPED stream — the held branch returns above the pop boundary,
-         so the mark could not be spent and the voice would wedge there.
+         (`playback.py`), the chooser preview (`chooser.py
+         _deliver_preview`), the answer-permission approve/deny confirm
+         (`decisions.py on_answer_permission` — RR-3, fix-wave E), and
+         ⌃⌘S-start's "Resumed." on a dead MUTED workspace (`playback.py
+         on_stop_session` — RR-4, fix-wave E). A settings nudge must never
+         read out a closed session's pile, and neither must un-muting one. A
+         single-item press also never claims the voice for a STOPPED stream —
+         the held branch returns above the pop boundary, so the mark could
+         not be spent and the voice would wedge there.
        Pending sessions stay adoptable — post-R1 the only content a pending
        stream can hold is the daemon-authored restart line, whose delivery
        deliberately rides this exact path (`tests/test_restart_line.py` pins
        it). Idle-⌃⌘W, catch-up, nav and every single-item answer DEPEND on
        this adoption/sanction machinery: any campaign touching
        `_select_keep_going` must also sweep `_release_dead_speaker` and every
-       `_sanction_dead_read` call site above. HONEST LIMIT: four more
+       `_sanction_dead_read` call site above. HONEST LIMIT: three more
        deliberate presses in the same family are NOT wired and stay silent on
        a dead workspace — learn mode and the query-actions readout
-       (`teaching.py`), re-read options (`decisions.py`), and ⌃⌘S-start on a
-       dead MUTED workspace (`playback.py`). Measured, pre-existing, and left
-       for an owner-adjacent ruling rather than widened here.
+       (`teaching.py`), and re-read options (`decisions.py`). Measured,
+       pre-existing, and left for an owner-adjacent ruling rather than widened
+       here. (A fourth candidate, ⌃⌘S-start, was carried in this same list
+       through fix-wave D as "pre-existing" — fix-wave E's re-review measured
+       it byte-identical to the pre-release base, i.e. an R-1 release
+       regression, not pre-existing; it is wired above, not listed here.
+       Fix-wave E's re-review also found the answer-permission confirm, which
+       had appeared in NEITHER the wired nor the unwired list at any point —
+       it is wired above too.)
      - **prose gating** (`prose.py`) — no gate in the handler. R1 clears the
        pending tier at the dispatch chokepoint, so `on_prose` never buffers
        into a quarantined stream. A dead session's prose still buffers, by
