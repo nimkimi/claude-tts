@@ -180,7 +180,7 @@ def _commit(host, st, target):
     workspace pinned to a closed terminal). Both death shapes are checked:
     SESSION_END unregisters (out of session_ids(), but is_live() fail-opens on
     the now-missing identity); a dead tty stays registered (is_live() catches
-    it via ttyutil.tty_alive) — neither check alone covers both."""
+    it via the captured-tty check) — neither check alone covers both."""
     if target == st.origin:
         _restore_and_clear(host)
         return
