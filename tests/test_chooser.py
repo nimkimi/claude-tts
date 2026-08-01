@@ -444,6 +444,26 @@ def test_digit_to_dead_session_speaks_the_closed_word(monkeypatch):
     assert "That session closed." in texts          # word lands in speaker()-or-workspace() stream
 
 
+def test_digit_onto_session_end_mid_browse_speaks_the_closed_word():
+    # Fix-round follow-up (independent review): unregister frees the digit's
+    # number, so a fresh session_for_number() lookup at press time can no
+    # longer distinguish "genuinely out-of-range" from "this exact session
+    # just closed" -- the same digit press that closed test_unknown_digit_...
+    # for the typo shape must still speak the word for the SESSION_END shape
+    # (mirrors _commit's OPEN-time-snapshot approach, spec §4b: both death
+    # shapes speak the same word on the digit path too).
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.register("A", cwd="/x/alpha")
+    sessions.register("B", cwd="/x/bravo")
+    _step(daemon)                                   # A(0) -> B(1): live at open, holds number 2
+    daemon.handle_message(_msg(MsgType.SESSION_END, "B"))   # B's own session closes mid-browse
+    daemon.handle_message(_msg(MsgType.CHOOSER_DIGIT, "", digit=2))   # B's own number, pressed
+    assert speaker.earcons[-1] == "error"
+    assert "B" not in sessions.session_ids()        # not phantom-re-registered
+    texts = [it.text for it in daemon._stream("A").queue._items]
+    assert "That session closed." in texts          # word lands in speaker()-or-workspace() stream
+
+
 def test_digit_of_current_session_is_the_noop_landing():
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
     sessions.register("B", cwd="/x/B")

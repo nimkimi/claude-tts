@@ -30,7 +30,8 @@ STALE_S = 30.0
 class ChooserState:
     """One open chooser gesture (chord held). Lives on host._chooser."""
 
-    def __init__(self, origin, candidates, opened_at, captured, captured_entry):
+    def __init__(self, origin, candidates, opened_at, captured, captured_entry,
+                 numbers):
         self.origin = origin            # session current at open: the no-op commit target
         self.candidates = candidates    # snapshot: [origin?] + MRU + never-visited (is_live)
         self.index = 0                  # cursor (0 == origin when origin is live)
@@ -39,6 +40,14 @@ class ChooserState:
         self.captured_entry = captured_entry   # its pending-heard entry, or None
         self.preview_id = None          # the queued preview item's id (swapped each step)
         self.preview_session = None     # which stream holds that preview
+        # OPEN-time {number: session} for the candidates (fix round: mirrors
+        # _commit's target-captured-at-open approach). session_for_number()
+        # is a LIVE lookup and unregister frees the number, so on a digit
+        # press that resolves to no session, this snapshot is the only way
+        # to tell "this digit belonged to a candidate that just died via
+        # SESSION_END mid-browse" apart from "this digit never mapped to
+        # anything" (independent review, fix round 2).
+        self.numbers = numbers
 
 
 def _snapshot(sessions):
@@ -68,6 +77,7 @@ def _open(host):
     if not candidates:
         host.cue("error")
         return None
+    numbers = {host.sessions.number(s): s for s in candidates}
     cur = host._current_item
     entry = host._pending_heard.get(cur.id) if cur is not None else None
     if cur is not None:
@@ -77,7 +87,7 @@ def _open(host):
         # speak thread catches up (e.g. the stale-reopen path) never recaptures
         # the same item twice.
         host._current_item = None
-    host._chooser = ChooserState(origin, candidates, _now(), cur, entry)
+    host._chooser = ChooserState(origin, candidates, _now(), cur, entry, numbers)
     return host._chooser
 
 
@@ -255,9 +265,20 @@ def on_chooser_digit(ctx, msg):
         digit = None
     target = host.sessions.session_for_number(digit) if digit is not None else None
     if target is None:
-        # The digit never mapped to any session at all (typo/out-of-range) --
-        # not a death, so no D7a word (fix round: independent review caught
-        # this branch speaking CLOSED_WORD on a plain wrong-digit press).
+        # target is None covers TWO shapes that a live-only lookup cannot
+        # tell apart on its own: (1) the digit never mapped to any session at
+        # all (typo/out-of-range) -- not a death, no D7a word (fix round 1:
+        # independent review caught this branch speaking CLOSED_WORD on a
+        # plain wrong-digit press); (2) the digit's OWN session died via
+        # SESSION_END mid-browse, which unregisters and frees the number, so
+        # session_for_number() can no longer find it -- that IS a death (fix
+        # round 2: independent review). st.numbers is the OPEN-time snapshot
+        # that still remembers it (mirrors _commit's captured-at-open target).
+        died = st.numbers.get(digit) if digit is not None else None
+        if died is not None:
+            dest = host.sessions.speaker() or host.sessions.workspace()
+            host.cue("error", word=CLOSED_WORD, session=dest)  # confirmed SESSION_END mid-browse death: D7a word
+            return None
         host.cue("error")          # unknown number: browse stays open (§3)
         return None
     if not host.sessions.is_live(target):
