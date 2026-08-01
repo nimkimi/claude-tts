@@ -1,4 +1,5 @@
-"""D2 §6.4/§6.5: ONE factual restart line — restored piles + restored mutes.
+"""D2 §6.4/§6.5: ONE factual restart line — sessions with unheard output +
+restored mutes.
 Queue-ordered (it follows the off-queue boot cue, R2 untouched); forward=False
 so it can never advance a restored frontier; content-only (no liveness claims);
 deferred to first activity when every restored session is muted."""
@@ -35,7 +36,7 @@ def _texts(speaker):
     return [s for s in speaker.spoken if s]
 
 
-def test_one_pile_restored_line_speaks_after_restore():
+def test_one_session_unheard_line_speaks_after_restore():
     src, *_ = make_daemon(foreground=None)
     _seed_pile(src, "s1")
     dst, speaker, sessions = _restart(src)
@@ -43,7 +44,7 @@ def test_one_pile_restored_line_speaks_after_restore():
     assert _texts(speaker) == ["One session has unheard output."]
 
 
-def test_two_piles_and_a_muted_session_compose():
+def test_two_unheard_sessions_and_a_muted_session_compose():
     src, *_ = make_daemon(foreground=None)
     _seed_pile(src, "s1")
     _seed_pile(src, "s2")
