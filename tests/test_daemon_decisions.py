@@ -1,3 +1,4 @@
+import sonari.ttyutil as ttyutil
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 from sonari.sessions import Identity
 from tests.daemon_helpers import make_daemon, stream_queue
@@ -8,6 +9,12 @@ def _msg(mtype, session, **extra):
     d = {"v": PROTOCOL_VERSION, "type": mtype, "session": session}
     d.update(extra)
     return d
+
+
+def _liveness(monkeypatch, dead=()):
+    """Fake tty_alive: empty tty -> live (fail-open); else live iff not in `dead`."""
+    monkeypatch.setattr(ttyutil, "tty_alive",
+                        lambda tty: True if not tty else tty not in dead)
 
 
 def test_choice_enqueues_when_foreground():
@@ -187,10 +194,11 @@ def test_bare_earcon_message_dings_for_non_speaker():
     assert speaker.earcons == ["turn_done"]
 
 
-def test_jump_decision_targets_the_focused_session_not_foreground():
+def test_jump_decision_targets_the_focused_session_not_foreground(monkeypatch):
     # ⌃⌘D acts on the OS-focused session (like on_nav), not the voice's foreground —
     # so a decision-jump fired while looking at another terminal jumps THAT session AND
     # moves the voice to it (crossed → focus()).
+    _liveness(monkeypatch)                        # D3: pin B live, independent of this machine's ttys
     from sonari.sessions import Identity
     from tests.daemon_helpers import stream_queue
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
@@ -206,9 +214,10 @@ def test_jump_decision_targets_the_focused_session_not_foreground():
     assert speaker.cancels == 1
 
 
-def test_jump_decision_crossed_with_folder_enqueues_folder_cue():
+def test_jump_decision_crossed_with_folder_enqueues_folder_cue(monkeypatch):
     # When the voice crosses to the focused session AND that session has a folder,
     # a folder-name cue is enqueued at_front (after jump_to_decision so it plays first).
+    _liveness(monkeypatch)                        # D3: pin B live, independent of this machine's ttys
     from sonari.sessions import Identity
     from tests.daemon_helpers import stream_queue
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
@@ -247,11 +256,12 @@ def test_answer_targets_workspace():
     assert daemon._pending_decisions["B"]["behavior"] == "allow"   # answered B (workspace), not A
 
 
-def test_jump_decision_raises_target_window():
+def test_jump_decision_raises_target_window(monkeypatch):
     # ⌃⌘D must raise the target terminal window (R5/R9 — C2 fix), mirroring
     # the same raise machinery on_jump_waiting and the chooser commit use.
     # B is the workspace (OS-focused) and owns the pending decision; we expect
     # the raise service to fire exactly once, targeting B's identity.
+    _liveness(monkeypatch)                        # D3: pin B live, independent of this machine's ttys
     daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
     rs = RecordingRaiseService(will=True)
     daemon.raise_service = rs

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sonari.protocol import MsgType
 from sonari.daemon.registry import handler
+from sonari.daemon.features.control import CLOSED_WORD
 
 
 @handler(MsgType.STOP)
@@ -209,6 +210,14 @@ def on_jump_decision(ctx, msg):
             ctx.host.cue("error")
         return None
     crossed = target != sessions.speaker()   # voice owner is speaker(); SP2 advances it independently of workspace()
+    if crossed and sessions.liveness(target) == "dead":
+        # D3 spec §4i: the crossed path MOVES the voice — a dead target gets
+        # the word and no move; the non-crossed path is deliberate reading
+        # within the session already in flight and stays unguarded. Must
+        # fire before the voice_state write below (no state mutation).
+        dest = sessions.speaker() or sessions.workspace()
+        ctx.host.cue("error", word=CLOSED_WORD, session=dest)
+        return None
     ctx.host.voice_state = "flowing"                 # ⌃⌘D re-engage (R5:149 groups jump/⌃⌘D)
     if crossed:
         sessions.focus(target)

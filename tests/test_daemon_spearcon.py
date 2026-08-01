@@ -1,6 +1,13 @@
 import threading
 
+import sonari.ttyutil as ttyutil
 from tests.daemon_helpers import make_daemon
+
+
+def _liveness(monkeypatch, dead=()):
+    """Fake tty_alive: empty tty -> live (fail-open); else live iff not in `dead`."""
+    monkeypatch.setattr(ttyutil, "tty_alive",
+                        lambda tty: True if not tty else tty not in dead)
 
 
 def _hit(daemon, folder, path="/cache/sp.aiff"):
@@ -50,7 +57,8 @@ def test_nav_crossed_folder_cue_uses_spearcon_on_hit():
     assert cue.audio_path == p and cue.names_session
 
 
-def test_jump_decision_crossed_cue_uses_spearcon_on_hit():
+def test_jump_decision_crossed_cue_uses_spearcon_on_hit(monkeypatch):
+    _liveness(monkeypatch)                        # D3: pin "a" live, independent of this machine's ttys
     from sonari.sessions import Identity
     daemon, q, speaker, sessions, _ = make_daemon(foreground="b")
     sessions.register("a", cwd="/work/frontend")
