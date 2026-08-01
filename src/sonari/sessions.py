@@ -355,3 +355,12 @@ class SessionManager:
         was never restored."""
         return session in self._provisional
 
+    def clear_quarantine(self, session: str) -> None:
+        """Lift *session*'s provisional quarantine (D3 spec R1): any inbound
+        message whose session field names a quarantined session is proof its
+        hook is talking to the daemon, so the daemon's dispatch chokepoint
+        calls this on EVERY session-authored message, not just an
+        identity-carrying one. A no-op for a session that was never
+        provisional. Public so a drift guard can keep the raw set private."""
+        self._provisional.discard(session)
+

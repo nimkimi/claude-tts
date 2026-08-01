@@ -599,6 +599,18 @@ class SpeechDaemon:
 
     def handle_message(self, msg):
         self._ctx.bind(msg)
+        # D3 spec §2-R1: any inbound message whose session field names a
+        # quarantined session clears it — a session whose hook is talking to
+        # the daemon IS alive, at the ONE dispatch chokepoint (never
+        # per-handler). WITNESS_PING is excepted (not session-authored); a
+        # daemon-internal message (e.g. CATCHUP_RESULT) carries no session
+        # field, so the truthy-session check excepts it too. Runs before the
+        # learn-mode intercept so handlers and teach-mode alike see
+        # post-clear state. A silent restored session that never talks stays
+        # quarantined forever (SP6 §4.4 purpose preserved).
+        sess = msg.get("session")
+        if sess and msg.get("type") != MsgType.WITNESS_PING:
+            self.sessions.clear_quarantine(sess)
         try:
             # Learn mode intercepts HERE, at the single dispatch chokepoint (socket
             # / hotkey / catch-up all funnel through handle_message): while on, any

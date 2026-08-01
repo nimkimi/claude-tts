@@ -3,8 +3,12 @@
 pins the truth table so no consumer can drift to a second predicate."""
 from __future__ import annotations
 
+import pytest
+
 from sonari import ttyutil
+from sonari.protocol import MsgType, PROTOCOL_VERSION
 from sonari.sessions import Identity, SessionManager
+from tests.daemon_helpers import make_daemon
 
 
 def _liveness(monkeypatch, dead):
@@ -97,3 +101,62 @@ def test_is_live_is_the_derived_binary(monkeypatch):
     sessions.load_state({"s1": {"folder": "alpha", "number": 1}})
     sessions.unregister("s1")
     assert sessions.is_live("s1") == (sessions.liveness("s1") == "live")
+
+
+def _msg(t, session, **kw):
+    return {"v": PROTOCOL_VERSION, "type": t, "session": session, **kw}
+
+
+# Every session-authored MsgType (D3 spec R1): a message FROM a quarantined
+# session is proof its hook is talking to the daemon, so dispatch must clear
+# quarantine regardless of which handler ultimately runs. Minimal-but-valid
+# payloads, cribbed from each type's own handler tests.
+_SESSION_AUTHORED = [
+    (MsgType.PROSE, {"index": 0, "final": True, "delta": "hello"}),
+    (MsgType.TOOL, {"tool": "Bash", "summary": "ls"}),
+    (MsgType.CHOICE, {"questions": [{"question": "Q?"}]}),
+    (MsgType.PLAN, {"text": "Do X."}),
+    (MsgType.PERMISSION, {"action": "rm -rf"}),
+    (MsgType.PERMISSION_REQUEST, {"tool": "Bash", "summary": "ls"}),
+    (MsgType.EARCON, {"kind": ""}),
+    (MsgType.SET_FOREGROUND, {"cwd": "/x/repo"}),
+    (MsgType.FLUSH, {}),
+]
+
+
+def test_prose_from_quarantined_session_clears_quarantine():
+    daemon, *_ = make_daemon(foreground=None)
+    daemon.sessions.load_state({"s1": {"folder": "repo", "number": 1}})
+    with daemon._state.transaction():
+        daemon.handle_message(_msg(MsgType.PROSE, "s1", index=0, final=True, delta="hello"))
+    assert daemon.sessions.is_provisional("s1") is False
+    assert daemon.sessions.liveness("s1") == "live"   # identity None -> fail-open
+
+
+@pytest.mark.parametrize("mtype,kwargs", _SESSION_AUTHORED)
+def test_session_authored_message_clears_quarantine(mtype, kwargs):
+    daemon, *_ = make_daemon(foreground=None)
+    daemon.sessions.load_state({"s1": {"folder": "repo", "number": 1}})
+    with daemon._state.transaction():
+        daemon.handle_message(_msg(mtype, "s1", **kwargs))
+    assert daemon.sessions.is_provisional("s1") is False
+
+
+def test_witness_ping_never_clears_quarantine():
+    # The real hotkeyd ping is session-less; a fake "session" field here proves
+    # the type exemption itself (not just the absence of a session key).
+    daemon, *_ = make_daemon(foreground=None)
+    daemon.sessions.load_state({"s1": {"folder": "repo", "number": 1}})
+    with daemon._state.transaction():
+        daemon.handle_message(_msg(MsgType.WITNESS_PING, "s1"))
+    assert daemon.sessions.is_provisional("s1") is True
+
+
+def test_other_session_traffic_never_clears_a_silent_quarantine():
+    daemon, *_ = make_daemon(foreground=None)
+    daemon.sessions.load_state({"s1": {"folder": "repo", "number": 1},
+                                "s2": {"folder": "other", "number": 2}})
+    for _ in range(3):
+        with daemon._state.transaction():
+            daemon.handle_message(_msg(MsgType.PROSE, "s2", index=0, final=True, delta="hi"))
+    assert daemon.sessions.liveness("s1") == "pending"
