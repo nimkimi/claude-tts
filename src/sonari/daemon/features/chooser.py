@@ -254,9 +254,15 @@ def on_chooser_digit(ctx, msg):
     except (TypeError, ValueError):
         digit = None
     target = host.sessions.session_for_number(digit) if digit is not None else None
-    if target is None or not host.sessions.is_live(target):
+    if target is None:
+        # The digit never mapped to any session at all (typo/out-of-range) --
+        # not a death, so no D7a word (fix round: independent review caught
+        # this branch speaking CLOSED_WORD on a plain wrong-digit press).
+        host.cue("error")          # unknown number: browse stays open (§3)
+        return None
+    if not host.sessions.is_live(target):
         dest = host.sessions.speaker() or host.sessions.workspace()
-        host.cue("error", word=CLOSED_WORD, session=dest)  # unknown/dead number: browse stays open (§3) + D7a word
+        host.cue("error", word=CLOSED_WORD, session=dest)  # confirmed mid-browse death: D7a word
         return None
     _commit(host, st, target)
     return None

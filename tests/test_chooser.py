@@ -404,6 +404,21 @@ def test_unknown_digit_errors_and_stays_open():
     assert sessions.foreground() == "B"            # the held candidate still commits
 
 
+def test_unknown_digit_does_not_speak_the_closed_word():
+    # Fix round (independent review): a digit that never maps to ANY session
+    # (typo/out-of-range) is not a death -- the D7a word ("That session
+    # closed.") must attach ONLY to a confirmed mid-browse death (spec §4b:
+    # "the mid-browse-death error tone gains its D7a word"), never to the
+    # plain wrong-digit case. Tone-only here.
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.register("B", cwd="/x/bravo")
+    _step(daemon)
+    daemon.handle_message(_msg(MsgType.CHOOSER_DIGIT, "", digit=7))
+    assert speaker.earcons[-1] == "error"
+    texts = [it.text for it in daemon._stream("A").queue._items]
+    assert "That session closed." not in texts     # never mapped -> no death word
+
+
 def test_digit_to_dead_session_errors(monkeypatch):
     _liveness(monkeypatch, dead={"/dev/ttysB"})
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
