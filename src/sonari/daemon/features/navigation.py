@@ -100,6 +100,9 @@ def _nav_response(ctx, session: str, direction: str) -> None:
 
 @handler(MsgType.NAV)
 def on_nav(ctx, msg):
+    # Sanctioned unguarded (D3 spec §4g; RECONCILIATION has the ruling): this
+    # is deliberate re-reading of already-stored transcript content, not a
+    # live voice hand-off, so no liveness check runs here.
     sessions = ctx.host.sessions
     target = sessions.workspace()
     if target is None:

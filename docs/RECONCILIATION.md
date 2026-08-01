@@ -12,8 +12,68 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
    `.venv/bin/python -m pytest -q tests/test_protocol.py tests/test_concurrency_guards.py`.
 3. **Sweep the shared-invariant consumers.** These rules are enforced at more
    than one call site; if your campaign touched ONE, check them ALL:
-   - "may this session's voice reach the ear?" — chooser, focus/jump, where-am-i,
-     keep-going (host), prose gating
+   - "may this session's voice reach the ear?" is answered ONLY by
+     `SessionManager.liveness()` (three states: `live`/`pending`/`dead`) or its
+     derived binary `is_live()`. The raw signals it composes (`_provisional`,
+     `_tty_evicted`, `ttyutil.tty_alive`) are private to `sessions.py` — a
+     drift guard in `tests/test_liveness_contract.py` fails if any other
+     module reaches past the composed predicate. R1: any inbound message
+     whose session is quarantined (`pending`) clears that quarantine at the
+     `handle_message` dispatch chokepoint, not per-handler (WITNESS_PING is
+     excepted — it carries no session). Per-consumer dispositions:
+     - **chooser** (`chooser.py`) — candidates are `is_live`-filtered (hiding
+       a non-live session is correct for the HANDS: you cannot dial into a
+       session you cannot reach). Both the chord-release commit and a digit
+       press re-check liveness at commit time and speak the shared word
+       ("That session closed.") on a target that died mid-browse.
+     - **jump-waiting** (`focus.py`) — candidates are `is_live`-filtered; a
+       commit-time re-check closes the selection-to-focus gap (a target that
+       died between selection and commit is never focused). The empty case
+       ("No session waiting.") gains a truthful tail counting backlog-holding
+       non-live sessions, e.g. "No session waiting. Two pending."
+     - **where-am-I** (`control.py`) — the MARK surface. A dead voice or
+       keyboard pointer gains a marker clause, e.g. "Keyboard: web 1,
+       closed." The Also-map names any pending-or-dead session that still
+       holds content clauses (leading with "pending" or "closed"), collapses
+       clause-less pending sessions into an aggregate tail ("Two pending."),
+       and drops clause-less dead sessions entirely — nothing to act on.
+     - **keep-going** (`host.py` `_select_keep_going`) — skips dead sessions:
+       a dead session's backlog is never auto-voiced onto the ear. Pending
+       sessions stay adoptable — post-R1 the only content a pending stream
+       can hold is the daemon-authored restart line, whose delivery
+       deliberately rides this exact path (`tests/test_restart_line.py` pins
+       it).
+     - **prose gating** (`prose.py`) — no gate in the handler. Liveness is
+       enforced upstream at the dispatch chokepoint by R1: an inbound PROSE
+       message proves its session is alive and clears quarantine before
+       `on_prose` ever runs, so the handler only ever buffers for live
+       sessions.
+     - **catch-up** (`catchup.py`) — proceeds on any registered workspace
+       target; reading a closed session's stored pile is a legitimate
+       recovery act, so it is never blocked. A dead target's acknowledgment
+       gains the closed marker; pending is structurally unreachable as a
+       workspace target.
+     - **navigation** (`navigation.py`) — SANCTIONED UNGUARDED: navigating is
+       deliberate re-reading of already-stored transcript content, and a
+       liveness check on every press would be noise, not signal. (The
+       workspace pointer itself going stale on a dead session is separate
+       hygiene work, out of this pass's scope.)
+     - **jump-decision** (`playback.py` `on_jump_decision`) — the crossed
+       path, which moves the voice via `sessions.focus`, is guarded like the
+       chooser: a dead target speaks the closed word and the move is
+       refused. The non-crossed path (acting within the current workspace)
+       is deliberate reading, like navigation, and stays unguarded.
+     - **restart line** (`host.py` `_compose_restore_line`) — every restored
+       session is uniformly pending at delivery, so the line stays
+       content-only by design (a liveness qualifier there would carry zero
+       information); the per-session mark is where-am-I's job.
+     - **teaching** (`teaching.py`) — checked 2026-08-01, unchanged: its
+       "waiting"-phrased hints stay true because jump-waiting only ever
+       offers live sessions.
+
+     A new consumer must consult `liveness()`/`is_live()` and add its
+     disposition here, plus a pin in the per-surface suite
+     (`tests/test_liveness_marks.py`).
    - `_enqueue` delivery flags (`mute_exempt`/`pause_exempt`/`at_front`) — any
      new cue must state WHY each flag is set or not
    - the cue registry (`src/sonari/cues.py`): every audible emission flows

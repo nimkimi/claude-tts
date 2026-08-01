@@ -7,6 +7,9 @@ from sonari.daemon.features import teaching
 
 @handler(MsgType.PROSE)
 def on_prose(ctx, msg):
+    # No liveness gate here by design (D3 spec §4e): R1 clears quarantine at
+    # the handle_message dispatch chokepoint before this handler ever runs,
+    # so an inbound PROSE only ever buffers for a session already live.
     session = ctx.session                 # was: msg.get("session", "")
     verbosity = ctx.verbosity             # was: self.config.get("verbosity", "everything")
     final = msg.get("final", False)

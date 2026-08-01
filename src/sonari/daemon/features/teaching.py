@@ -7,7 +7,11 @@ line instead of dispatching. Non-action-shaped messages (CLI control carrying a
 "v" key, hook prose) never equal a registered action, so they are never taught; an
 action-shaped message teaches regardless of transport — on macOS the socket IS the
 hotkey transport (hotkeyd sends resolved action messages over it). This module
-owns the toggle."""
+owns the toggle.
+
+Strings checked against the D3 liveness tiers 2026-08-01 — unchanged: the
+"waiting"-phrased hints below stay true under jump-waiting's live-only
+definition (spec D3 §4j)."""
 from __future__ import annotations
 
 from sonari.protocol import MsgType

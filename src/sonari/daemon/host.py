@@ -1154,8 +1154,10 @@ class SpeechDaemon:
         """The ONE factual post-restore line (D2 §6.4/§6.5), or None when nothing
         was restored. A PILE = a restored session whose history extends past its
         frontier (catch-up-reachable; frontier None == everything unheard).
-        Content-only — no session-liveness claims (D3's hide-vs-mark untouched).
-        Wording per the owner's ear ruling (ear-batch-2 slot 9): counts SESSIONS
+        Content-only by design: every restored session is uniformly pending at
+        delivery, so a liveness qualifier here would carry zero information —
+        the per-session mark lives in where-am-I's Also-map instead (D3 spec
+        §4h). Wording per the owner's ear ruling (ear-batch-2 slot 9): counts SESSIONS
         with unheard output, a present-state claim — which is exactly what the
         recompose-at-delivery path computes."""
         piles = 0
