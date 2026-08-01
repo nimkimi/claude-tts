@@ -281,9 +281,20 @@ def on_chooser_digit(ctx, msg):
             return None
         host.cue("error")          # unknown number: browse stays open (§3)
         return None
-    if not host.sessions.is_live(target):
+    lv = host.sessions.liveness(target)
+    if lv == "dead":
         dest = host.sessions.speaker() or host.sessions.workspace()
         host.cue("error", word=CLOSED_WORD, session=dest)  # confirmed mid-browse death: D7a word
+        return None
+    if lv == "pending":
+        # WB-C3/R-2: session_for_number() looks over the WHOLE roster, and a
+        # restored session keeps its persisted number -- so this digit can
+        # land on a session that MIGHT be alive, not yet reconfirmed.
+        # CLOSED_WORD is the DEAD tier's ONE word (spec §5's one-word-per-tier
+        # law); §4b mints no chooser-side pending string and rules pending
+        # never dialable, so the honest output is the bare tone, same as an
+        # unknown digit.
+        host.cue("error")
         return None
     _commit(host, st, target)
     return None

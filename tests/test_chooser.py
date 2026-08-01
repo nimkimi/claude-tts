@@ -444,6 +444,35 @@ def test_digit_to_dead_session_speaks_the_closed_word(monkeypatch):
     assert "That session closed." in texts          # word lands in speaker()-or-workspace() stream
 
 
+def test_digit_onto_pending_session_speaks_only_the_error_tone(monkeypatch):
+    # WB-C3/R-2: session_for_number() looks over the WHOLE roster, and a
+    # restored session keeps its persisted number (that persistence is the
+    # point) -- so an ordinary morning-after digit press can resolve to a
+    # PENDING target, not just live/dead. The old `not is_live` guard treated
+    # pending the same as dead and spoke CLOSED_WORD -- the dead tier's word --
+    # about a session that might still be alive, breaking §5's one-word-per-tier
+    # law. §4b mints no chooser-side pending string and pending is never
+    # dialable, so the honest output is the bare tone, same as an unknown digit.
+    # Probe E recipe: restore two numbered sessions, re-prove one via PROSE
+    # (R1 clears its quarantine at dispatch), dial the number of the one
+    # that's still silent.
+    _liveness(monkeypatch, dead=set())
+    daemon, queue, speaker, sessions, _ = make_daemon(foreground=None)
+    sessions.load_state({"Y": {"folder": "yankee", "number": 1},
+                         "Z": {"folder": "zulu", "number": 3}})
+    daemon.handle_message(_msg(MsgType.PROSE, "Y", index=0, final=True, delta="hi"))
+    assert sessions.liveness("Y") == "live"
+    assert sessions.liveness("Z") == "pending"
+    sessions.set_foreground("Y")                     # you're sitting in Y's terminal
+    _step(daemon)                                   # opens: only Y (is_live) is a candidate
+    daemon.handle_message(_msg(MsgType.CHOOSER_DIGIT, "", digit=3))   # Z's persisted number
+    assert speaker.earcons[-1] == "error"
+    assert daemon._chooser is not None               # browse continues (§3), same as unknown digit
+    assert sessions.liveness("Z") == "pending"        # untouched by the press
+    texts = [it.text for it in daemon._stream("Y").queue._items]
+    assert "That session closed." not in texts        # no D7a word for a not-yet-dead session
+
+
 def test_digit_onto_session_end_mid_browse_speaks_the_closed_word():
     # Fix-round follow-up (independent review): unregister frees the digit's
     # number, so a fresh session_for_number() lookup at press time can no
