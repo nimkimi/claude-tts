@@ -52,17 +52,35 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
        a dead session's backlog is never auto-voiced onto the ear, and a
        speaker that dies MID-DRAIN is released (`_release_dead_speaker`, at
        the pop boundary) rather than read to the end of its pile (R-1). One
-       exception: a deliberate press — idle ⌃⌘W, ⌃⌘W on a dead speaker, or
-       ⌃⌘L catch-up — may sanction ONE dead stream
-       (`host._sanction_dead_read`) and drains it whole, backlog included;
-       the sanction is one-shot and never automatic (fix-wave A's model).
+       exception: a deliberate press may sanction ONE dead stream
+       (`host._sanction_dead_read`), one-shot and never automatic, at a GRAIN
+       matching what the press asked for:
+       - **whole stream, backlog included** — a read OF that session: idle
+         ⌃⌘W, ⌃⌘W on a dead speaker (`control.py`), ⌃⌘L catch-up
+         (`catchup.py _cue_dest`), and ⌃⌘←/→ navigation (`navigation.py`,
+         whose seek-and-play clears the queue first, so the whole stream IS
+         the requested content).
+       - **the one front item** — an answer that merely LANDED there because
+         its destination falls back to `workspace()`: the rate/verbosity
+         readbacks (`control.py _readback`), jump-waiting's empty case
+         (`focus.py`), the repeat/skip-pile/jump-decision fallbacks
+         (`playback.py`), and the chooser preview (`chooser.py
+         _deliver_preview`). A settings nudge must never read out a closed
+         session's pile. A single-item press also never claims the voice for
+         a STOPPED stream — the held branch returns above the pop boundary,
+         so the mark could not be spent and the voice would wedge there.
        Pending sessions stay adoptable — post-R1 the only content a pending
        stream can hold is the daemon-authored restart line, whose delivery
        deliberately rides this exact path (`tests/test_restart_line.py` pins
-       it). Idle-⌃⌘W and catch-up delivery DEPEND on this adoption/sanction
-       machinery: any campaign touching `_select_keep_going` must also sweep
-       `_release_dead_speaker` and the three `_sanction_dead_read` call
-       sites.
+       it). Idle-⌃⌘W, catch-up, nav and every single-item answer DEPEND on
+       this adoption/sanction machinery: any campaign touching
+       `_select_keep_going` must also sweep `_release_dead_speaker` and every
+       `_sanction_dead_read` call site above. HONEST LIMIT: four more
+       deliberate presses in the same family are NOT wired and stay silent on
+       a dead workspace — learn mode and the query-actions readout
+       (`teaching.py`), re-read options (`decisions.py`), and ⌃⌘S-start on a
+       dead MUTED workspace (`playback.py`). Measured, pre-existing, and left
+       for an owner-adjacent ruling rather than widened here.
      - **prose gating** (`prose.py`) — no gate in the handler. R1 clears the
        pending tier at the dispatch chokepoint, so `on_prose` never buffers
        into a quarantined stream. A dead session's prose still buffers, by

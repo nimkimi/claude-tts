@@ -1,8 +1,8 @@
-"""D3 fix-wave A: who may voice a DEAD session's stream.
+"""D3 fix-waves A and D: who may voice a DEAD session's stream, and how much.
 
 §4d keeps the voice off a dead session's backlog AUTOMATICALLY — keep-going
-never adopts one. Three sites compose that rule, and the whole-branch review
-found the seam between them broken in both directions:
+never adopts one. Three rules compose that, and the whole-branch review plus
+its re-review found the seams between them broken in both directions:
 
 1. Automatic flow never adopts dead (T9, `_select_keep_going` — unchanged).
 2. A DELIBERATE press may adopt a dead stream and sanctions reading it. Idle
@@ -10,14 +10,25 @@ found the seam between them broken in both directions:
    destination's own stream; with keep-going refusing it and speaker() None,
    the correct answer was composed and never voiced (WB-C1 CRITICAL, WB-C2).
    Such a press now takes the voice itself and marks the stream consciously
-   re-opened — including whatever backlog already sat there (the wrinkle,
-   pinned below).
+   re-opened.
 3. A dead speaker WITHOUT that sanction RELEASES the voice. §4d was
    selection-time only, so a session that died MID-DRAIN was auto-voiced to
    the end of its pile (R-1). Skipping the pop wedges the voice forever
    (probe G); releasing it — `set_speaker(None)`, queue intact — lets the
    bootstrap-from-None path reach a live session, the idiom chooser.py:214
    already uses.
+
+Rule 2's sanction carries a GRAIN, because "may read it" and "how much of it"
+are different questions (fix-wave D):
+
+- WHOLE stream, backlog included (the wrinkle, pinned below) when the press is
+  a read OF that session: idle ⌃⌘W, ⌃⌘W on a dead speaker, catch-up, and
+  navigation — whose seek-and-play clears the queue first, so the whole stream
+  IS the requested content (RR-1: rule 3 had silenced it outright).
+- ONE front item when the press merely LANDED an answer there because its
+  destination falls back to workspace(): the settings readbacks, jump-waiting's
+  empty case, the repeat/skip/jump-decision fallbacks, the chooser preview
+  (RR-2). A rate nudge is not a request to be read a closed session's pile.
 """
 from sonari import ttyutil
 from sonari.protocol import PROTOCOL_VERSION
