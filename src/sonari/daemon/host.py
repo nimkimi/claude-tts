@@ -342,9 +342,11 @@ class SpeechDaemon:
         §4d keeps the voice off a dead session's backlog automatically:
         _select_keep_going never adopts one and _release_dead_speaker drops the
         voice the moment a speaker dies. But a deliberate press composes its
-        answer INTO that stream — idle ⌃⌘W and catch-up (§4f) route their cues to
-        the workspace when speaker() is None — so without this the correct,
-        correctly-marked answer is composed and never voiced (WB-C1/WB-C2). The
+        answer INTO that stream — the three sites are idle ⌃⌘W and catch-up
+        (§4f), which route their cues to the workspace when speaker() is None,
+        and a ⌃⌘W readout about a dead speaker, which lands in the speaker's own
+        stream — so without this the correct, correctly-marked answer is
+        composed and never voiced (WB-C1/WB-C2, and R-1's release). The
         press re-opened THIS stream on purpose, so while the mark names the
         speaker the loop drains it normally, backlog included (the deliberate
         read is the whole stream — pinned in test_dead_stream_voice.py). Nothing
