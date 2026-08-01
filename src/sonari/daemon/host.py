@@ -54,9 +54,14 @@ def _stream_quiescent(st) -> bool:
 def _select_keep_going(streams, sessions) -> "str | None":
     """The longest-waiting eligible background session, or None. Eligible = a
     registered session other than the current speaker whose stream exists, is not
-    stopped, and has a non-empty queue. Among those, pick the minimum
-    SpeechQueue.oldest_id() (the globally-monotonic SpeechItem.id of the oldest unheard
-    item). Runs INSIDE the speak-loop lock; never pokes _items.
+    stopped, has a non-empty queue, and is not dead (D3 spec §4d — a dead session's
+    backlog is never auto-voiced; it stays discoverable via where-am-I and readable
+    via catch-up). **pending** stays eligible: post-R1 the only content a pending
+    stream can hold is daemon-authored (the restart line), whose delivery
+    deliberately rides this exact path (test_restart_line.py pins it). Among the
+    eligible, pick the minimum SpeechQueue.oldest_id() (the globally-monotonic
+    SpeechItem.id of the oldest unheard item). Runs INSIDE the speak-loop lock;
+    never pokes _items.
 
     §14 is longest-waiting-first AT EACH IDLE WINDOW, not global starvation-freedom:
     re-selection happens only at speaker-idle, so a busy speaker drains FIFO ahead of
@@ -70,6 +75,8 @@ def _select_keep_going(streams, sessions) -> "str | None":
             continue
         st = streams.get(s)
         if st is None or st.stopped or len(st.queue) == 0:
+            continue
+        if sessions.liveness(s) == "dead":
             continue
         oid = st.queue.oldest_id()
         if oid is None:
