@@ -46,7 +46,8 @@ Sonari keeps a few small local files under `~/.sonari/` (and LaunchAgent files u
   `daemon.fail_memo` — operational/diagnostic files only (startup messages,
   error tracebacks, native-crash dumps, and a restart-retry timestamp
   marker). They record what Sonari's process is doing, not what it speaks;
-  the text Sonari narrates lives only in `state.json`.
+  the text Sonari narrates is persisted only in `state.json` by default (see
+  "Optional diagnostic capture" below for the one opt-in exception).
 
 None of these files are transmitted off your machine.
 
