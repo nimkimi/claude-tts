@@ -265,7 +265,7 @@ class MacSupervisorBackend:
 
         Covers: say, afplay, enhanced voice, swiftc, hotkeyd binary,
         hotkeyd resolved keymap, speechd LaunchAgent loaded,
-        hotkeyd LaunchAgent loaded, sonari launcher.
+        hotkeyd, sonari launcher.
         """
         from sonari.platform.macos.hotkeys import (
             LAUNCH_AGENT_LABEL as HOTKEYD_LAUNCH_AGENT_LABEL,
@@ -322,11 +322,39 @@ class MacSupervisorBackend:
                      LAUNCH_AGENT_LABEL if speechd_loaded
                      else "not loaded (run 'sonari install')"))
 
-        # hotkeyd LaunchAgent loaded
+        # R1: the watchdog must itself be watched. Presence is not enough —
+        # a hotkeyd whose alarm is disabled or unplayable cannot bark. The
+        # resolved file is a JSON ARRAY (keymap.write_resolved(): bindings +
+        # the witness entry) — NOT a dict keyed by "witness_config" — matching
+        # hotkeyd/sonari-hotkeyd.swift:180-191's `[[String: Any]]` parse.
         hotkeyd_loaded = self.launchctl(["list", HOTKEYD_LAUNCH_AGENT_LABEL]) == 0
-        rows.append(("hotkeyd LaunchAgent loaded", hotkeyd_loaded,
-                     HOTKEYD_LAUNCH_AGENT_LABEL if hotkeyd_loaded
-                     else "not loaded (build CLT then 'sonari install')"))
+        if not hotkeyd_loaded:
+            rows.append(("hotkeyd", False,
+                         "not running — no independent alarm if the daemon dies"))
+        else:
+            enabled, asset = True, None      # compiled-in defaults (swift:175-177)
+            try:
+                with open(str(paths.HOTKEYD_RESOLVED_PATH), "r",
+                          encoding="utf-8") as fh:
+                    parsed = json.load(fh)
+                if isinstance(parsed, list):
+                    wc = next((e for e in parsed if isinstance(e, dict)
+                               and e.get("action") == "witness_config"), None)
+                    if wc is not None:
+                        enabled = bool(wc.get("alarmEnabled", True))
+                        asset = wc.get("alarmAsset")
+            except Exception:  # noqa: BLE001 - doctor must never raise
+                pass                          # no/bad resolved file -> defaults apply
+            if not enabled:
+                rows.append(("hotkeyd", False,
+                             "running, but its alarm is disabled — the daemon "
+                             "could die silently"))
+            elif asset and not os.path.exists(asset):
+                rows.append(("hotkeyd", False,
+                             "running, but its alarm sound is missing: {0}"
+                             .format(asset)))
+            else:
+                rows.append(("hotkeyd", True, "running, alarm armed"))
 
         # sonari launcher + PATH
         launcher = _launcher_path()
