@@ -1848,7 +1848,11 @@ git commit -m "perf(hooks): async registrations except the answering PermissionR
 
 **Interfaces:** none.
 
-**Spec §8.1 step 5.** `bin/sonari-hook:79` calls `ensure_daemon()` unconditionally, so after `sonari uninstall` the next hook event **respawns** the daemon from the plugin's own `src/`. The gate: still `send()` to an already-reachable daemon, never **spawn** one for an uninstalled Sonari. `INSTALL_RECORD_PATH` is already removed by uninstall, so no new state is needed.
+**Spec §8.1 step 5.** `bin/sonari-hook:79` calls `ensure_daemon()` unconditionally, so after `sonari uninstall` the next hook event **respawns** the daemon from the plugin's own `src/`. The gate: still `send()` to an already-reachable daemon, never **spawn** one for an uninstalled Sonari.
+
+> **Gate on TWO signals, not one.** The obvious gate — "spawn only if the install record exists" — is **wrong and dangerous**. `INSTALL_RECORD_PATH` can be legitimately absent while Sonari is fully installed (doctor's own plugin-path row says `install.json missing ... (run 'sonari install')`, which is a *recoverable* state, not an uninstalled one). A record-only gate would silently kill lazy relaunch for those users: the daemon dies, nothing resurrects it, and Sonari goes mute until a manual `sonari install` — **the exact silent-death class D4 exists to close, introduced by D4.**
+>
+> Uninstall removes **both** the record **and** `APP_DIR` (`cli/install.py:155-177`). So suppress the spawn only when **both are gone**; if either survives, Sonari is installed and lazy relaunch must still work.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1864,7 +1868,12 @@ import pytest
 HOOK = "bin/sonari-hook"
 
 
-def _run_hook(monkeypatch, record_exists, stdin=b"{}"):
+def _run_hook(monkeypatch, tmp_path, record_exists, app_dir_exists, stdin=b"{}"):
+    # A REAL directory rather than a global os.path.isdir patch — runpy imports
+    # a lot, and a blanket isdir patch would perturb unrelated import machinery.
+    app_dir = tmp_path / "app"
+    if app_dir_exists:
+        app_dir.mkdir()
     monkeypatch.setattr(sys, "argv", ["sonari-hook", "Notification"])
     monkeypatch.setattr(sys, "stdin", mock.MagicMock(buffer=mock.MagicMock(
         read=lambda: stdin)))
@@ -1872,19 +1881,38 @@ def _run_hook(monkeypatch, record_exists, stdin=b"{}"):
          mock.patch("sonari.client.send"), \
          mock.patch("sonari.install_record.read_install_record",
                     return_value={"app_path": "/a"} if record_exists else None), \
+         mock.patch("sonari.paths.APP_DIR", app_dir), \
          mock.patch("sonari.hooks_entry.handle_event",
                     return_value=[{"type": "prose", "text": "hi"}]):
         runpy.run_path(HOOK, run_name="__main__")
         return ensure
 
 
-def test_no_spawn_when_sonari_is_uninstalled(monkeypatch):
-    ensure = _run_hook(monkeypatch, record_exists=False)
+def test_no_spawn_only_when_BOTH_signals_say_uninstalled(monkeypatch, tmp_path):
+    ensure = _run_hook(monkeypatch, tmp_path, record_exists=False,
+                       app_dir_exists=False)
     ensure.assert_not_called()
 
 
-def test_spawn_is_allowed_when_installed(monkeypatch):
-    ensure = _run_hook(monkeypatch, record_exists=True)
+def test_spawn_is_allowed_when_installed(monkeypatch, tmp_path):
+    ensure = _run_hook(monkeypatch, tmp_path, record_exists=True,
+                       app_dir_exists=True)
+    ensure.assert_called_once()
+
+
+def test_a_missing_record_alone_must_NOT_disable_lazy_relaunch(monkeypatch, tmp_path):
+    """THE case that protects live users. install.json can go missing while
+    Sonari is fully installed (doctor treats it as recoverable: "run sonari
+    install"). Suppressing the spawn here would make the daemon's death
+    permanent and silent — the exact defect D4 exists to close."""
+    ensure = _run_hook(monkeypatch, tmp_path, record_exists=False,
+                       app_dir_exists=True)
+    ensure.assert_called_once()
+
+
+def test_a_missing_app_dir_alone_still_spawns(monkeypatch, tmp_path):
+    ensure = _run_hook(monkeypatch, tmp_path, record_exists=True,
+                       app_dir_exists=False)
     ensure.assert_called_once()
 
 
@@ -1918,9 +1946,17 @@ Replace lines 78-81 of `bin/sonari-hook`:
     # unconditional ensure_daemon() respawned the daemon from this very src/ —
     # and every resurrection was born a detached orphan launchctl cannot stop.
     # We still send() below, so a daemon that is genuinely up keeps working.
+    #
+    # TWO signals, both of which uninstall removes. A missing install record
+    # ALONE is a recoverable state, not an uninstall (doctor says "run sonari
+    # install"), and treating it as one would make a dead daemon permanently
+    # and silently dead — the very failure D4 exists to close.
     try:
-        from sonari import install_record
-        if install_record.read_install_record():
+        import os as _os
+        from sonari import install_record, paths as _paths
+        installed = bool(install_record.read_install_record()) or \
+            _os.path.isdir(str(_paths.APP_DIR))
+        if installed:
             client.ensure_daemon()
     except Exception:
         pass
@@ -1951,6 +1987,8 @@ git commit -m "fix(hook): never spawn a daemon for an uninstalled Sonari"
 - Produces: `teardown.stop_daemon(timeout: float = 5.0) -> str` returning `"not-running"`, `"stopped"`, or `"still-running"`.
 
 **Spec §8.1 steps 2–4.** Read `pid` from the lockfile **before** deleting it (`transport.py:18-20`), SIGTERM (the handler at `host.py:1346-1361` exits into SP6's clean shutdown flush, so state is preserved), then acquire `SINGLETON_PATH`'s flock as **positive proof** of death.
+
+> **`SINGLETON_PATH` must never be added to uninstall's artifact list.** It is deliberately absent today. A `flock` is held against an *open file description*, so deleting and recreating the path orphans the daemon's lock — `_singleton_free()` would then acquire a lock on a brand-new inode and report "stopped" while the daemon is very much alive. T17 adds `DAEMON_ERR_PATH` to that list; do not sweep the singleton in alongside it as another "log-like file".
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2238,9 +2276,13 @@ def test_absent_state_summarises_as_nothing(tmp_path):
         assert install_cmd.transcript_summary() == (0, 0)
 
 
-def test_the_question_is_asked_before_the_daemon_is_stopped(tmp_path):
-    """Spec 8.1: unloading first would kill the voice that must ask."""
+def test_the_full_teardown_order_is_ask_then_unload_then_stop(tmp_path):
+    """Spec 8.1's pin, all three steps — asserting only ask<stop would let an
+    implementer land ask -> SIGTERM -> unload, and launchd would then restart
+    the daemon the SIGTERM just stopped."""
     order = []
+    sup = mock.MagicMock()
+    sup.uninstall.side_effect = lambda *a, **k: order.append("unloaded")
     with mock.patch("sonari.paths.STATE_PATH", _state(tmp_path)), \
          mock.patch("sonari.cli.voiceout.speak",
                     side_effect=lambda *a, **k: order.append("asked")), \
@@ -2248,9 +2290,22 @@ def test_the_question_is_asked_before_the_daemon_is_stopped(tmp_path):
                     side_effect=lambda *a, **k: order.append("stopped") or "stopped"), \
          mock.patch("builtins.input", return_value="n"), \
          mock.patch("sys.stdout.isatty", return_value=True), \
+         mock.patch("sonari.cli._platform",
+                    return_value=mock.MagicMock(supervisor=sup)):
+        install_cmd.uninstall()
+    assert order == ["asked", "unloaded", "stopped"], order
+
+
+def test_a_piped_uninstall_prints_the_question_but_does_not_speak_it(tmp_path):
+    """Same tty discipline as doctor (T3): speaking a question we will not wait
+    for an answer to is noise in a script."""
+    with mock.patch("sonari.paths.STATE_PATH", _state(tmp_path)), \
+         mock.patch("sys.stdout.isatty", return_value=False), \
+         mock.patch("sonari.cli.voiceout.speak") as spoken, \
+         mock.patch("sonari.cli.teardown.stop_daemon", return_value="stopped"), \
          mock.patch("sonari.cli._platform"):
         install_cmd.uninstall()
-    assert order.index("asked") < order.index("stopped")
+    spoken.assert_not_called()
 
 
 def test_purge_flag_deletes_the_transcripts(tmp_path):
@@ -2302,15 +2357,20 @@ Change the signature to `def uninstall(purge=None) -> int:` and insert, as the *
 
 ```python
     from sonari.cli import voiceout
+    from sonari.cli.doctor import should_speak
     sessions, utterances = transcript_summary()
     if sessions and purge is None:
         # PROVISIONAL (ear-batch-4)
         q = (f"Sonari saved transcript text from {sessions} session"
              f"{'' if sessions == 1 else 's'}. Delete it?")
-        voiceout.speak(q)
         print(q + f" ({utterances} utterances at {paths.STATE_PATH})")
+        interactive = sys.stdout.isatty()
+        # Same tty discipline as doctor: speaking a question we will not wait
+        # for an answer to is noise in a script.
+        if interactive:
+            voiceout.speak(q)
         try:
-            purge = sys.stdout.isatty() and input("  delete? [y/N] ").strip().lower() in ("y", "yes")
+            purge = interactive and input("  delete? [y/N] ").strip().lower() in ("y", "yes")
         except (EOFError, OSError):
             purge = False       # silence keeps the data
 ```
