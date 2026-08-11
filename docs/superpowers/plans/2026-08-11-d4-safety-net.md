@@ -243,7 +243,7 @@ git commit -m "feat(doctor): pure total verdict function"
 
 **Files:**
 - Modify: `src/sonari/cli/__init__.py:117-118` (the `doctor` subparser)
-- Modify: `src/sonari/cli/doctor.py:90-97` (`_cmd_doctor`)
+- Modify: `src/sonari/cli/doctor.py` — **add `should_speak` at module level only.** `_cmd_doctor` is NOT touched in this task; Task 6 rewrites it to call `should_speak`.
 - Test: `tests/test_doctor_speaks.py`
 
 **Interfaces:**
