@@ -105,11 +105,22 @@ def doctor() -> list:
     return results
 
 
-def _cmd_doctor(_args) -> int:
+def _cmd_doctor(args=None) -> int:
+    from sonari.cli import voiceout
+    from sonari.cli.verdict import verdict
+
     rows = doctor()
     all_ok = True
+    speech_path_ok = True
     for check, ok, detail in rows:
         mark = "ok " if ok else "FAIL"
         print(f"[{mark}] {check}: {detail}")
         all_ok = all_ok and ok
+        if check == "speech path" and not ok:
+            speech_path_ok = False
+
+    if should_speak(args):
+        # A red speech-path row means the daemon cannot carry the sentence;
+        # go straight to the fallback rather than waiting out a socket timeout.
+        voiceout.speak(verdict(rows), prefer_daemon=speech_path_ok)
     return 0 if all_ok else 1
