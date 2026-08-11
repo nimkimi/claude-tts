@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 import time
+from unittest import mock
 
 from sonari.speaker import Speaker
 from sonari.sessions import SessionManager
@@ -484,7 +485,14 @@ def test_keep_going_flush_race_leaves_no_orphan():
     sessions.register("bg", cwd="/x/bg")
     daemon._enqueue("bg", "prose", "race", False, entry=_HeardEntry())
 
-    daemon._speak_loop_once()                      # keep-going pops bg, claims, speaks; FLUSH races
+    # _ReentrantFlusher has no .transient(), so cue() raises inside
+    # _signal_speak_failure and trips T15's gap-B fallback — which shells out to
+    # a REAL `say`. Pre-T15 that AttributeError was swallowed with no fallback,
+    # so this test was silent; now it speaks aloud on every run. The owner works
+    # eyes-free and runs this suite constantly. Mocked, not "fixed" in the stub:
+    # the raise is what drives the failure path this race test needs.
+    with mock.patch("sonari.cli.voiceout.speak_direct"):
+        daemon._speak_loop_once()                  # keep-going pops bg, claims, speaks; FLUSH races
 
     assert daemon._current_item is None            # claim released
     assert len(daemon._stream("bg").queue) == 0    # item popped; FLUSH cleared nothing extra
