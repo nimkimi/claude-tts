@@ -75,8 +75,22 @@ def main() -> None:
     if not msgs:
         return
 
+    # Only START a daemon for an INSTALLED Sonari. After `sonari uninstall` the
+    # plugin's hooks keep firing until the user disables the plugin by hand; an
+    # unconditional ensure_daemon() respawned the daemon from this very src/ --
+    # and every resurrection was born a detached orphan launchctl cannot stop.
+    # We still send() below, so a daemon that is genuinely up keeps working.
+    #
+    # TWO signals, both of which uninstall removes. A missing install record
+    # ALONE is a recoverable state, not an uninstall (doctor says "run sonari
+    # install"), and treating it as one would make a dead daemon permanently
+    # and silently dead -- the very failure D4 exists to close.
     try:
-        client.ensure_daemon()
+        from sonari import install_record, paths as _paths
+        installed = bool(install_record.read_install_record()) or \
+            os.path.isdir(str(_paths.APP_DIR))
+        if installed:
+            client.ensure_daemon()
     except Exception:
         pass
 
