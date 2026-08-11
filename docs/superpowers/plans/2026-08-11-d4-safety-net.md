@@ -2032,6 +2032,167 @@ git commit -m "perf(hooks): async registrations except the answering PermissionR
 
 ---
 
+## Task 18a: The new-session announce never fires — fix it and give it a test that can see it
+
+> **Added 2026-08-11, owner-approved.** Found by T18's reviewer, reproduced by the controller. **Pre-existing and live** — nothing to do with T18's change, which is why the plan's original T18 rationale (a `UserPromptSubmit` race) was wrong about the mechanism.
+
+**The bug.** `hooks_entry.handle_event("SessionStart", …)` returns **two** messages — `SET_FOREGROUND` then `SESSION_START` (`hooks_entry.py:103-119`) — and `bin/sonari-hook` sends both. Both dispatch to the same `on_set_foreground` handler. The first one's `_record()` registers the session, so by the time the real `SESSION_START` arrives, `is_new = session not in session_ids()` (`lifecycle.py:64`) is already **False** and the announce block (`:118-131`) is skipped.
+
+Controller's reproduction against the real emission:
+
+```
+SessionStart emits:              ['set_foreground', 'session_start']
+queued after REAL sequence:      []
+queued after BARE session_start: ['1, myproj.']
+```
+
+So the spoken "{number}, {folder}." that makes digit teleports learnable by ear has been silently absent. `tests/test_where_roster.py:88` passes because it sends only the bare `SESSION_START`, skipping the leg the real hook always sends first — the same seam blindness that hid the ANNOUNCE Critical.
+
+**The fix: stop inferring newness from a registration side effect.** `register()` is literally `self._record(session, cwd)` (`sessions.py:158-159`), the same call the `SET_FOREGROUND` leg already made — so `is_new` can never be trusted to survive a multi-message sequence. Track the announce explicitly instead: it fires **once per session id, until that id is unregistered**, which is exactly the documented intent ("never re-fired on resume/clear/compact of a known id") and is robust to how many messages a hook emits or in what order.
+
+**Rejected — drop the redundant `SET_FOREGROUND` emission.** It looks like the tidier fix (and `SESSION_START` is a strict superset), but it changes what the daemon receives for every session start in a codebase where Policy-A voice-taking, workspace drift and keep-going all key off that handler. Too broad a blast radius for this campaign; the announce gets fixed without touching what is sent.
+
+**Files:**
+- Modify: `src/sonari/sessions.py` (add `claim_announce`; clear it in `unregister`)
+- Modify: `src/sonari/daemon/features/lifecycle.py` (announce gate)
+- Test: `tests/test_session_announce.py`
+
+**Interfaces:**
+- Produces: `SessionManager.claim_announce(session: str) -> bool` — True the first time it is called for a session id, False thereafter, reset by `unregister`. It is a **test-and-set**, not a query; the name says `claim` for that reason. Call it exactly once, at the announce site.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_session_announce.py
+"""The new-session announce must survive the REAL hook emission.
+
+SessionStart emits TWO messages (SET_FOREGROUND then SESSION_START) and the
+first one registers the session — so any test that sends only the bare
+SESSION_START proves nothing about production. These drive
+hooks_entry.handle_event's actual output.
+"""
+from sonari import hooks_entry
+from tests.daemon_helpers import make_daemon
+
+
+def _spoken(daemon):
+    return [i.text for st in daemon._streams.values() for i in st.queue._items]
+
+
+def _feed(daemon, event, payload):
+    for m in hooks_entry.handle_event(event, payload):
+        daemon.handle_message(m)
+
+
+def test_a_new_session_announces_itself_through_the_real_hook_sequence():
+    daemon, _q, _sp, _se, _c = make_daemon(foreground=None)
+    _feed(daemon, "SessionStart", {"session_id": "s1", "cwd": "/x/myproj"})
+    assert any("myproj" in t for t in _spoken(daemon)), (
+        "the new-session announce did not fire for the real two-message sequence")
+
+
+def test_the_announce_does_not_repeat_on_a_second_session_start():
+    """Resume/clear/compact re-fire SessionStart for a known id; the announce
+    must not repeat. This is the property is_new was there to provide."""
+    daemon, _q, _sp, _se, _c = make_daemon(foreground=None)
+    _feed(daemon, "SessionStart", {"session_id": "s1", "cwd": "/x/myproj"})
+    before = len(_spoken(daemon))
+    _feed(daemon, "SessionStart", {"session_id": "s1", "cwd": "/x/myproj"})
+    assert len(_spoken(daemon)) == before, "the announce repeated on resume"
+
+
+def test_a_second_distinct_session_announces_too():
+    daemon, _q, _sp, _se, _c = make_daemon(foreground=None)
+    _feed(daemon, "SessionStart", {"session_id": "s1", "cwd": "/x/one"})
+    _feed(daemon, "SessionStart", {"session_id": "s2", "cwd": "/x/two"})
+    spoken = " ".join(_spoken(daemon))
+    assert "one" in spoken and "two" in spoken
+
+
+def test_quiet_verbosity_still_suppresses_the_announce():
+    daemon, _q, _sp, _se, _c = make_daemon(verbosity="quiet", foreground=None)
+    _feed(daemon, "SessionStart", {"session_id": "s1", "cwd": "/x/myproj"})
+    assert not any("myproj" in t for t in _spoken(daemon))
+
+
+def test_claim_announce_is_a_one_shot_reset_by_unregister():
+    from sonari.sessions import SessionManager
+    sm = SessionManager()
+    sm.register("s1", cwd="/x/myproj")
+    assert sm.claim_announce("s1") is True
+    assert sm.claim_announce("s1") is False
+    sm.unregister("s1")
+    sm.register("s1", cwd="/x/myproj")
+    assert sm.claim_announce("s1") is True
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `.venv/bin/python -m pytest tests/test_session_announce.py -v`
+Expected: `test_a_new_session_announces_itself_through_the_real_hook_sequence` FAILS with the stated message (this is the live bug), and `test_claim_announce_is_a_one_shot_reset_by_unregister` fails with `AttributeError: 'SessionManager' object has no attribute 'claim_announce'`. **If the first test passes before you change anything, stop and tell the controller — the premise is wrong.**
+
+- [ ] **Step 3: Implement**
+
+In `src/sonari/sessions.py`, add to `SessionManager.__init__` alongside the other per-session sets:
+
+```python
+        self._announced = set()
+```
+
+and the method (place it next to `register`):
+
+```python
+    def claim_announce(self, session: str) -> bool:
+        """Claim the one-shot registration announce for *session*.
+
+        TEST-AND-SET, not a query — call it exactly once, at the announce site.
+        The announce used to be gated on `is_new` inferred from whether the id
+        was already registered, but a single SessionStart hook emits TWO
+        messages and the first one registers the session, so `is_new` was
+        always False by the time SESSION_START arrived and the announce never
+        fired. Claiming explicitly is robust to how many messages a hook emits.
+        """
+        if session in self._announced:
+            return False
+        self._announced.add(session)
+        return True
+```
+
+In `unregister`, next to the other per-session cleanup lines, add:
+
+```python
+        self._announced.discard(session)
+```
+
+In `src/sonari/daemon/features/lifecycle.py`, change the announce gate. It currently reads `if is_new and ctx.verbosity != "quiet":` — replace with:
+
+```python
+        # NOT `is_new`: a single SessionStart hook emits SET_FOREGROUND then
+        # SESSION_START, and the first already registered this id, so `is_new`
+        # was always False here and the announce never fired. Claim it
+        # explicitly instead — once per id, reset by unregister.
+        if ctx.verbosity != "quiet" and ctx.host.sessions.claim_announce(session):
+```
+
+**Order matters in that condition:** verbosity is checked FIRST so a quiet session does not silently consume its one-shot claim and then stay mute forever after verbosity is raised.
+
+Leave the `is_new` local in place if other code reads it; if nothing else uses it after this change, remove it rather than leaving a dead variable — check with `grep -n "is_new" src/sonari/daemon/features/lifecycle.py`.
+
+- [ ] **Step 4: Run it and watch it pass**
+
+Run: `.venv/bin/python -m pytest tests/test_session_announce.py -v` → 5 passed.
+Then the full suite. **`tests/test_where_roster.py:88` may now behave differently** — it sends a bare `SESSION_START`, which still claims the announce, so it should still pass. If it fails, do NOT weaken it; report what changed.
+
+- [ ] **Step 5: Commit**
+
+```bash
+.venv/bin/python -m pytest -q
+git add src/sonari/sessions.py src/sonari/daemon/features/lifecycle.py tests/test_session_announce.py
+git commit -m "fix(lifecycle): the new-session announce never fired"
+```
+
+---
+
 ## Task 19: Close the hook-resurrection path
 
 **Files:**
