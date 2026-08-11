@@ -56,10 +56,19 @@ def doctor() -> list:
                             expect_reply=True)
         ok = bool(reply) and reply.get("ok") is True
         if ok:
-            supervised = _platform().supervisor.daemon_is_launchd_job()
-            detail = ("reachable (supervised by launchd)" if supervised else
-                      "reachable, but running as a detached orphan — "
-                      "'launchctl' cannot stop it")
+            # The PING already PROVED the daemon is reachable. Supervision is
+            # advisory on top of that, so its probe gets its own guard: without
+            # one, a raising launchctl (PermissionError — anything but the
+            # FileNotFoundError the helper handles) fell to the outer except and
+            # reported "not reachable ... (run 'sonari install')", sending an
+            # eyes-free user to reinstall a system that was working fine.
+            try:
+                supervised = _platform().supervisor.daemon_is_launchd_job()
+                detail = ("reachable (supervised by launchd)" if supervised else
+                          "reachable, but running as a detached orphan — "
+                          "'launchctl' cannot stop it")
+            except Exception as exc:  # noqa: BLE001 - advisory, never fails the row
+                detail = f"reachable; supervision unknown ({exc})"
             results.append(("daemon socket", True, detail))
         else:
             results.append(("daemon socket", False, "no ok reply from daemon"))
