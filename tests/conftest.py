@@ -113,6 +113,17 @@ def _isolate_sonari_dir(tmp_path, monkeypatch):
     # sonari.paths.FAULTLOG_PATH would read/write the developer's real
     # ~/.sonari/faulthandler.log.
     monkeypatch.setattr(paths, "FAULTLOG_PATH", sonari_dir / "faulthandler.log", raising=False)
+    # ~/.local/bin/sonari is built from os.path.expanduser("~") inside the macOS
+    # supervisor, NOT from SONARI_DIR, so none of the repoints above reach it.
+    # Un-isolated, MacSupervisorBackend.uninstall() deletes the DEVELOPER'S REAL
+    # launcher: running the suite made `sonari` vanish from this machine until
+    # the next install. Proven by running the suite and stat-ing the file.
+    local_bin = tmp_path / "local-bin"
+    local_bin.mkdir(exist_ok=True)
+    import sonari.platform.macos.supervisor as _sup
+    monkeypatch.setattr(_sup, "_local_bin_dir", lambda: str(local_bin), raising=False)
+    monkeypatch.setattr(_sup, "_launcher_path", lambda: str(local_bin / "sonari"),
+                        raising=False)
     # DAEMON_ERR_PATH is SONARI_DIR/"daemon.err.log". supervisor.py's launch_spec()
     # reads it live off the `paths` module (no by-value bind), but any test that
     # calls launch_spec() without explicitly mocking the path (e.g.
