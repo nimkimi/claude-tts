@@ -9,8 +9,14 @@ does — and does not do — with your data.
 ## The short version
 
 **Sonari runs entirely on your own Mac. It does not collect, transmit, sell, or share any of
-your data.** There are no servers, no accounts, no telemetry, no analytics, no crash
-reporting, and no third-party services.
+your data.** There are no servers, no accounts, no telemetry, no analytics, and no crash
+reporting.
+
+Sonari makes exactly one kind of outbound connection, and only if you ask for it: running
+`sonari voices install` downloads the neural-voice runtime and model — Python packages from
+PyPI and a ~316 MB voice model from GitHub — the same way any package install does. It sends
+nothing about you: no data of yours leaves your Mac, then or ever. Skip that command and
+Sonari never touches the network at all.
 
 ## What Sonari processes
 
@@ -48,6 +54,12 @@ Sonari keeps a few small local files under `~/.sonari/` (and LaunchAgent files u
   marker). They record what Sonari's process is doing, not what it speaks;
   the text Sonari narrates is persisted only in `state.json` by default (see
   "Optional diagnostic capture" below for the one opt-in exception).
+
+- `spearcons/` — a cache of short rendered audio clips of your session labels
+  (the project-folder name and its number), so Sonari can play them without
+  re-synthesising each time. Same information as the roster above, in audio
+  form. `sonari uninstall` does **not** remove this folder; delete
+  `~/.sonari/spearcons/` yourself, or the whole `~/.sonari` folder.
 
 None of these files are transmitted off your machine.
 
