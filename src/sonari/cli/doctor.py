@@ -60,6 +60,28 @@ def doctor() -> list:
         results.append(("daemon socket", False,
                         f"not reachable: {exc} (run 'sonari install')"))
 
+    # Speech-path liveness. PING is answered by the socket thread, so a wedged
+    # speak loop still reports "reachable" — this row is the one that can tell
+    # a wedge from silence. STATUS already carries both facts we need.
+    WEDGE_S = 120.0
+    try:
+        from sonari import client
+        st = client.send({"v": PROTOCOL_VERSION, "type": MsgType.STATUS},
+                         expect_reply=True) or {}
+        age = st.get("last_drain_age_s")
+        claimed = bool(st.get("current_item"))
+        if not claimed:
+            results.append(("speech path", True,
+                            "idle (nothing claimed by the speak loop)"))
+        elif age is not None and age > WEDGE_S:
+            results.append(("speech path", False,
+                            f"wedged: an utterance has been claimed for "
+                            f"{age:.0f}s without draining"))
+        else:
+            results.append(("speech path", True, "draining normally"))
+    except Exception as exc:  # noqa: BLE001 - doctor must never raise
+        results.append(("speech path", False, f"cannot read daemon status: {exc}"))
+
     results.append(_platform().supervisor.hooks_doctor_row())
 
     try:
