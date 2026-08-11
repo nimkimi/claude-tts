@@ -108,6 +108,24 @@ def doctor() -> list:
     except Exception as exc:  # noqa: BLE001 - doctor must never raise
         results.append(("restore health", False, f"unreadable: {exc}"))
 
+    # Did the daemon die natively since it last armed? bootstrap.py opens the
+    # log mode 'w', so anything after the arming line belongs to THIS boot.
+    try:
+        fl = str(paths.FAULTLOG_PATH)
+        if not os.path.exists(fl):
+            results.append(("fault log", True, "no crash log"))
+        else:
+            with open(fl, "r", encoding="utf-8", errors="replace") as fh:
+                body = fh.read()
+            after = body.split("===", 2)[-1] if "===" in body else body
+            if after.strip():
+                results.append(("fault log", False,
+                                f"a native crash was recorded — see {fl}"))
+            else:
+                results.append(("fault log", True, "armed, no crash recorded"))
+    except Exception as exc:  # noqa: BLE001 - doctor must never raise
+        results.append(("fault log", False, f"unreadable: {exc}"))
+
     results.append(_platform().supervisor.hooks_doctor_row())
 
     try:

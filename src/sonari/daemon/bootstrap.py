@@ -33,11 +33,11 @@ def _arm_faulthandler() -> None:
     try:
         import faulthandler
         import signal
-        # Import SONARI_DIR LIVE (not at module top) so the conftest monkeypatch /
+        # Import FAULTLOG_PATH LIVE (not at module top) so the conftest monkeypatch /
         # any SONARI_DIR redirection takes effect; a top-level import would freeze
         # the value before tests patch it and leak into the real ~/.sonari.
-        from sonari.paths import SONARI_DIR
-        path = str(SONARI_DIR / "faulthandler.log")
+        from sonari.paths import FAULTLOG_PATH
+        path = str(FAULTLOG_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         # mode 'w': only the latest run's crash matters; never grow unbounded.
         _FAULT_FILE = open(path, "w", encoding="utf-8")

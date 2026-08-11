@@ -158,7 +158,7 @@ def uninstall() -> int:
         paths.HOTKEYD_RESOLVED_PATH,
         paths.INSTALL_RECORD_PATH,
         sonari_dir / "hotkeyd.log",
-        sonari_dir / "faulthandler.log",
+        paths.FAULTLOG_PATH,
     ]
     for artifact in artifacts:
         if os.path.exists(str(artifact)):

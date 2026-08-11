@@ -89,6 +89,12 @@ def _isolate_sonari_dir(tmp_path, monkeypatch):
     # above): without this repoint, any doctor() call that does not explicitly
     # mock sonari.paths.STATE_PATH reads the developer's real ~/.sonari/state.json.
     monkeypatch.setattr(paths, "STATE_PATH", sonari_dir / "state.json", raising=False)
+    # FAULTLOG_PATH is SONARI_DIR/"faulthandler.log" bound at import (same trap):
+    # without this repoint, _arm_faulthandler()'s live `from sonari.paths import
+    # FAULTLOG_PATH` and any doctor() call that does not explicitly mock
+    # sonari.paths.FAULTLOG_PATH would read/write the developer's real
+    # ~/.sonari/faulthandler.log.
+    monkeypatch.setattr(paths, "FAULTLOG_PATH", sonari_dir / "faulthandler.log", raising=False)
     import sonari.daemon.host as daemon_host
     import sonari.daemon.bootstrap as daemon_bootstrap
     monkeypatch.setattr(daemon_host, "LOCK_PATH", sonari_dir / "daemon.lock", raising=False)
