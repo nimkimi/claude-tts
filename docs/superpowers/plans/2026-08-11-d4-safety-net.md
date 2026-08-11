@@ -437,6 +437,144 @@ git commit -m "feat(cli): direct say fallback for CLI-originated speech"
 
 ---
 
+## Task 5a: The ANNOUNCE message — a daemon path for CLI-originated speech
+
+> **Added 2026-08-11, owner-approved, after the original Task 5 was found dead on arrival.** The plan assumed the daemon could be told to speak a sentence. It cannot: `features/prose.py:15-19` reads `msg["delta"]`/`["index"]` (not `"text"`), `ctx.session` is `msg.get("session", "")` (`context.py:34-35`), and the daemon's model is session-streams end to end — even where-am-I speaks by enqueuing into a **playable session stream** (`control.py:380-395`). A CLI verdict has no session, so no existing message can carry it. The owner chose to add the missing path rather than drop daemon-first (which would re-open D8's overlap class) or fake a session (which would pollute the transcript pile).
+
+**Files:**
+- Modify: `src/sonari/protocol.py` (add `ANNOUNCE` to `MsgType`)
+- Modify: `src/sonari/daemon/features/control.py` (add the handler)
+- Test: `tests/test_announce.py`
+
+**Interfaces:**
+- Produces: `MsgType.ANNOUNCE = "announce"`; a handler that returns `{"ok": True}` when the sentence was enqueued and `{"ok": False}` when there was nowhere audible to put it.
+
+**Why it must ack.** `client.send` without `expect_reply` returns `None` whether the daemon spoke or silently dropped the message. Without an ack, `speak()` cannot tell delivery from loss and would report success while the user hears nothing — the exact class of confident lie D4 exists to end. The ack is what makes the direct fallback reachable.
+
+**Delivery shape.** Reuse where-am-I's proven one-off-sentence path verbatim in spirit: enqueue into a **playable** stream with `mute_exempt=True, pause_exempt=True`, and sanction a dead read, because a typed CLI command is a deliberate press exactly like ⌃⌘W.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_announce.py
+"""ANNOUNCE carries CLI-originated speech (the doctor verdict, install/uninstall).
+
+The daemon speaks only into session streams; a CLI sentence has no session, so
+this handler picks a playable one. It MUST ack: without a reply, voiceout.speak
+cannot tell a delivered sentence from a dropped one and would never fall back.
+"""
+from sonari.protocol import MsgType
+
+
+def test_announce_is_a_distinct_message_type():
+    assert MsgType.ANNOUNCE == "announce"
+    # It must not collide with the session-scoped prose path.
+    assert MsgType.ANNOUNCE != MsgType.PROSE
+
+
+def test_announce_enqueues_the_sentence_and_acks(daemon):
+    daemon.sessions.set_foreground("s1")
+    reply = daemon.handle_message(
+        {"v": 1, "type": MsgType.ANNOUNCE, "text": "Sonari is healthy."})
+    assert reply == {"ok": True}
+    queued = [i.text for st in daemon._streams.values() for i in st.queue]
+    assert "Sonari is healthy." in queued
+
+
+def test_announce_refuses_when_there_is_nowhere_audible(daemon):
+    """No workspace and no speaker: the honest answer is ok False so the CLI
+    falls back to its own voice, NOT a silent success."""
+    reply = daemon.handle_message(
+        {"v": 1, "type": MsgType.ANNOUNCE, "text": "Sonari is healthy."})
+    assert reply == {"ok": False}
+
+
+def test_empty_text_is_refused(daemon):
+    daemon.sessions.set_foreground("s1")
+    reply = daemon.handle_message({"v": 1, "type": MsgType.ANNOUNCE, "text": ""})
+    assert reply == {"ok": False}
+
+
+def test_announce_is_mute_and_pause_exempt(daemon):
+    """A safety-net verdict must be audible even on a muted or held stream —
+    it is the message that explains why everything else is quiet."""
+    daemon.sessions.set_foreground("s1")
+    daemon.handle_message(
+        {"v": 1, "type": MsgType.ANNOUNCE, "text": "Sonari is unhealthy."})
+    item = [i for st in daemon._streams.values() for i in st.queue][-1]
+    assert item.mute_exempt is True
+    assert item.pause_exempt is True
+```
+
+Use the same `daemon` fixture the existing host tests use — find it with
+`grep -rn "def daemon" tests/conftest.py` and follow that construction path; do
+not invent a new one. If the fixture's helper for dispatching a message is not
+`handle_message`, use whatever the neighbouring host tests use and keep the
+assertions identical.
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `.venv/bin/python -m pytest tests/test_announce.py -v`
+Expected: `AttributeError: type object 'MsgType' has no attribute 'ANNOUNCE'`
+
+- [ ] **Step 3: Implement**
+
+In `src/sonari/protocol.py`, add to `MsgType` (keep the existing comment style):
+
+```python
+    ANNOUNCE = "announce"   # CLI-originated one-off speech (doctor verdict, install/uninstall): no session, acked so the CLI can fall back
+```
+
+In `src/sonari/daemon/features/control.py`:
+
+```python
+@handler(MsgType.ANNOUNCE)
+def on_announce(ctx, msg):
+    """Speak one CLI-originated sentence and ACK whether it landed.
+
+    The daemon only speaks into session streams, so a sentence with no session
+    needs a playable one chosen for it — the same problem where-am-I solves for
+    its own readout when speaker() is None. Ack matters: an unacked send cannot
+    be distinguished from a dropped one, and the CLI's direct fallback depends
+    on knowing the difference.
+    """
+    host = ctx.host
+    text = (msg.get("text") or "").strip()
+    if not text:
+        return {"ok": False}
+    target = host.sessions.workspace()
+    if target is None:
+        target = host.sessions.speaker()
+    if target is None:
+        return {"ok": False}
+    st = host._streams.get(target)
+    if st is not None and st.stopped:
+        return {"ok": False}
+    host._enqueue(target, "prose", text, False,
+                  mute_exempt=True, pause_exempt=True)
+    # A typed CLI command is a deliberate press, exactly like ⌃⌘W: it sanctions
+    # reading this stream even if the session behind it is dead (D3's grain).
+    host._sanction_dead_read(target)
+    return {"ok": True}
+```
+
+- [ ] **Step 4: Run it and watch it pass**
+
+Run: `.venv/bin/python -m pytest tests/test_announce.py -v` → 5 passed.
+Then run the drift/protocol guards, which pin `MsgType`:
+`.venv/bin/python -m pytest tests/test_protocol.py tests/test_concurrency_guards.py -q` → 16 passed.
+If a guard fails because it enumerates message types, add `ANNOUNCE` to that enumeration — do not weaken the guard.
+
+- [ ] **Step 5: Commit**
+
+```bash
+.venv/bin/python -m pytest -q
+git add src/sonari/protocol.py src/sonari/daemon/features/control.py tests/test_announce.py
+git commit -m "feat(protocol): ANNOUNCE carries CLI-originated speech, with an ack"
+```
+
+---
+
 ## Task 5: Daemon-first delivery with fallback
 
 **Files:**
@@ -459,11 +597,34 @@ from sonari.cli import voiceout
 
 
 def test_prefers_the_daemon_when_it_is_reachable():
-    with mock.patch("sonari.client.send") as send, \
+    with mock.patch("sonari.client.send", return_value={"ok": True}) as send, \
          mock.patch.object(voiceout, "speak_direct") as direct:
         assert voiceout.speak("hello") == "daemon"
     send.assert_called_once()
     direct.assert_not_called()
+
+
+def test_sends_ANNOUNCE_not_PROSE():
+    """PROSE is session-scoped and reads delta/index; a CLI sentence sent as
+    PROSE is accepted and silently dropped. This test is the guard against
+    that regression, which every mock-based routing test would otherwise miss."""
+    from sonari.protocol import MsgType
+    with mock.patch("sonari.client.send", return_value={"ok": True}) as send, \
+         mock.patch.object(voiceout, "speak_direct"):
+        voiceout.speak("hello")
+    msg = send.call_args[0][0]
+    assert msg["type"] == MsgType.ANNOUNCE
+    assert msg["text"] == "hello"
+    assert send.call_args.kwargs["expect_reply"] is True
+
+
+def test_a_dropped_message_falls_back_instead_of_claiming_success():
+    """The daemon answered but refused to speak (nowhere audible). Reporting
+    "daemon" here would leave the user in silence believing it spoke."""
+    with mock.patch("sonari.client.send", return_value={"ok": False}), \
+         mock.patch.object(voiceout, "speak_direct", return_value=True) as direct:
+        assert voiceout.speak("hello") == "direct"
+    direct.assert_called_once_with("hello")
 
 
 def test_falls_back_to_direct_when_the_daemon_is_unreachable():
@@ -474,7 +635,7 @@ def test_falls_back_to_direct_when_the_daemon_is_unreachable():
 
 
 def test_skips_the_daemon_entirely_when_the_caller_knows_it_is_broken():
-    with mock.patch("sonari.client.send") as send, \
+    with mock.patch("sonari.client.send", return_value={"ok": True}) as send, \
          mock.patch.object(voiceout, "speak_direct", return_value=True):
         assert voiceout.speak("hello", prefer_daemon=False) == "direct"
     send.assert_not_called()
@@ -502,6 +663,11 @@ def speak(text: str, *, prefer_daemon: bool = True) -> str:
     prefer_daemon=False is for callers that ALREADY know the speech path is
     broken (a red speech-path row, a stopped daemon) — it skips a pointless
     socket timeout rather than changing the policy.
+
+    The daemon branch REQUIRES an ack. A send with no reply cannot distinguish
+    a spoken sentence from a silently dropped one, and reporting "daemon" for a
+    dropped message would leave the user in silence while the CLI believes it
+    spoke — so anything short of {"ok": True} falls through to the direct voice.
     """
     if not text:
         return "silent"
@@ -509,9 +675,11 @@ def speak(text: str, *, prefer_daemon: bool = True) -> str:
         try:
             from sonari import client
             from sonari.protocol import MsgType, PROTOCOL_VERSION
-            client.send({"v": PROTOCOL_VERSION, "type": MsgType.PROSE,
-                         "text": text})
-            return "daemon"
+            reply = client.send({"v": PROTOCOL_VERSION,
+                                 "type": MsgType.ANNOUNCE,
+                                 "text": text}, expect_reply=True)
+            if reply and reply.get("ok") is True:
+                return "daemon"
         except Exception:  # noqa: BLE001 - any daemon failure means fall back
             pass
     return "direct" if speak_direct(text) else "silent"

@@ -121,7 +121,10 @@ Rejected: reading every row aloud (≈15 rows of speech in the common all-green 
 **When it speaks.** Speak when `sys.stdout.isatty()`; stay silent when piped or redirected. `--speak` and `--quiet` override in both directions. This is the standard convention (`git`, `ls`, `grep`), it keeps the 1402-test suite silent by default, and it means the flag is never needed in the case that actually matters — a human at a terminal.
 
 **How it speaks.**
-1. **Daemon-first.** Send the verdict as a normal utterance so it obeys D8's atomic cue+speech contract and can never interleave with live session speech.
+
+> **CORRECTION OF RECORD (2026-08-11, during build).** This section originally said "send the verdict as a normal utterance". There is no such thing: `features/prose.py:15-19` reads `delta`/`index`, `ctx.session` is `msg.get("session","")`, and the daemon speaks **only into session streams** — even where-am-I enqueues into a playable one (`control.py:380-395`). A CLI verdict has no session, so **no existing message could carry it** and the daemon-first branch was dead on arrival. The owner chose to add the missing path (decision #16) rather than drop daemon-first (re-opening D8's overlap class) or fake a session (polluting the transcript pile). A second defect surfaced with it: an unacked `client.send` cannot distinguish a spoken sentence from a dropped one, so the fallback could never fire.
+
+1. **Daemon-first via a new `ANNOUNCE` message**, whose handler enqueues the sentence into a playable stream (`mute_exempt`, `pause_exempt`, dead-read sanctioned — a typed command is a deliberate press) and **acks**. Only `{"ok": True}` counts as spoken; anything else falls through. This keeps the verdict inside D8's atomic cue+speech contract so it can never interleave with live session speech.
 2. **Direct fallback** — a raw `say` (with `--`, per `tts.py:194`) plus an earcon — when the daemon is unreachable, the send fails, **or the speech-path row is red**. This is deliberately the same shape, and the same reasoning, as the witness alarm's raw shell-out.
 
 **The verdict is its own end-to-end proof.** If the sentence is heard, the whole ear path just worked — synthesis, playback, routing. No separate probe tone is needed, and no extra noise is added. The heartbeat row (§4.1) serves the printed and CI reader, who cannot hear anything.
@@ -232,3 +235,4 @@ Kept separate from the pending **ear-batch-3** (D3's five strings and the "pendi
 | 13 | **#54's surviving half folded into D4** | §10 |
 | 14 | Four verified-stale issues (#14, #50, #22, #1) **closed with evidence** | done 2026-08-11 |
 | 15 | **Uninstall must actually stop the daemon** and close the hook-resurrection path (post-go scope rider, approved) | §8.1 steps 3, 5 |
+| 16 | **Add an `ANNOUNCE` message + acking handler** for CLI-originated speech, rather than dropping daemon-first or faking a session (build-time scope rider, approved) | §6 |
