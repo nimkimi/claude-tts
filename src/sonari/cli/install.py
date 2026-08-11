@@ -64,11 +64,15 @@ def _copy_app(plugin_root: str) -> str:
     return app_dir
 
 
-def install() -> int:
-    """Install Sonari: resolve python, copy the runtime, write the install
-    record, then delegate OS-specific autostart + hooks + launcher + hotkeys to
-    the platform backend (macOS: LaunchAgents + hotkeyd; Windows: Task Scheduler
-    + settings.json hooks + sonari.cmd)."""
+def _install_body() -> int:
+    """Do the actual machine-mutating install: resolve python, copy the
+    runtime, write the install record, then delegate OS-specific autostart +
+    hooks + launcher + hotkeys to the platform backend (macOS: LaunchAgents +
+    hotkeyd; Windows: Task Scheduler + settings.json hooks + sonari.cmd).
+
+    Split out from `install()` as a seam: `install()`'s eared summary calls
+    the real `doctor()`, and a test exercising that summary must not also
+    perform a real install (LaunchAgents, app copy, ...) to reach it."""
     from sonari.cli import _platform, _build_raise_helper
     paths.ensure_sonari_dir()
     sup = _platform().supervisor
@@ -132,6 +136,29 @@ def install() -> int:
     # 8. OS-specific next steps.
     sup.post_install_notes()
     return 0
+
+
+def install() -> int:
+    """Run the real install, then speak the eared summary.
+
+    The summary runs even when `_install_body()` reports failure: whatever
+    broke the install (missing python, an unwritable ~/.sonari, ...) shows up
+    as a failing row in doctor()'s own checks too, so the verdict still lands
+    as unhealthy rather than going silent right when the user needs it most.
+    Reuses doctor's own `doctor()` rows and `verdict()` sentence — one health
+    policy, so the printed/spoken summary here and `sonari doctor` can never
+    drift apart (spec §8)."""
+    rc = _install_body()
+    import argparse
+    from sonari.cli import voiceout
+    from sonari.cli.doctor import doctor, should_speak
+    from sonari.cli.verdict import verdict
+    rows = doctor()
+    for check, ok, detail in rows:
+        print("[{0}] {1}: {2}".format("ok " if ok else "FAIL", check, detail))
+    if should_speak(argparse.Namespace(speak=False, quiet=False)):
+        voiceout.speak(verdict(rows))
+    return rc
 
 
 def _cmd_install(_args) -> int:
