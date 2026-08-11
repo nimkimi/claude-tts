@@ -2570,8 +2570,12 @@ Run: `.venv/bin/python -m pytest tests/test_manifests.py -v` → pass.
 
 - [ ] **Step 5: Commit**
 
+**Never `git add -A` in this repo.** `.superpowers/` (the SDD workspace and the campaign chronicle), `scratchpad/`, and `src/sonari/hooks_prime.py` are untracked but **not** git-ignored, so `-A` would sweep all three into the release commit — violating this plan's "do not touch" constraint. Name the five files:
+
 ```bash
-git add -A
+git add pyproject.toml .claude-plugin/plugin.json .claude-plugin/marketplace.json \
+        src/sonari/__init__.py tests/test_manifests.py
+git status --short          # expect ONLY untracked ?? lines to remain
 git commit -m "chore(release): 0.10.0 — the safety net"
 ```
 
