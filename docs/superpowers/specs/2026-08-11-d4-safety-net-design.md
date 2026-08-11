@@ -16,11 +16,29 @@ It is **shallow** — its daemon row is a `PING`, answered by the socket thread.
 
 It is **blind** — nothing checks the heartbeat, `state.json` freshness or last-restore outcome (P17), hotkeyd *liveness* as opposed to mere presence, the faulthandler log, or login/CLI reachability.
 
-It **lies by self-healing** — `client.send` → `ensure_daemon` (`client.py:43`) → `ensure_running` relaunches the daemon, so the socket row reports `reachable` even immediately after `sonari uninstall`. The probe repairs the thing it is measuring.
+And **`sonari uninstall` does not uninstall.** This is the correction of record described in §2.1 — the mechanism is not the one the MAP and this spec's first revision assumed. Three faults compose:
 
-And the surrounding lifecycle is equally un-eared: `sonari install` ends in a silent transcript; `sonari uninstall` has no spoken confirmation, discards `launchctl unload`'s return code (so "Removed LaunchAgent" prints on a file delete alone), and leaves `state.json` — verbatim spoken text, up to 200 utterances per session — on disk, absent from PRIVACY.md's inventory and contradicting its own "not designed to record session content" claim.
+1. **`launchctl unload` cannot stop a lazily-spawned daemon.** `ensure_running` (`daemon/bootstrap.py:16-21`) starts the daemon with `subprocess.Popen(..., start_new_session=True)` — a detached session leader that is **not a launchd job**. Unloading the LaunchAgent has no effect on it.
+2. **Hooks resurrect it afterwards.** Uninstall's last line asks the user to disable the plugin *manually*, so hook events keep firing. `bin/sonari-hook:79` calls `client.ensure_daemon()` **unconditionally** — no install gate — which finds no lockfile, calls `ensure_running`, and **respawns the daemon** from the plugin's own `src/` (which survives the `APP_DIR` removal). Every resurrected daemon is born an orphan.
+3. **Removing the lockfile makes the survivor unfindable.** `LOCK_PATH` is in the removed-artifacts list, and it is the only record of the daemon's host/port/**pid**. After uninstall, nothing can locate the process that is still running — and still speaking.
+
+The spoken uninstall confirmation D4 adds would otherwise narrate *"Sonari removed"* while Sonari keeps talking. That is the exact class of confident lie this campaign exists to end.
+
+The rest of the lifecycle is equally un-eared: `sonari install` ends in a silent transcript; `sonari uninstall` has no spoken confirmation, discards `launchctl unload`'s return code (so "Removed LaunchAgent" prints on a file delete alone — `platform/macos/supervisor.py:228-231`), and leaves `state.json` — verbatim spoken text, up to 200 utterances per session — on disk, absent from PRIVACY.md's inventory and contradicting its own "not designed to record session content" claim.
 
 D4 closes all of it, and in doing so completes **R1** ("the reader cannot announce its own death").
+
+## 2.1 Correction of record (2026-08-11, during plan authoring)
+
+The first revision of this spec claimed doctor **self-heals**: that `client.send` → `ensure_daemon` → `ensure_running` relaunches the daemon, making the socket row report `reachable` right after uninstall. **That is false, and the tree falsifies it:**
+
+- `client.send` (`client.py:15-40`) connects or raises `DaemonNotRunning`. It never calls `ensure_daemon`.
+- `ensure_daemon` has **exactly one caller in the entire repo**: `bin/sonari-hook:79`.
+- Therefore **`sonari doctor` never relaunches anything.** Decision #9's *intent* — doctor observes, never repairs — was already true; only the invariant was unpinned.
+
+The claim rode unchecked from MAP §5's bullet into this spec. It was caught by reading the code before a single build task ran. **The real defect behind the misdiagnosis is worse** — §1's three-fault "uninstall does not uninstall" — and it is what D4 now fixes.
+
+**Consequence for the plan:** the "probe-only send path" task is deleted. It would have fixed nothing. What survives is the **invariant pin** (§4.2) and the genuine teardown work (§8.1).
 
 ## 2. What is already true — verified, so the plan does not rediscover it
 
@@ -37,6 +55,11 @@ These were confirmed in the tree at `e92bfd2` during design. They are load-beari
 | **No `isatty` guard exists anywhere in `src/`.** Four test files call `doctor()`. | `grep -rn "isatty" src/` → empty |
 | `ensure_daemon(timeout=3.0)` polls `_connectable()` every 50 ms with no backoff and no failure memo, after calling `ensure_running()`. | `client.py:43-52` |
 | Five version sites are pinned by the manifest test. | `pyproject.toml:7`, `.claude-plugin/plugin.json:4`, `.claude-plugin/marketplace.json:12`, `src/sonari/__init__.py:4`, `tests/test_manifests.py:88` |
+| **The lockfile carries the daemon's `pid`** — alongside host/port/token. So the running process is addressable *before* the lockfile is deleted. | `platform/transport.py:18-20` |
+| **A SIGTERM handler already exists** and exits `run()` into SP6's clean shutdown flush. SIGTERM is therefore the *correct* stop mechanism — it preserves state rather than hard-killing. | `daemon/host.py:1346-1361` |
+| **There is no SHUTDOWN/QUIT message type.** `STOP` / `STOP_ALL` / `STOP_SESSION` stop *speech*, not the process. | `protocol.py:9-50` |
+| **`SINGLETON_PATH` is absent from uninstall's artifact list**, and the daemon holds it as a process-lifetime `flock`. Acquiring it is therefore a positive proof that no daemon survives. | `cli/install.py:155-162`, `platform/transport.py:55-58` |
+| Transport is **TCP with a lockfile**, not a Unix socket — `connectable()` reads the lockfile first, so deleting it makes a live daemon unreachable *and* unfindable. | `platform/transport.py:31-52`, `paths.py:29-32` |
 
 **Two MAP items are therefore already closed and must not be re-opened as work:**
 - §7(b) *"Build the witness?"* — built and shipped in D2+D7. What remains for D4 is **checking that it is alive and armed** (R1's "the watchdog is itself unwatched").
@@ -72,11 +95,13 @@ Each check becomes a callable returning a record. Beyond today's `(check, ok, de
 | **fault log** | Whether `SONARI_DIR/faulthandler.log` holds a crash dump written *after* the arming line — i.e. did the daemon die natively since boot. | silent C-level deaths |
 | **reachability** | Both LaunchAgents loaded, and `sonari` resolvable on `PATH`. | R10 / login-item drift |
 
-### 4.2 Changed row
+### 4.2 The side-effect-free invariant (pin, not a fix)
 
-**`daemon socket` becomes side-effect-free.** A probe-only send path that never calls `ensure_running`. A diagnostic that repairs what it measures cannot measure it, and today's behaviour resurrects a daemon the user just uninstalled.
+Per §2.1, doctor **already** never relaunches — `client.send` connects or raises, and `ensure_daemon` is reachable only from `bin/sonari-hook`. There is no repair work to do here.
 
-The normal `client.send` path keeps its existing relaunch behaviour unchanged — this is an additional probe entry point, not a change to how the rest of the product talks to the daemon. **That invariant gets its own pinned test.**
+What D4 owes is the **pin**: a test proving that a full `doctor()` run spawns **zero** processes, so a future edit cannot quietly reintroduce a self-healing probe. A spawn-counting fake is the mechanism. This is cheap and it is the whole task.
+
+**Additionally, one new row makes the orphan visible:** `daemon socket` gains a supervision detail — whether the reachable daemon is a **launchd job** or a **detached orphan** (`launchctl list <label>` vs a live lockfile `pid` with no corresponding job). An orphan is a `warn`, not a `fail` — it works, it just cannot be stopped by `launchctl`, which is precisely what §8.1 fixes.
 
 ## 5. Layer 2 — the verdict
 
@@ -113,13 +138,20 @@ Applied to the failure paths D4 already touches: `_signal_speak_failure`, earcon
 
 **`sonari install`** ends with the **same verdict** (§5). One policy, not a second one that can drift.
 
-**`sonari uninstall`** — the step order is **pinned**, because the disclosure and the teardown compete for the same voice:
+### 8.1 `sonari uninstall` — the pinned teardown sequence
 
-1. **Ask first, while the daemon is still alive.** *"Sonari saved transcript text from N sessions. Delete it?"* goes out on the **normal daemon-first path** (§6), so the question obeys D8's contract and cannot collide with whatever the user is still hearing. **Exception:** if the daemon is already dead when `uninstall` starts, the disclosure uses the **direct fallback** — the question must be audible precisely when Sonari is broken, which is a common reason to be uninstalling.
-2. **Then unload** the LaunchAgents, **honouring `launchctl unload`'s return code** instead of discarding it — today "Removed LaunchAgent" prints on a successful file delete regardless of whether the process actually stopped.
-3. **Then remove files**, purging or preserving `state.json` per the answer from step 1.
+> **SCOPE RIDER, PENDING OWNER.** Steps 3 and 5 (actually stopping the daemon, and closing the hook-resurrection path) are **new scope**, discovered during plan authoring and not present in the MAP or the approved design. They are the real defect behind §2.1's misdiagnosis. Awaiting the owner's word; everything else in this section was already approved.
 
-Unloading before asking is explicitly rejected: it kills the voice that has to ask the question, forcing every disclosure down the fallback path for no gain.
+The order is **pinned**, because the disclosure and the teardown compete for the same voice, and because stopping a process you have already made unfindable is impossible:
+
+1. **Ask first, while the daemon is still alive.** *"Sonari saved transcript text from N sessions. Delete it?"* goes out on the **normal daemon-first path** (§6), so the question obeys D8's contract and cannot collide with whatever the user is still hearing. **Exception:** if the daemon is already dead, the disclosure uses the **direct fallback** — the question must be audible precisely when Sonari is broken, which is a common reason to be uninstalling.
+2. **Unload the LaunchAgents first**, so launchd cannot restart what step 3 is about to stop — and **honour `launchctl unload`'s return code** instead of discarding it (`supervisor.py:228-231`).
+3. **Stop the running daemon.** Read `pid` from the lockfile **before** deleting it (`transport.py:18-20`) and send **SIGTERM** — which the daemon already handles by exiting into SP6's clean shutdown flush (`host.py:1346-1361`), so state is preserved rather than truncated. This is the step that makes uninstall true for a lazily-spawned orphan.
+4. **Verify it actually stopped** by acquiring the `SINGLETON_PATH` flock. The daemon holds it for its process lifetime, so a successful acquire is **positive proof** no daemon survives — not an inference from a missing lockfile. On timeout, say so out loud rather than reporting success.
+5. **Close the resurrection path.** `bin/sonari-hook` gates its `ensure_daemon()` call on the install record existing. It may still `send()` to an already-reachable daemon, but it must never **spawn** one for an uninstalled Sonari. `INSTALL_RECORD_PATH` is already removed by uninstall, so the gate needs no new state.
+6. **Then remove files**, purging or preserving `state.json` per the answer from step 1.
+
+Two orderings are explicitly rejected: **unloading before asking** (it kills the voice that has to ask the question, forcing every disclosure down the fallback path for no gain), and **deleting the lockfile before stopping the process** (it discards the only record of the pid — today's behaviour, and the reason the orphan is unfindable).
 
 Non-interactive: `--purge-transcripts` / `--keep-transcripts`. With neither flag and no tty, the default is **keep**, and the path is printed. Silence must never destroy data.
 
@@ -193,7 +225,7 @@ Kept separate from the pending **ear-batch-3** (D3's five strings and the "pendi
 | 6 | "Try doctor" cue = **one-shot per class, re-armed by a success** | §7 |
 | 7 | **Hook-responsiveness fix folded in** | §9 |
 | 8 | **D4 = 0.10.0**; M0 → 0.11.0, M1 → 0.12.0 | §14 |
-| 9 | Doctor is **side-effect-free** — never relaunches | §4.2 |
+| 9 | Doctor is **side-effect-free** — never relaunches. **Not reopened; intent unchanged. §2.1 found it was already true — the premise behind the question (a self-healing probe) was false, so the work shrinks from a fix to an invariant pin.** | §2.1, §4.2 |
 | 10 | **Speaks when interactive**, silent when piped; `--speak` / `--quiet` | §6 |
 | 11 | D4 gets its **own ear-batch-4** | §13 |
 | 12 | The 23 tagged `[Windows]` issues **closed** | done 2026-08-11 |
