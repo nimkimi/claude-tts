@@ -244,6 +244,10 @@ class SpeechDaemon:
         self._witness_last_ping = None
         self._witness_alarmed = False
         self._alarm_popen = subprocess.Popen
+        # D4 T15: fire-once-per-class suppression for the "try doctor" hint
+        # appended to _signal_speak_failure's word (below).
+        from sonari.daemon.faultcue import FaultCue
+        self._faultcue = FaultCue()
 
     # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
     # (speak loop + kernel ops) goes through self._state._X directly; these
@@ -909,21 +913,53 @@ class SpeechDaemon:
         """An utterance raised (missing TTS extra, synth/playback failure, ...).
         The inner speak-loop handlers swallow it so one bad item can't wedge the
         loop — but for an eyes-free user a swallowed exception is a SILENT no-op,
-        the worst outcome (#41). Signal it audibly — the error tone plus, when
-        the failing item's *session* is known, the D7a word so the failure is
-        learnable, not a bare tone (T14). The word needs the queue and the queue
-        needs self._lock; both call sites run on the speak thread OUTSIDE the
-        lock, so the lock is taken here. Never raises — error signaling must not
-        itself re-break the loop. Call only from within an active `except` block
-        (print_exc reads the handled exception)."""
+        the worst outcome (#41). Signal it audibly — the error tone plus the
+        D7a word, so the failure is learnable, not a bare tone (T14), plus a
+        fire-once-per-class "try doctor" hint (D4 T15).
+
+        #54 gap A: when no session is known there is no per-session queue to
+        enqueue the word onto (`cue()`'s word/session combo requires both) —
+        and this handler exists because speech itself just broke, so riding
+        that same path might never be heard anyway. The word is spoken via
+        `voiceout.speak_direct` (T4) instead, bypassing the daemon entirely;
+        the tone still fires through `cue()`. Two accepted, deliberate costs:
+        this bypasses D8 law 1 (verbal never bypasses the queue) for this one
+        case, and a raw `say` can overlap live session speech (a second voice).
+
+        #54 gap B: if `cue()` itself raises (the failure IS the TTS path), the
+        word cannot ride it either — fall back to `speak_direct` there too.
+
+        The word needs the queue and the queue needs self._lock (session
+        branch only); both call sites run on the speak thread OUTSIDE the
+        lock, so the lock is taken here. Never raises — error signaling must
+        not itself re-break the loop. Call only from within an active
+        `except` block (print_exc reads the handled exception)."""
+        hint = ""
+        if self._faultcue.should_fire("speak"):
+            hint = " Things seem off — try sonari doctor."  # PROVISIONAL (ear-batch-4)
+        word = SPEAK_FAILURE_WORD + hint
+        spoken = False
         try:
             if session is not None:
                 with self._lock:
-                    self.cue("error_system", word=SPEAK_FAILURE_WORD, session=session)
+                    self.cue("error_system", word=word, session=session)
             else:
-                self.cue("error_system")   # W6: "Sonari itself failed; content preserved unheard"
-        except Exception:  # noqa: BLE001 - signaling failure must not wedge the loop
+                # #54 gap A: this branch used to fire a BARE tone (W6). An
+                # eyes-free user got a sound with no account of what failed.
+                self.cue("error_system")
+                from sonari.cli import voiceout
+                voiceout.speak_direct(word)
+            spoken = True
+        except Exception:  # noqa: BLE001 - signaling must not wedge the loop
             pass
+        if not spoken:
+            # #54 gap B: the word was routed through the very TTS path that
+            # just failed. Same reasoning as hotkeyd's raw shell-out alarm.
+            try:
+                from sonari.cli import voiceout
+                voiceout.speak_direct(word)
+            except Exception:  # noqa: BLE001 - last resort; nothing to escalate to
+                pass
         try:
             import sys
             import traceback

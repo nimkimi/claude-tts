@@ -110,12 +110,18 @@ def test_cancelled_utterance_does_not_fire_error_earcon(monkeypatch):
 
 def test_error_earcon_failure_is_contained(monkeypatch):
     # If signaling the error itself raises, the loop must still not die.
+    from unittest import mock
+
     daemon, queue, speaker, *_ = make_daemon(foreground="fg")
     monkeypatch.setattr(speaker, "speak", _raise(RuntimeError("synth blew up")))
     monkeypatch.setattr(speaker, "transient", _raise(RuntimeError("earcon backend down")))
     daemon._enqueue("fg", "prose", "hello", False)
 
-    daemon._speak_loop_once()                    # must return normally despite both raising
+    # D4 T15: cue() raising here now trips the #54 gap-B fallback (speak_direct,
+    # a real `say` shell-out) — mocked so the suite stays silent; this test is
+    # about containment, not about that call landing.
+    with mock.patch("sonari.cli.voiceout.speak_direct"):
+        daemon._speak_loop_once()                # must return normally despite both raising
 
 
 # ---------------------------------------------------------------------------
@@ -128,14 +134,19 @@ def test_error_earcon_failure_is_contained(monkeypatch):
 def test_signal_speak_failure_logs_traceback_to_stderr():
     import io
     import contextlib
+    from unittest import mock
 
     daemon, queue, speaker, *_ = make_daemon(foreground="fg")
     buf = io.StringIO()
-    try:
-        raise RuntimeError("synthetic synth failure")
-    except RuntimeError:
-        with contextlib.redirect_stderr(buf):
-            daemon._signal_speak_failure()
+    # D4 T15: the session-less branch now also speaks via voiceout.speak_direct
+    # (a real `say` shell-out) — mocked here so the suite stays silent; the
+    # earcon/traceback behaviour under test is unrelated to that call.
+    with mock.patch("sonari.cli.voiceout.speak_direct"):
+        try:
+            raise RuntimeError("synthetic synth failure")
+        except RuntimeError:
+            with contextlib.redirect_stderr(buf):
+                daemon._signal_speak_failure()
 
     stderr_output = buf.getvalue()
     assert "Traceback (most recent call last)" in stderr_output, (

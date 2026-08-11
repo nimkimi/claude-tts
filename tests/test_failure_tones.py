@@ -131,7 +131,10 @@ def test_speak_loop_failure_speaks_the_word_after_the_tone():
     daemon._speak_loop_once()                      # raises inside; tone + queued word
     assert "error_system" in speaker.earcons
     daemon._speak_loop_once()                      # the word drains in normal order
-    assert speaker.spoken[-1] == "Speech failed; kept unheard."
+    # D4 T15: the daemon's first speak failure also arms the fire-once "try
+    # doctor" hint, appended to the word.
+    assert speaker.spoken[-1] == (
+        "Speech failed; kept unheard. Things seem off — try sonari doctor.")
 
 
 def test_crossing_fallback_can_never_be_silently_unconfigured():
