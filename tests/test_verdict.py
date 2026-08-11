@@ -1,0 +1,32 @@
+from sonari.cli.verdict import verdict
+
+
+def test_all_green_reports_healthy_and_the_count():
+    rows = [("python3", True, "ok"), ("keymap resolves", True, "ok")]
+    assert verdict(rows) == "Sonari is healthy. 2 checks passed."
+
+
+def test_failures_are_named_with_their_spoken_names():
+    rows = [("python3", True, "ok"),
+            ("daemon socket", False, "not reachable"),
+            ("SONARI_DIR writable", False, "not writable")]
+    out = verdict(rows)
+    assert out.startswith("Sonari is unhealthy. 2 checks failed:")
+    assert "daemon socket" in out
+    assert "storage" in out          # spoken name, not the printed one
+
+
+def test_a_warn_row_neither_fails_the_verdict_nor_is_spoken():
+    rows = [("python3", True, "ok"), ("neural voices", False, "venv broken")]
+    out = verdict(rows)
+    assert out.startswith("Sonari is healthy.")
+    assert "neural" not in out
+
+
+def test_empty_rows_still_produce_a_sentence():
+    assert verdict([]) == "Sonari ran no checks."
+
+
+def test_singular_wording_for_one_failure():
+    rows = [("daemon socket", False, "down")]
+    assert verdict(rows) == "Sonari is unhealthy. 1 check failed: daemon socket."
