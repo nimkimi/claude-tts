@@ -469,3 +469,33 @@ def on_witness_ping(ctx, msg):
     ctx.host._witness_last_ping = time.monotonic()
     ctx.host._witness_alarmed = False
     return {"ok": True}
+
+
+@handler(MsgType.ANNOUNCE)
+def on_announce(ctx, msg):
+    """Speak one CLI-originated sentence and ACK whether it landed.
+
+    The daemon only speaks into session streams, so a sentence with no session
+    needs a playable one chosen for it — the same problem where-am-I solves for
+    its own readout when speaker() is None. Ack matters: an unacked send cannot
+    be distinguished from a dropped one, and the CLI's direct fallback depends
+    on knowing the difference.
+    """
+    host = ctx.host
+    text = (msg.get("text") or "").strip()
+    if not text:
+        return {"ok": False}
+    target = host.sessions.workspace()
+    if target is None:
+        target = host.sessions.speaker()
+    if target is None:
+        return {"ok": False}
+    st = host._streams.get(target)
+    if st is not None and st.stopped:
+        return {"ok": False}
+    host._enqueue(target, "prose", text, False,
+                  mute_exempt=True, pause_exempt=True)
+    # A typed CLI command is a deliberate press, exactly like ⌃⌘W: it sanctions
+    # reading this stream even if the session behind it is dead (D3's grain).
+    host._sanction_dead_read(target)
+    return {"ok": True}

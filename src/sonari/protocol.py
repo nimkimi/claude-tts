@@ -48,6 +48,7 @@ class MsgType:
     LEARN_MODE = "learn_mode"           # SP-D1: toggle learn mode (keys speak their teach line instead of acting)
     QUERY_ACTIONS = "query_actions"     # "what can I do right now": speaks the context-relevant actions
     WITNESS_PING = "witness_ping"       # hotkeyd -> daemon liveness ping (§7 witness; fire-and-forget)
+    ANNOUNCE = "announce"   # CLI-originated one-off speech (doctor verdict, install/uninstall): no session, acked so the CLI can fall back
 
 
 def encode(msg: dict) -> bytes:

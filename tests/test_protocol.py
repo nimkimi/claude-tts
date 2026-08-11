@@ -141,6 +141,7 @@ def test_msgtype_defines_no_extra_string_constants():
         "LEARN_MODE": "learn_mode",
         "QUERY_ACTIONS": "query_actions",
         "WITNESS_PING": "witness_ping",
+        "ANNOUNCE": "announce",
     }
     assert actual == expected
 
