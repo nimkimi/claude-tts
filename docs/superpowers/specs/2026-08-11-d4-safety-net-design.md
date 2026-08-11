@@ -113,11 +113,17 @@ Applied to the failure paths D4 already touches: `_signal_speak_failure`, earcon
 
 **`sonari install`** ends with the **same verdict** (§5). One policy, not a second one that can drift.
 
-**`sonari uninstall`**
-- **Discloses and offers**, by ear: *"Sonari saved transcript text from N sessions. Delete it?"*, then acts on the answer.
-- Non-interactive: `--purge-transcripts` / `--keep-transcripts`. With neither flag and no tty, the default is **keep**, and the path is printed. Silence must never destroy data.
-- **Disable-order fix:** unload the LaunchAgents *before* removing files, and **honour `launchctl unload`'s return code** instead of discarding it — today "Removed LaunchAgent" prints on a successful file delete regardless of whether the process actually stopped.
-- With §4.2 in place, doctor no longer self-heals a daemon that uninstall just stopped.
+**`sonari uninstall`** — the step order is **pinned**, because the disclosure and the teardown compete for the same voice:
+
+1. **Ask first, while the daemon is still alive.** *"Sonari saved transcript text from N sessions. Delete it?"* goes out on the **normal daemon-first path** (§6), so the question obeys D8's contract and cannot collide with whatever the user is still hearing. **Exception:** if the daemon is already dead when `uninstall` starts, the disclosure uses the **direct fallback** — the question must be audible precisely when Sonari is broken, which is a common reason to be uninstalling.
+2. **Then unload** the LaunchAgents, **honouring `launchctl unload`'s return code** instead of discarding it — today "Removed LaunchAgent" prints on a successful file delete regardless of whether the process actually stopped.
+3. **Then remove files**, purging or preserving `state.json` per the answer from step 1.
+
+Unloading before asking is explicitly rejected: it kills the voice that has to ask the question, forcing every disclosure down the fallback path for no gain.
+
+Non-interactive: `--purge-transcripts` / `--keep-transcripts`. With neither flag and no tty, the default is **keep**, and the path is printed. Silence must never destroy data.
+
+With §4.2 in place, doctor no longer self-heals a daemon that uninstall just stopped.
 
 **PRIVACY.md** gains `state.json` in its inventory — what it contains, where it lives, how long it persists, how to purge it — and loses the "not designed to record session content" claim its own contents contradict.
 
