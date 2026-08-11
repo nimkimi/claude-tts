@@ -253,6 +253,10 @@ class MacSupervisorBackend:
             print('Add ~/.local/bin to your PATH so `sonari` works in every shell:')
             print('  export PATH="$HOME/.local/bin:$PATH"')
 
+    def daemon_is_launchd_job(self) -> bool:
+        """True if launchd is supervising the speech daemon."""
+        return self.launchctl(["list", LAUNCH_AGENT_LABEL]) == 0
+
     def reachability_row(self) -> tuple:
         """Is the `sonari` launcher actually runnable from a shell?
 

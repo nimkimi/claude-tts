@@ -41,6 +41,9 @@ class FakeSupervisor:
     def reachability_row(self):
         return ("reachability", True, "ok")
 
+    def daemon_is_launchd_job(self):
+        return True
+
 
 class FakeHotkey:
     def __init__(self, ok=True, detail="ok"):

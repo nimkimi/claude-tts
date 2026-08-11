@@ -40,6 +40,9 @@ def test_doctor_includes_raise_rows(monkeypatch):
             @staticmethod
             def reachability_row(): return ("reachability", True, "ok")
 
+            @staticmethod
+            def daemon_is_launchd_job(): return True
+
         class hotkey:
             @staticmethod
             def doctor_rows(): return []
