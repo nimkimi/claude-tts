@@ -95,6 +95,12 @@ def _isolate_sonari_dir(tmp_path, monkeypatch):
     # sonari.paths.FAULTLOG_PATH would read/write the developer's real
     # ~/.sonari/faulthandler.log.
     monkeypatch.setattr(paths, "FAULTLOG_PATH", sonari_dir / "faulthandler.log", raising=False)
+    # DAEMON_ERR_PATH is SONARI_DIR/"daemon.err.log". supervisor.py's launch_spec()
+    # reads it live off the `paths` module (no by-value bind), but any test that
+    # calls launch_spec() without explicitly mocking the path (e.g.
+    # test_macos_supervisor.py's start_new_session test) would still open the
+    # developer's real ~/.sonari/daemon.err.log without this default repoint.
+    monkeypatch.setattr(paths, "DAEMON_ERR_PATH", sonari_dir / "daemon.err.log", raising=False)
     # DAEMON_FAIL_MEMO_PATH is SONARI_DIR/"daemon.fail_memo" bound at import (same
     # trap as LOCK_PATH above): client.py's `from sonari.paths import
     # DAEMON_FAIL_MEMO_PATH` is a by-value bind, so without repointing both the

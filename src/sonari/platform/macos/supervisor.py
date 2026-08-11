@@ -162,12 +162,22 @@ class MacSupervisorBackend:
 
     # --- lifecycle ---
     def launch_spec(self):
-        """Return (argv, spawn_kwargs) to lazily start the daemon process."""
+        """Return (argv, spawn_kwargs) to lazily start the daemon process.
+
+        stderr goes to a real file, not DEVNULL: host.py's failure handler
+        writes tracebacks there, and discarding them made every lazily-spawned
+        daemon's faults unrecoverable. Mode 'w' — only the latest run matters,
+        so the log cannot grow unbounded (the faulthandler.log discipline).
+        """
         shim = os.path.join(paths.repo_root(), "bin", "sonari-daemon")
+        try:
+            err = open(str(paths.DAEMON_ERR_PATH), "w", encoding="utf-8")
+        except OSError:
+            err = subprocess.DEVNULL   # diagnostics must never block startup
         return ([shim], {"start_new_session": True,
                          "stdin": subprocess.DEVNULL,
                          "stdout": subprocess.DEVNULL,
-                         "stderr": subprocess.DEVNULL})
+                         "stderr": err})
 
     def place_launcher(self, plugin_root: str) -> str:
         """Write an executable ~/.local/bin/sonari that execs the plugin bin/sonari.
