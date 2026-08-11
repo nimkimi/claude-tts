@@ -45,6 +45,15 @@ class Speaker:
         self._earcons = dict(earcons) if earcons else {}
         self._current = None
         self._current_lock = threading.Lock()
+        # D8: ONE voice. _current_lock guards only the handle and the epoch —
+        # proc.wait(), i.e. the whole duration of the utterance, ran outside any
+        # lock, so two threads could have `say` playing at once. That is not
+        # hypothetical: on a daemon restart bootstrap._start_boot_cue() speaks
+        # W8 on its own thread while daemon.run()'s speak loop is already
+        # draining the queue, and the two talked over each other. Transient
+        # earcons keep their own lock and are deliberately NOT serialised here —
+        # the tone is meant to be instant, only the words queue.
+        self._play_lock = threading.Lock()
         self._cancel_epoch = 0          # bumped by cancel(); closes the synth-gap race
         self._transient_proc = None     # the one-slot arbiter's current tone
         self._terminated_procs: list = []   # superseded tones awaiting a reap
@@ -80,31 +89,36 @@ class Speaker:
         # the utterance played anyway. If the epoch advanced past the baseline while
         # we synthesized, a cancel landed: honor it by terminating immediately and
         # reporting the utterance as NOT completed (so the caller replays it).
-        with self._current_lock:
-            epoch = self._cancel_epoch if cancel_epoch is None else cancel_epoch
-        say_voice = voice if voice is not None else self._voice
-        proc = (runner(audio_path) if audio_path is not None
-                else runner(text, say_voice, self._rate))
-        if proc is None:
-            return False                # afplay could not spawn / the file vanished
-        with self._current_lock:
-            interrupted = self._cancel_epoch != epoch
-            if not interrupted:
-                self._current = proc
-        if interrupted:
-            proc.terminate()
-            return False
-        try:
-            try:
-                proc.wait(timeout=self._wait_timeout)
-            except subprocess.TimeoutExpired:
-                # 'say' hung past the generous deadline; kill it and move on.
-                proc.terminate()
-        finally:
+        # Held for the whole utterance so a second caller waits its turn rather
+        # than playing over this one. cancel() takes only _current_lock, so a
+        # barge-in still interrupts the utterance in flight and releases this
+        # promptly; the waiter then re-reads the epoch below and honours it.
+        with self._play_lock:
             with self._current_lock:
-                if self._current is proc:
-                    self._current = None
-        return getattr(proc, "returncode", None) == 0
+                epoch = self._cancel_epoch if cancel_epoch is None else cancel_epoch
+            say_voice = voice if voice is not None else self._voice
+            proc = (runner(audio_path) if audio_path is not None
+                    else runner(text, say_voice, self._rate))
+            if proc is None:
+                return False            # afplay could not spawn / the file vanished
+            with self._current_lock:
+                interrupted = self._cancel_epoch != epoch
+                if not interrupted:
+                    self._current = proc
+            if interrupted:
+                proc.terminate()
+                return False
+            try:
+                try:
+                    proc.wait(timeout=self._wait_timeout)
+                except subprocess.TimeoutExpired:
+                    # 'say' hung past the generous deadline; kill it and move on.
+                    proc.terminate()
+            finally:
+                with self._current_lock:
+                    if self._current is proc:
+                        self._current = None
+            return getattr(proc, "returncode", None) == 0
 
     def cancel(self) -> None:
         with self._current_lock:
