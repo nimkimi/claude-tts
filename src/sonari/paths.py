@@ -16,6 +16,11 @@ HOTKEYD_BIN_PATH = SONARI_DIR / "sonari-hotkeyd"
 RAISE_BIN_PATH = SONARI_DIR / "sonari-raise"
 INSTALL_RECORD_PATH = SONARI_DIR / "install.json"
 FAULTLOG_PATH = SONARI_DIR / "faulthandler.log"   # native-crash dump; see daemon/bootstrap.py
+# mtime = timestamp of the last ensure_daemon() spawn failure. Persisted to disk
+# (not an in-process variable) because bin/sonari-hook fires as a brand-new OS
+# process per hook event -- an in-memory memo cannot survive between calls. See
+# client.py's ensure_daemon()/reset_failure_memo().
+DAEMON_FAIL_MEMO_PATH = SONARI_DIR / "daemon.fail_memo"
 KOKORO_VENV = SONARI_DIR / "venv"   # opt-in uv-managed venv for neural voices
 
 

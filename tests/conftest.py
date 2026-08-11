@@ -95,6 +95,15 @@ def _isolate_sonari_dir(tmp_path, monkeypatch):
     # sonari.paths.FAULTLOG_PATH would read/write the developer's real
     # ~/.sonari/faulthandler.log.
     monkeypatch.setattr(paths, "FAULTLOG_PATH", sonari_dir / "faulthandler.log", raising=False)
+    # DAEMON_FAIL_MEMO_PATH is SONARI_DIR/"daemon.fail_memo" bound at import (same
+    # trap as LOCK_PATH above): client.py's `from sonari.paths import
+    # DAEMON_FAIL_MEMO_PATH` is a by-value bind, so without repointing both the
+    # paths module's copy AND the client module's copy, ensure_daemon() tests
+    # would read/write the developer's real ~/.sonari/daemon.fail_memo.
+    monkeypatch.setattr(
+        paths, "DAEMON_FAIL_MEMO_PATH", sonari_dir / "daemon.fail_memo", raising=False)
+    monkeypatch.setattr(
+        client_mod, "DAEMON_FAIL_MEMO_PATH", sonari_dir / "daemon.fail_memo", raising=False)
     import sonari.daemon.host as daemon_host
     import sonari.daemon.bootstrap as daemon_bootstrap
     monkeypatch.setattr(daemon_host, "LOCK_PATH", sonari_dir / "daemon.lock", raising=False)
