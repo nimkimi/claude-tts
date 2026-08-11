@@ -38,6 +38,9 @@ class FakeSupervisor:
     def hooks_doctor_row(self):
         return self._hooks_row
 
+    def reachability_row(self):
+        return ("reachability", True, "ok")
+
 
 class FakeHotkey:
     def __init__(self, ok=True, detail="ok"):

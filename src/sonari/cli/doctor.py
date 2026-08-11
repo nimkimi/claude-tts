@@ -129,6 +129,11 @@ def doctor() -> list:
     results.append(_platform().supervisor.hooks_doctor_row())
 
     try:
+        results.append(_platform().supervisor.reachability_row())
+    except Exception as exc:  # noqa: BLE001 - doctor must never raise
+        results.append(("reachability", False, f"error: {exc}"))
+
+    try:
         keymap.resolve_keymap(keymap.load_keymap())
         results.append(("keymap resolves", True, "ok"))
     except Exception as exc:  # noqa: BLE001

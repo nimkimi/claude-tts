@@ -106,6 +106,44 @@ def test_doctor_rows_include_macos_checks(monkeypatch):
             "speechd LaunchAgent loaded"} <= names
 
 
+def test_reachability_row_no_launcher(tmp_path, monkeypatch):
+    import sonari.platform.macos.supervisor as ms
+    launcher = tmp_path / ".local" / "bin" / "sonari"  # never written
+    monkeypatch.setattr(ms, "_launcher_path", lambda: str(launcher))
+    name, ok, detail = ms.MacSupervisorBackend().reachability_row()
+    assert name == "reachability"
+    assert ok is False
+    assert "sonari install" in detail
+
+
+def test_reachability_row_launcher_off_path(tmp_path, monkeypatch):
+    import sonari.platform.macos.supervisor as ms
+    local_bin = tmp_path / ".local" / "bin"
+    launcher = local_bin / "sonari"
+    local_bin.mkdir(parents=True)
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(ms, "_launcher_path", lambda: str(launcher))
+    monkeypatch.setattr(ms, "_local_bin_dir", lambda: str(local_bin))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")  # local_bin deliberately absent
+    name, ok, detail = ms.MacSupervisorBackend().reachability_row()
+    assert name == "reachability"
+    assert ok is False
+    assert str(local_bin) in detail
+
+
+def test_reachability_row_launcher_on_path(tmp_path, monkeypatch):
+    import sonari.platform.macos.supervisor as ms
+    local_bin = tmp_path / ".local" / "bin"
+    launcher = local_bin / "sonari"
+    local_bin.mkdir(parents=True)
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(ms, "_launcher_path", lambda: str(launcher))
+    monkeypatch.setattr(ms, "_local_bin_dir", lambda: str(local_bin))
+    monkeypatch.setenv("PATH", f"{local_bin}:/usr/bin:/bin")
+    name, ok, detail = ms.MacSupervisorBackend().reachability_row()
+    assert (name, ok) == ("reachability", True)
+
+
 def test_place_launcher_writes_wrapper_execing_plugin_bin(tmp_path, monkeypatch):
     import os
     import sonari.platform.macos.supervisor as ms

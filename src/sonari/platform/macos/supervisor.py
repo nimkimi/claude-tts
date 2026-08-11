@@ -253,6 +253,22 @@ class MacSupervisorBackend:
             print('Add ~/.local/bin to your PATH so `sonari` works in every shell:')
             print('  export PATH="$HOME/.local/bin:$PATH"')
 
+    def reachability_row(self) -> tuple:
+        """Is the `sonari` launcher actually runnable from a shell?
+
+        The launcher can exist while ~/.local/bin is off PATH — every command
+        in the docs then fails with 'command not found', which reads as
+        "Sonari is broken" rather than "your PATH is short".
+        """
+        if not os.path.exists(_launcher_path()):
+            return ("reachability", False,
+                    "no launcher installed — run: sonari install")
+        if not _local_bin_on_path():
+            return ("reachability", False,
+                    f"{_local_bin_dir()} is not on your PATH — "
+                    f"'sonari' will not run from a new shell")
+        return ("reachability", True, "sonari is on your PATH")
+
     def hooks_doctor_row(self) -> tuple:
         """macOS: hooks ship in the plugin's repo hooks/hooks.json manifest."""
         hooks_json = os.path.join(paths.repo_root(), "hooks", "hooks.json")

@@ -37,6 +37,9 @@ def test_doctor_includes_raise_rows(monkeypatch):
             @staticmethod
             def hooks_doctor_row(): return ("hooks", True, "ok")
 
+            @staticmethod
+            def reachability_row(): return ("reachability", True, "ok")
+
         class hotkey:
             @staticmethod
             def doctor_rows(): return []
