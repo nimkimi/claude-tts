@@ -1945,7 +1945,14 @@ git commit -m "fix(supervisor): capture the lazy relaunch's stderr instead of di
 
 **Interfaces:** none (data file).
 
-Every registration is synchronous today, so each qualifying event blocks Claude Code for the duration. Only `PermissionRequest` returns a decision — it must stay synchronous. **Read `hooks/hooks.json` fully first**; do not assume its shape.
+Every registration is synchronous today, so each qualifying event blocks Claude Code for the duration. **Read `hooks/hooks.json` fully first**; do not assume its shape. There are **11** registrations, not one per event — `PreToolUse` has 3 (matchers `AskUserQuestion`, `ExitPlanMode`, `""`) and `Notification` has 2 (`permission_prompt`, `idle_prompt`). Count them programmatically rather than by eye.
+
+**Two stay synchronous, for two different reasons:**
+
+- **`PermissionRequest`** — it returns a decision (`bin/sonari-hook:83-99` prints it to stdout). It cannot be fire-and-forget.
+- **`SessionStart`** — *owner-approved deviation from the "no decision ⇒ async" rule, 2026-08-11.* The rule is about **blocking**; this is about **ordering**. `SessionStart` establishes session identity, and `lifecycle.py:62-64` calls its `is_new` computation "the only observation point" for the registration announce (`:117-122`, the spoken "{folder}, {number}" that makes digit teleports learnable by ear). Both `SessionStart` and `UserPromptSubmit` route through `on_set_foreground`, and both branches `_record()` the session — so if an async `SessionStart` loses the race to `UserPromptSubmit`, `is_new` is False and **the announce is silently suppressed**. Whether Claude Code's async hooks can actually reorder across events was NOT verified; keeping this one sync removes the bet for free, since `SessionStart` fires once per session and contributes nothing to the responsiveness problem this task solves (high-frequency events: MessageDisplay, PreToolUse, Stop).
+
+So: **9 of the 11 registrations become async**; `PermissionRequest` and `SessionStart` stay synchronous.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1965,6 +1972,9 @@ def _registrations():
                 yield event, hook
 
 
+SYNC_EVENTS = {"PermissionRequest", "SessionStart"}
+
+
 def test_permission_request_stays_synchronous():
     for event, hook in _registrations():
         if event == "PermissionRequest":
@@ -1972,16 +1982,28 @@ def test_permission_request_stays_synchronous():
                 "PermissionRequest returns a decision; it cannot be async")
 
 
+def test_session_start_stays_synchronous():
+    """Ordering, not blocking. SessionStart is the only observation point for
+    is_new (lifecycle.py:62-64), which gates the spoken "{folder}, {number}"
+    registration announce. UserPromptSubmit also records the session, so an
+    async SessionStart that loses the race silently suppresses that announce."""
+    for event, hook in _registrations():
+        if event == "SessionStart":
+            assert hook.get("async") is not True, (
+                "SessionStart is ordering-critical; async can lose the "
+                "new-session announce")
+
+
 def test_every_other_registration_is_async():
     for event, hook in _registrations():
-        if event != "PermissionRequest":
+        if event not in SYNC_EVENTS:
             assert hook.get("async") is True, f"{event} still blocks the session"
 
 
-def test_at_least_one_of_each_kind_exists():
+def test_the_async_set_is_not_empty_and_both_sync_events_exist():
     events = {e for e, _ in _registrations()}
-    assert "PermissionRequest" in events
-    assert events - {"PermissionRequest"}
+    assert SYNC_EVENTS <= events
+    assert events - SYNC_EVENTS
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
