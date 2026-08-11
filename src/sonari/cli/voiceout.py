@@ -36,6 +36,13 @@ def speak(text: str, *, prefer_daemon: bool = True) -> str:
     prefer_daemon=False is for callers that ALREADY know the speech path is
     broken (a red speech-path row, a stopped daemon) — it skips a pointless
     socket timeout rather than changing the policy.
+
+    ANNOUNCE, not PROSE: PROSE is session-scoped and its handler reads
+    delta/index, so a CLI sentence sent that way is accepted and silently
+    discarded. The ack is equally load-bearing — a send with no reply cannot
+    distinguish a spoken sentence from a dropped one, so anything short of
+    {"ok": True} falls through to the direct voice rather than reporting a
+    success the user never heard.
     """
     if not text:
         return "silent"
@@ -43,9 +50,11 @@ def speak(text: str, *, prefer_daemon: bool = True) -> str:
         try:
             from sonari import client
             from sonari.protocol import MsgType, PROTOCOL_VERSION
-            client.send({"v": PROTOCOL_VERSION, "type": MsgType.PROSE,
-                         "text": text})
-            return "daemon"
+            reply = client.send({"v": PROTOCOL_VERSION,
+                                 "type": MsgType.ANNOUNCE,
+                                 "text": text}, expect_reply=True)
+            if reply and reply.get("ok") is True:
+                return "daemon"
         except Exception:  # noqa: BLE001 - any daemon failure means fall back
             pass
     return "direct" if speak_direct(text) else "silent"
