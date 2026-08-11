@@ -140,7 +140,7 @@ Applied to the failure paths D4 already touches: `_signal_speak_failure`, earcon
 
 ### 8.1 `sonari uninstall` — the pinned teardown sequence
 
-> **SCOPE RIDER, PENDING OWNER.** Steps 3 and 5 (actually stopping the daemon, and closing the hook-resurrection path) are **new scope**, discovered during plan authoring and not present in the MAP or the approved design. They are the real defect behind §2.1's misdiagnosis. Awaiting the owner's word; everything else in this section was already approved.
+> **SCOPE RIDER — APPROVED 2026-08-11.** Steps 3 and 5 (actually stopping the daemon, and closing the hook-resurrection path) were new scope discovered during plan authoring, not present in the MAP or the approved design. They are the real defect behind §2.1's misdiagnosis, and the owner folded them into D4 on the recommendation. Decision #15 in the register.
 
 The order is **pinned**, because the disclosure and the teardown compete for the same voice, and because stopping a process you have already made unfindable is impossible:
 
@@ -231,3 +231,4 @@ Kept separate from the pending **ear-batch-3** (D3's five strings and the "pendi
 | 12 | The 23 tagged `[Windows]` issues **closed** | done 2026-08-11 |
 | 13 | **#54's surviving half folded into D4** | §10 |
 | 14 | Four verified-stale issues (#14, #50, #22, #1) **closed with evidence** | done 2026-08-11 |
+| 15 | **Uninstall must actually stop the daemon** and close the hook-resurrection path (post-go scope rider, approved) | §8.1 steps 3, 5 |
