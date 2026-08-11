@@ -138,10 +138,45 @@ def _cmd_install(_args) -> int:
     return install()
 
 
-def uninstall() -> int:
+def transcript_summary():
+    """(session_count, utterance_count) held in state.json. Never raises."""
+    try:
+        import json as _json
+        with open(str(paths.STATE_PATH), "r", encoding="utf-8") as fh:
+            blob = _json.load(fh) or {}
+        sessions = blob.get("sessions") or {}
+        n = sum(len(s.get("entries") or []) for s in sessions.values())
+        return (len(sessions), n)
+    except Exception:  # noqa: BLE001 - a disclosure must never break uninstall
+        return (0, 0)
+
+
+def uninstall(purge=None) -> int:
     """Remove Sonari's OS autostart/hooks/launcher (via the platform backend)
-    plus the shared runtime artifacts, PRESERVING config.json + keymap.json."""
+    plus the shared runtime artifacts, PRESERVING config.json + keymap.json.
+
+    `purge` decides state.json's fate: True deletes the transcripts, False keeps
+    them, None asks (spec §8.1 step 1). The ask runs FIRST, while the daemon is
+    still alive to carry the question — after `sup.uninstall()` there may be no
+    voice left to ask with."""
     from sonari.cli import _platform
+    from sonari.cli import voiceout
+    sessions, utterances = transcript_summary()
+    if sessions and purge is None:
+        # PROVISIONAL (ear-batch-4)
+        q = (f"Sonari saved transcript text from {sessions} session"
+             f"{'' if sessions == 1 else 's'}. Delete it?")
+        print(q + f" ({utterances} utterances at {paths.STATE_PATH})")
+        interactive = sys.stdout.isatty()
+        # Same tty discipline as doctor: speaking a question we will not wait
+        # for an answer to is noise in a script.
+        if interactive:
+            voiceout.speak(q)
+        try:
+            purge = interactive and input("  delete? [y/N] ").strip().lower() in ("y", "yes")
+        except (EOFError, OSError):
+            purge = False       # silence keeps the data
+
     sup = _platform().supervisor
     sup.uninstall()
     try:
@@ -189,6 +224,18 @@ def uninstall() -> int:
             except OSError:
                 pass
 
+    # Spec §8.1 step 6: state.json goes ONLY on an explicit yes. The default on
+    # silence — no tty, no flag — is keep, so an unattended uninstall can never
+    # destroy transcript data nobody agreed to lose.
+    if purge:
+        try:
+            os.remove(str(paths.STATE_PATH))
+            print(f"Deleted saved transcripts: {paths.STATE_PATH}")
+        except OSError:
+            pass
+    elif os.path.exists(str(paths.STATE_PATH)):
+        print(f"Kept saved transcripts: {paths.STATE_PATH}")
+
     # Remove the stable app copy (spec §3.B). config.json + keymap.json live in
     # SONARI_DIR (not APP_DIR) and are preserved below.
     if os.path.isdir(str(paths.APP_DIR)):
@@ -212,8 +259,8 @@ def uninstall() -> int:
     return 0
 
 
-def _cmd_uninstall(_args) -> int:
-    return uninstall()
+def _cmd_uninstall(args) -> int:
+    return uninstall(purge=getattr(args, "purge", None))
 
 
 def _cmd_voices_install(_args) -> int:

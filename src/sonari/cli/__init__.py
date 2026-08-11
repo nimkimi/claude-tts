@@ -122,9 +122,13 @@ def _register_local(sub) -> None:
     dp.set_defaults(func=doctor_cmd._cmd_doctor)
     sub.add_parser("install", help="install the LaunchAgent + SONARI_DIR").set_defaults(
         func=install_cmd._cmd_install)
-    sub.add_parser("uninstall",
-                   help="remove Sonari (LaunchAgents, launcher, runtime files)").set_defaults(
-        func=install_cmd._cmd_uninstall)
+    up = sub.add_parser("uninstall",
+                        help="remove Sonari (LaunchAgents, launcher, runtime files)")
+    # default=None means "ask" (spec §8.1 step 1); the flags are for scripts and
+    # for anyone who would rather not be asked.
+    up.add_argument("--purge-transcripts", dest="purge", action="store_true", default=None)
+    up.add_argument("--keep-transcripts", dest="purge", action="store_false")
+    up.set_defaults(func=install_cmd._cmd_uninstall)
     sub.add_parser("daemon", help="run the speech daemon in the foreground").set_defaults(
         func=_cmd_daemon)
     sp = sub.add_parser(
