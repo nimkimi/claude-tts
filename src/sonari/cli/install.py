@@ -149,8 +149,28 @@ def uninstall() -> int:
     except Exception:  # noqa: BLE001 - hotkey teardown must never break uninstall
         pass
 
+    # Spec §8.1 steps 2-3: stop the daemon AFTER unloading the LaunchAgents
+    # (so launchd cannot restart it) and BEFORE the artifact loop below deletes
+    # LOCK_PATH — teardown.stop_daemon() reads the pid off the lockfile itself,
+    # so it must run while that file still exists.
+    from sonari.cli import teardown
+    outcome = teardown.stop_daemon()
+    if outcome == "still-running":
+        # PROVISIONAL string — ear-batch-4.
+        print("warning: the Sonari daemon is STILL RUNNING and could not be "
+              "stopped; it will exit at logout.")
+    elif outcome == "stopped":
+        print("Stopped the Sonari daemon.")  # PROVISIONAL string — ear-batch-4.
+
     # Spec §5.4: remove Sonari-owned runtime artifacts but PRESERVE the user's
     # keymap.json AND config.json so customizations survive uninstall/reinstall.
+    # NOTE: SINGLETON_PATH must never be added here. A flock is held against
+    # an open file description; deleting/recreating the path would orphan a
+    # still-running daemon's lock (see teardown.py). STATE_PATH is also
+    # deliberately absent: spec §8.1 step 6 ties its removal to the ask-first
+    # purge/keep disclosure (step 1), which is a separate, not-yet-built task
+    # — deleting it unconditionally here would destroy transcript data
+    # without ever asking.
     sonari_dir = paths.SONARI_DIR
     artifacts = [
         paths.LOCK_PATH,
@@ -159,6 +179,8 @@ def uninstall() -> int:
         paths.INSTALL_RECORD_PATH,
         sonari_dir / "hotkeyd.log",
         paths.FAULTLOG_PATH,
+        paths.DAEMON_ERR_PATH,
+        paths.DAEMON_FAIL_MEMO_PATH,
     ]
     for artifact in artifacts:
         if os.path.exists(str(artifact)):

@@ -51,3 +51,31 @@ def test_uninstall_subcommand_invokes_uninstall():
         rc = cli.main(["uninstall"])
     un.assert_called_once()
     assert rc == 0
+
+
+def test_uninstall_is_idempotent_run_twice_no_daemon_no_lockfile(
+        tmp_path, monkeypatch):
+    """Care-list requirement: uninstall must never raise on a second run --
+    no daemon, no lockfile, everything the first run already removed."""
+    sonari_dir = tmp_path / ".sonari"
+    sonari_dir.mkdir()
+    lock = sonari_dir / "daemon.lock"          # never created: no daemon ever ran
+    log = sonari_dir / "speechd.log"
+    resolved = sonari_dir / "hotkeyd.resolved.json"
+    record = sonari_dir / "install.json"
+    app_dir = sonari_dir / "app"
+
+    sup = FakeSupervisor()
+    hk = FakeHotkey()
+    monkeypatch.setattr(cli, "_platform", lambda: fake_platform(supervisor=sup, hotkey=hk))
+    with mock.patch.object(cli.paths, "SONARI_DIR", sonari_dir), \
+         mock.patch.object(cli.paths, "LOG_PATH", log), \
+         mock.patch.object(cli.paths, "LOCK_PATH", lock), \
+         mock.patch.object(cli.paths, "HOTKEYD_RESOLVED_PATH", resolved), \
+         mock.patch.object(cli.paths, "INSTALL_RECORD_PATH", record), \
+         mock.patch.object(cli.paths, "APP_DIR", app_dir):
+        rc_first = cli.install.uninstall()
+        rc_second = cli.install.uninstall()
+
+    assert rc_first == 0
+    assert rc_second == 0
