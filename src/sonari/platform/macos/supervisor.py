@@ -342,7 +342,15 @@ class MacSupervisorBackend:
                                and e.get("action") == "witness_config"), None)
                     if wc is not None:
                         enabled = bool(wc.get("alarmEnabled", True))
-                        asset = wc.get("alarmAsset")
+                        # Narrow HERE, not at the os.path.exists() call below:
+                        # that call sits outside this try, so a non-string
+                        # alarmAsset from untyped JSON raised TypeError and took
+                        # all of doctor_rows() down with it. Mirrors swift:186's
+                        # `if let a = obj["alarmAsset"] as? String` — a
+                        # non-string leaves the compiled-in default in place, so
+                        # hotkeyd would still bark and the row is honestly green.
+                        raw_asset = wc.get("alarmAsset")
+                        asset = raw_asset if isinstance(raw_asset, str) else None
             except Exception:  # noqa: BLE001 - doctor must never raise
                 pass                          # no/bad resolved file -> defaults apply
             if not enabled:

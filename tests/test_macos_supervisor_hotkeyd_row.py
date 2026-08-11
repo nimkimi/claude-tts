@@ -83,6 +83,24 @@ def test_missing_resolved_file_still_reports_armed_compiled_defaults(tmp_path):
     assert ok is True
 
 
+def test_non_string_alarm_asset_cannot_crash_doctor(tmp_path):
+    """doctor must NEVER raise. alarmAsset arrives from untyped JSON, and the
+    asset-existence check runs OUTSIDE the parse try/except — so a non-string
+    (here a list) reached os.path.exists() and raised TypeError, taking the
+    whole doctor_rows() down. Narrowed at the parse boundary instead, mirroring
+    swift:186's `if let a = obj["alarmAsset"] as? String`: a non-string leaves
+    the compiled-in default in place, so hotkeyd really would still bark and the
+    row is honestly green."""
+    resolved = _write_resolved(tmp_path, [
+        _BINDING_ENTRY,
+        {"action": "witness_config", "alarmEnabled": True,
+         "alarmAsset": ["not", "a", "path"]},
+    ])
+    ok, detail = _row(tmp_path, resolved_path=resolved)
+    assert ok is True
+    assert "armed" in detail
+
+
 def test_valid_array_without_a_witness_entry_uses_compiled_defaults(tmp_path):
     """Pins the container shape: the resolved file is a JSON ARRAY, not a dict
     keyed by "witness_config". A well-formed array that simply carries no
