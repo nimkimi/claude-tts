@@ -60,7 +60,7 @@ The current `doctor()` is one function doing collection, formatting, and output.
 Each check becomes a callable returning a record. Beyond today's `(check, ok, detail)` it carries:
 
 - **`spoken`** — a short, sayable name distinct from the printed one (`"daemon socket"`, `"hotkeyd"`, `"neural voices"`). The printed name may be long and precise; the spoken name must survive being read in a list.
-- **`severity`** — `fail` vs `warn`. `warn` rows (e.g. neural voices absent-but-optional) are printed but do not make the verdict "unhealthy".
+- **`severity`** — `fail` vs `warn`. A `warn` row (e.g. neural voices absent-but-optional) is **printed only**: it never makes the verdict "unhealthy" and is **never named in the spoken sentence**. Mixing warnings into a verdict that then says "healthy" would reproduce, in the safety net itself, the ambiguous-signal problem D2 spent a campaign removing.
 
 ### 4.1 New rows
 
@@ -82,8 +82,10 @@ The normal `client.send` path keeps its existing relaunch behaviour unchanged �
 
 A **pure, total** function: rows → one sentence. No I/O, no clock, no config reads.
 
-- All green → `"Sonari is healthy. Fourteen checks passed."`
+- All green → `"Sonari is healthy. Fifteen checks passed."`
 - Failures → `"Sonari is unhealthy. Three checks failed: daemon socket, hotkeyd, neural voices."`
+
+The counts in those examples are **illustrative, not specified**: the sentence reports however many rows the registry actually produced, which varies with platform backend and with M1's per-adapter contribution. The plan must not pin a literal total.
 
 **Why enumerate rather than headline-only:** the shipped rule already forbids a relaying session from glossing doctor. A count-only verdict would gloss it by ear instead. Enumeration is self-bounding — names are spoken only for failures, and a healthy system says one short line.
 
