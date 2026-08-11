@@ -493,9 +493,15 @@ def on_announce(ctx, msg):
     st = host._streams.get(target)
     if st is not None and st.stopped:
         return {"ok": False}
+    # SINGLE-ITEM grain, at_front — the _readback() idiom (control.py:173-191),
+    # not where-am-I's. ⌃⌘W is a read OF its session, so it earns whole=True;
+    # an announcement merely LANDS on whatever workspace()/speaker() resolves
+    # to, which _sanction_dead_read's own docstring names as the whole=False
+    # category. The two halves are ATOMIC: whole=False is spent on the first
+    # pop, so without at_front the sanction would be consumed by a stale
+    # backlog item and the verdict itself would be stranded unspoken — after
+    # {"ok": True} was already returned. On a live target both are no-ops.
     host._enqueue(target, "prose", text, False,
-                  mute_exempt=True, pause_exempt=True)
-    # A typed CLI command is a deliberate press, exactly like ⌃⌘W: it sanctions
-    # reading this stream even if the session behind it is dead (D3's grain).
-    host._sanction_dead_read(target)
+                  mute_exempt=True, pause_exempt=True,
+                  at_front=host._sanction_dead_read(target, whole=False))
     return {"ok": True}
