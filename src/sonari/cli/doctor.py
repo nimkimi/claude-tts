@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from sonari import paths
 from sonari import keymap
@@ -81,6 +82,31 @@ def doctor() -> list:
             results.append(("speech path", True, "draining normally"))
     except Exception as exc:  # noqa: BLE001 - doctor must never raise
         results.append(("speech path", False, f"cannot read daemon status: {exc}"))
+
+    # Restore health (P17): you can lose the whole backlog to the crash/upgrade
+    # path and still get an all-green doctor today.
+    try:
+        from sonari.daemon import persistence
+        state_path = paths.STATE_PATH
+        if not os.path.exists(str(state_path)):
+            results.append(("restore health", True,
+                            "no saved state yet (nothing to restore)"))
+        else:
+            import json as _json
+            with open(str(state_path), "r", encoding="utf-8") as fh:
+                blob = _json.load(fh)
+            ver = blob.get("version")
+            n = len(blob.get("sessions") or {})
+            age_h = (time.time() - os.path.getmtime(str(state_path))) / 3600.0
+            if ver != persistence.STATE_VERSION:
+                results.append(("restore health", False,
+                                f"state version {ver} != {persistence.STATE_VERSION}; "
+                                f"the restored pile will be dropped at next boot"))
+            else:
+                results.append(("restore health", True,
+                                f"{n} session(s), saved {age_h:.1f}h ago"))
+    except Exception as exc:  # noqa: BLE001 - doctor must never raise
+        results.append(("restore health", False, f"unreadable: {exc}"))
 
     results.append(_platform().supervisor.hooks_doctor_row())
 

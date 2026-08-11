@@ -85,6 +85,10 @@ def _isolate_sonari_dir(tmp_path, monkeypatch):
     # reset the process-wide held-flock global so a main()-calling test never
     # blocks a later one.
     monkeypatch.setattr(paths, "SINGLETON_PATH", sonari_dir / "daemon.singleton", raising=False)
+    # STATE_PATH is SONARI_DIR/"state.json" bound at import (same trap as APP_DIR
+    # above): without this repoint, any doctor() call that does not explicitly
+    # mock sonari.paths.STATE_PATH reads the developer's real ~/.sonari/state.json.
+    monkeypatch.setattr(paths, "STATE_PATH", sonari_dir / "state.json", raising=False)
     import sonari.daemon.host as daemon_host
     import sonari.daemon.bootstrap as daemon_bootstrap
     monkeypatch.setattr(daemon_host, "LOCK_PATH", sonari_dir / "daemon.lock", raising=False)

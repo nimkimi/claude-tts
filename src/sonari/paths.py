@@ -8,6 +8,7 @@ APP_DIR = SONARI_DIR / "app"          # stable copy of the sonari package (PYTHO
 CONFIG_PATH = SONARI_DIR / "config.json"
 LOCK_PATH = SONARI_DIR / "daemon.lock"
 SINGLETON_PATH = SONARI_DIR / "daemon.singleton"   # held-open flock: single-instance
+STATE_PATH = SONARI_DIR / "state.json"   # SP6 durable-state snapshot (daemon/persistence.py)
 LOG_PATH = SONARI_DIR / "speechd.log"
 KEYMAP_PATH = SONARI_DIR / "keymap.json"
 HOTKEYD_RESOLVED_PATH = SONARI_DIR / "hotkeyd.resolved.json"
