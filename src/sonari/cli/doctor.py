@@ -9,6 +9,24 @@ from sonari import install_record
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 
 
+def should_speak(args) -> bool:
+    """Speak when a human is at a terminal; stay silent when piped or scripted.
+
+    The standard convention (git, ls, grep). It also keeps the test suite and
+    every scripted invocation silent WITHOUT threading a flag through them.
+    --quiet wins over --speak: the quieter reading of a contradictory command.
+    """
+    import sys
+    if getattr(args, "quiet", False):
+        return False
+    if getattr(args, "speak", False):
+        return True
+    try:
+        return bool(sys.stdout.isatty())
+    except Exception:  # noqa: BLE001 - a detached stdout must not break doctor
+        return False
+
+
 def doctor() -> list:
     """Return a list of (check, ok, detail) health-check tuples."""
     from sonari.cli import _platform, _resolve_python

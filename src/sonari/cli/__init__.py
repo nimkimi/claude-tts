@@ -114,8 +114,12 @@ def _cmd_daemon(_args) -> int:
 
 def _register_local(sub) -> None:
     """Register local (non-control) subcommands."""
-    sub.add_parser("doctor", help="run health checks").set_defaults(
-        func=doctor_cmd._cmd_doctor)
+    dp = sub.add_parser("doctor", help="run health checks")
+    dp.add_argument("--speak", action="store_true",
+                    help="speak the verdict even when output is piped")
+    dp.add_argument("--quiet", action="store_true",
+                    help="never speak the verdict")
+    dp.set_defaults(func=doctor_cmd._cmd_doctor)
     sub.add_parser("install", help="install the LaunchAgent + SONARI_DIR").set_defaults(
         func=install_cmd._cmd_install)
     sub.add_parser("uninstall",
