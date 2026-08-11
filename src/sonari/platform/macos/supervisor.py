@@ -295,7 +295,7 @@ class MacSupervisorBackend:
 
     def daemon_is_launchd_job(self) -> bool:
         """True if launchd is supervising the speech daemon."""
-        return self.launchctl(["list", LAUNCH_AGENT_LABEL]) == 0
+        return self.launchctl(["list", LAUNCH_AGENT_LABEL], timeout=5.0) == 0
 
     def reachability_row(self) -> tuple:
         """Is the `sonari` launcher actually runnable from a shell?
@@ -377,7 +377,7 @@ class MacSupervisorBackend:
                          "unreadable: {0}".format(exc)))
 
         # speechd LaunchAgent loaded
-        speechd_loaded = self.launchctl(["list", LAUNCH_AGENT_LABEL]) == 0
+        speechd_loaded = self.launchctl(["list", LAUNCH_AGENT_LABEL], timeout=5.0) == 0
         rows.append(("speechd LaunchAgent loaded", speechd_loaded,
                      LAUNCH_AGENT_LABEL if speechd_loaded
                      else "not loaded (run 'sonari install')"))
@@ -387,7 +387,7 @@ class MacSupervisorBackend:
         # resolved file is a JSON ARRAY (keymap.write_resolved(): bindings +
         # the witness entry) — NOT a dict keyed by "witness_config" — matching
         # hotkeyd/sonari-hotkeyd.swift:180-191's `[[String: Any]]` parse.
-        hotkeyd_loaded = self.launchctl(["list", HOTKEYD_LAUNCH_AGENT_LABEL]) == 0
+        hotkeyd_loaded = self.launchctl(["list", HOTKEYD_LAUNCH_AGENT_LABEL], timeout=5.0) == 0
         if not hotkeyd_loaded:
             rows.append(("hotkeyd", False,
                          "not running — no independent alarm if the daemon dies"))

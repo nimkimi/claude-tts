@@ -25,6 +25,8 @@ def test_uninstall_dispatches_and_cleans_shared_artifacts_preserving_user_files(
     hk = FakeHotkey()
     monkeypatch.setattr(cli, "_platform", lambda: fake_platform(supervisor=sup, hotkey=hk))
     with mock.patch.object(cli.paths, "SONARI_DIR", sonari_dir), \
+         mock.patch.object(cli.paths, "STATE_PATH", sonari_dir / "state.json"), \
+         mock.patch("sonari.cli.voiceout.speak"), \
          mock.patch.object(cli.paths, "CONFIG_PATH", config), \
          mock.patch.object(cli.paths, "LOG_PATH", log), \
          mock.patch.object(cli.paths, "LOCK_PATH", lock), \
@@ -69,6 +71,8 @@ def test_uninstall_is_idempotent_run_twice_no_daemon_no_lockfile(
     hk = FakeHotkey()
     monkeypatch.setattr(cli, "_platform", lambda: fake_platform(supervisor=sup, hotkey=hk))
     with mock.patch.object(cli.paths, "SONARI_DIR", sonari_dir), \
+         mock.patch.object(cli.paths, "STATE_PATH", sonari_dir / "state.json"), \
+         mock.patch("sonari.cli.voiceout.speak"), \
          mock.patch.object(cli.paths, "LOG_PATH", log), \
          mock.patch.object(cli.paths, "LOCK_PATH", lock), \
          mock.patch.object(cli.paths, "HOTKEYD_RESOLVED_PATH", resolved), \

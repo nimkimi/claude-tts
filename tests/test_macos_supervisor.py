@@ -101,7 +101,7 @@ def test_doctor_rows_include_macos_checks(monkeypatch):
     import sonari.platform.macos.supervisor as ms
     sup = ms.MacSupervisorBackend()
     monkeypatch.setattr(ms.shutil, "which", lambda n: "/usr/bin/" + n)
-    monkeypatch.setattr(sup, "launchctl", lambda a: 0)
+    monkeypatch.setattr(sup, "launchctl", lambda a, timeout=None: 0)
     monkeypatch.setattr("sonari.platform.macos.tts.MacTtsBackend.best_voice",
                         lambda self: "Ava (Premium)")
     names = {row[0] for row in sup.doctor_rows()}

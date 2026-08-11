@@ -13,6 +13,24 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _no_blocking_prompts(monkeypatch):
+    """A test that reaches a real input() hangs the whole suite with no output.
+
+    `uninstall()` prompts before deleting transcripts, gated on isatty(); pytest's
+    captured stdout reports False, so it is unreachable *by accident today* — but
+    that is incidental, not designed. Under `pytest -s`, or a CI runner that
+    allocates a tty, it would block forever. Two agents were lost to exactly this
+    hang before it was diagnosed. Fail loudly instead: any test that genuinely
+    needs input() mocks it, and its mock takes precedence over this fixture.
+    """
+    def _refuse(prompt=""):
+        raise AssertionError(
+            "a test reached a real input() — mock it; an unmocked prompt hangs "
+            "the suite instead of failing it (prompt was: {0!r})".format(prompt))
+    monkeypatch.setattr("builtins.input", _refuse)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_sonari_dir(tmp_path, monkeypatch):
     """Redirect every Sonari path to a per-test tmp dir.
 

@@ -192,7 +192,7 @@ def test_install_macos_stdout_locks_hotkeyd_and_speechd_lines(tmp_path, monkeypa
     monkeypatch.setattr(ms, "_launcher_path", lambda: str(tmp_path / "sonari"))
     monkeypatch.setattr(mh.paths, "HOTKEYD_BIN_PATH", tmp_path / "sonari-hotkeyd")
     monkeypatch.setattr(ms.shutil, "which", lambda n: "/usr/bin/" + n)  # swiftc present
-    monkeypatch.setattr(ms.MacSupervisorBackend, "launchctl", lambda self, a: 0)
+    monkeypatch.setattr(ms.MacSupervisorBackend, "launchctl", lambda self, a, timeout=None: 0)
     monkeypatch.setattr(mh.MacHotkeyBackend, "build", lambda self: (True, "built"))
     monkeypatch.setattr("sonari.platform.macos.tts.MacTtsBackend.best_voice",
                         lambda self: "Ava (Premium)")
