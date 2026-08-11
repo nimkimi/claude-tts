@@ -164,6 +164,10 @@ def test_scripted_session_full_ordering():
 
     assert log == [
         ("earcon", "choice"),
+        # T18a: the new-session announce now fires through the real hook
+        # sequence (previously swallowed by the is_new/two-message bug).
+        # SID is the only session so far -> number 1.
+        ("text", "1, Another session."),
         ("text", "Let me check the files."),
         ("text", "I will start now."),
         ("text", "Which approach? Option 1: Refactor. Option 2: Rewrite. Press the option's number to choose, or Escape to cancel. Selecting is immediate. — at the terminal."),
@@ -199,10 +203,13 @@ def test_background_session_is_earcon_only():
     })
     drain_queue(daemon, speaker)
 
-    # Earcon fired (alerts are cross-session), but no text was spoken.
-    # SP3: the "waiting" earcon is retired (no mid-turn ding); the sessionless
-    # "choice" decision earcon still fires immediately.
-    assert log == [("earcon", "choice")]
+    # Earcon fired (alerts are cross-session), but no BACKGROUND text was
+    # spoken — bg's own chatter/choice text never reaches the log. SP3: the
+    # "waiting" earcon is retired (no mid-turn ding); the sessionless
+    # "choice" decision earcon still fires immediately. T18a: the one text
+    # item is fg's OWN registration announce (number 1), not bg's — the
+    # bg-stays-silent invariant this test exists to prove is untouched.
+    assert log == [("earcon", "choice"), ("text", "1, Another session.")]
 
 
 def test_background_reinvocation_does_not_hijack_foreground_voice():
@@ -247,6 +254,10 @@ def test_background_reinvocation_does_not_hijack_foreground_voice():
     drain_queue(daemon, speaker)
     spoken = [text for kind, text in log if kind == "text"]
     assert spoken == [
+        # T18a: A's own registration announce, enqueued at SessionStart ahead
+        # of the reply prose — B never SessionStart's here, so this is A's
+        # only announce (number 1).
+        "1, Another session.",
         "First part of the answer.",
         "Second part of the answer.",
         "Third part.",

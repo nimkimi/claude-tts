@@ -59,9 +59,6 @@ def on_set_foreground(ctx, msg):
     t = msg.get("type")          # KEEP LOCAL — there is NO ctx.type
     session = ctx.session
     cwd = msg.get("cwd")
-    # Newness must be captured BEFORE the Policy-A gate: both gate branches
-    # _record() the session, so this is the only observation point (announce D5).
-    is_new = session not in ctx.host.sessions.session_ids()
     # Policy A (R6 resolved): take the VOICE iff it is idle OR the submitter already
     # owns it (is the speaker); otherwise register only (ding + accrue as a jump/keep-
     # going target). Split voice-take from workspace-move: an auto-advanced speaker
@@ -116,7 +113,11 @@ def on_set_foreground(ctx, msg):
         ))
     if t == MsgType.SESSION_START:
         ctx.host.sessions.register(session, cwd=cwd)
-        if is_new and ctx.verbosity != "quiet":
+        # NOT `is_new`: a single SessionStart hook emits SET_FOREGROUND then
+        # SESSION_START, and the first already registered this id, so `is_new`
+        # was always False here and the announce never fired. Claim it
+        # explicitly instead — once per id, reset by unregister.
+        if ctx.verbosity != "quiet" and ctx.host.sessions.claim_announce(session):
             # Registration announce (spec §6): "{folder}, {number}." so digit
             # teleports are learnable eyes-free. Suppressed at quiet; never
             # re-fired on resume/clear/compact of a known id. Lands in the new

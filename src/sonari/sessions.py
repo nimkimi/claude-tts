@@ -75,6 +75,7 @@ class SessionManager:
         # by set_identity. Empty for every normally-registered session, so the
         # is_live fail-close and the ⌃⌘W/chooser exclusions are no-ops off-restore.
         self._provisional: "set[str]" = set()
+        self._announced = set()
 
     def _record(self, session: str, cwd) -> None:
         folder = _basename(cwd)
@@ -158,12 +159,28 @@ class SessionManager:
     def register(self, session: str, cwd=None) -> None:
         self._record(session, cwd)
 
+    def claim_announce(self, session: str) -> bool:
+        """Claim the one-shot registration announce for *session*.
+
+        TEST-AND-SET, not a query — call it exactly once, at the announce site.
+        The announce used to be gated on `is_new` inferred from whether the id
+        was already registered, but a single SessionStart hook emits TWO
+        messages and the first one registers the session, so `is_new` was
+        always False by the time SESSION_START arrived and the announce never
+        fired. Claiming explicitly is robust to how many messages a hook emits.
+        """
+        if session in self._announced:
+            return False
+        self._announced.add(session)
+        return True
+
     def unregister(self, session: str) -> None:
         self._sessions.pop(session, None)
         self._identities.pop(session, None)
         self._tty_evicted.discard(session)
         self._provisional.discard(session)
         self._numbers.pop(session, None)
+        self._announced.discard(session)
         if session in self._mru:
             self._mru.remove(session)
         if self._foreground == session:

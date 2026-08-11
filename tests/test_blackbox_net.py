@@ -147,6 +147,11 @@ def test_prose_ordering_decision_earcon_fires_before_fifo_text():
 
     assert log == [
         ("earcon", "choice"),
+        # T18a: the new-session announce now fires through the real hook
+        # sequence (it was silently swallowed by the is_new/two-message bug
+        # before). "fg" already claimed number 1 in make_net(), so this
+        # session is 2.
+        ("text", "2, Another session."),
         ("text", "Let me check the files."),
         ("text", "I will start now."),
         ("text", "Which approach? Option 1: Refactor. Option 2: Rewrite. "
