@@ -6,10 +6,18 @@ from sonari.cli import install as install_cmd
 
 
 def _state(tmp_path, sessions=2, per=3):
+    """The REAL envelope. The brief's fixture put `entries` under `sessions`;
+    the daemon puts the transcript pile under `history` (history.py:216-238)
+    and keeps only folder/number in `sessions`. A fixture with the wrong shape
+    made a broken summary look correct."""
     p = tmp_path / "state.json"
-    p.write_text(json.dumps({"version": 1, "sessions": {
-        f"s{i}": {"entries": [{"text": "x"}] * per} for i in range(sessions)}}),
-        encoding="utf-8")
+    p.write_text(json.dumps({
+        "version": 1,
+        "sessions": {f"s{i}": {"folder": "x", "number": i}
+                     for i in range(sessions)},
+        "history": {f"s{i}": {"entries": [{"text": "x"}] * per}
+                    for i in range(sessions)},
+    }), encoding="utf-8")
     return p
 
 
@@ -75,3 +83,57 @@ def test_silence_preserves_the_transcripts(tmp_path):
          mock.patch("sonari.cli.voiceout.speak"):
         install_cmd.uninstall()
     assert state.exists()
+
+
+def _real_shape(tmp_path, sessions_with_text=2, per=3, roster=0):
+    """state.json as the daemon ACTUALLY writes it: the transcript pile lives in
+    `history[session]["entries"]` (SessionHistory.to_state, history.py:216-238);
+    `sessions` is only the live roster (folder/number), which carries no text."""
+    p = tmp_path / "state.json"
+    p.write_text(json.dumps({
+        "version": 1,
+        "sessions": {f"r{i}": {"folder": "x", "number": i}
+                     for i in range(roster)},
+        "history": {f"s{i}": {"msg_id": 1, "group_seq": 0, "turn_id": 0,
+                              "entries": [{"text": "x", "kind": "prose"}] * per}
+                    for i in range(sessions_with_text)},
+    }), encoding="utf-8")
+    return p
+
+
+def test_the_count_comes_from_history_not_the_live_roster(tmp_path):
+    """The roster holds folder/number, never text. Counting it reported 0
+    utterances against a real 168 KB state.json holding 818 — a disclosure that
+    understates what deletion destroys defeats the consent it exists to obtain."""
+    with mock.patch("sonari.paths.STATE_PATH",
+                    _real_shape(tmp_path, sessions_with_text=2, per=3, roster=9)):
+        assert install_cmd.transcript_summary() == (2, 6)
+
+
+def test_text_with_an_empty_roster_still_gets_disclosed(tmp_path):
+    """Sessions end and leave the roster; their transcripts stay (forget() is
+    called nowhere). Gating the ask on the roster would skip it entirely."""
+    state = _real_shape(tmp_path, sessions_with_text=1, per=4, roster=0)
+    with mock.patch("sonari.paths.STATE_PATH", state), \
+         mock.patch("sys.stdout.isatty", return_value=False), \
+         mock.patch("sonari.cli.teardown.stop_daemon", return_value="stopped"), \
+         mock.patch("sonari.cli._platform"), \
+         mock.patch("sonari.cli.voiceout.speak"):
+        install_cmd.uninstall()
+        # inside the patch: outside it, conftest's isolated STATE_PATH answers
+        assert install_cmd.transcript_summary() == (1, 4)
+    assert state.exists()          # silence still keeps the data
+
+
+def test_a_failed_purge_says_so_instead_of_claiming_success(tmp_path, capsys):
+    """purge=True that cannot delete must not go quiet: the user asked for the
+    data to be gone and it is still there."""
+    state = _real_shape(tmp_path, sessions_with_text=1, per=1)
+    with mock.patch("sonari.paths.STATE_PATH", state), \
+         mock.patch("sonari.cli.teardown.stop_daemon", return_value="stopped"), \
+         mock.patch("sonari.cli._platform"), \
+         mock.patch("sonari.cli.voiceout.speak"), \
+         mock.patch("os.remove", side_effect=OSError("denied")):
+        install_cmd.uninstall(purge=True)
+    out = capsys.readouterr().out
+    assert "could not delete" in out.lower()

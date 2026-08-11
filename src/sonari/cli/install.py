@@ -166,14 +166,24 @@ def _cmd_install(_args) -> int:
 
 
 def transcript_summary():
-    """(session_count, utterance_count) held in state.json. Never raises."""
+    """(session_count, utterance_count) of the transcript text in state.json.
+
+    Counts `history`, NOT `sessions`. `sessions` is the live roster —
+    `SessionManager.to_state()` serialises folder/number and no text at all —
+    while the durable pile lives in `history[session]["entries"]`
+    (`SessionHistory.to_state()`, history.py:216-238). Counting the roster
+    reported "0 utterances" against a real 168 KB state.json holding 818, and a
+    disclosure that understates what deletion destroys defeats the informed
+    consent it exists to obtain. History entries are never pruned (`forget()`
+    is called nowhere), so a session that has ENDED still has transcripts here
+    long after it left the roster. Never raises."""
     try:
         import json as _json
         with open(str(paths.STATE_PATH), "r", encoding="utf-8") as fh:
             blob = _json.load(fh) or {}
-        sessions = blob.get("sessions") or {}
-        n = sum(len(s.get("entries") or []) for s in sessions.values())
-        return (len(sessions), n)
+        history = blob.get("history") or {}
+        n = sum(len(h.get("entries") or []) for h in history.values())
+        return (len(history), n)
     except Exception:  # noqa: BLE001 - a disclosure must never break uninstall
         return (0, 0)
 
@@ -258,8 +268,12 @@ def uninstall(purge=None) -> int:
         try:
             os.remove(str(paths.STATE_PATH))
             print(f"Deleted saved transcripts: {paths.STATE_PATH}")
-        except OSError:
-            pass
+        except FileNotFoundError:
+            pass                # nothing to delete is the outcome they asked for
+        except OSError as exc:
+            # They asked for the data to be gone and it is still there. Going
+            # quiet here would leave them believing it was deleted.
+            print(f"warning: could not delete {paths.STATE_PATH}: {exc}")
     elif os.path.exists(str(paths.STATE_PATH)):
         print(f"Kept saved transcripts: {paths.STATE_PATH}")
 
