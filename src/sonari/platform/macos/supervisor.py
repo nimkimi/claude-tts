@@ -83,11 +83,20 @@ class MacSupervisorBackend:
         return qualifying[0][0]
 
     # --- launchd helpers (verbatim moves) ---
-    def launchctl(self, args: list) -> int:
-        """Run 'launchctl <args...>'. Returns the exit code."""
+    def launchctl(self, args: list, timeout: Optional[float] = None) -> int:
+        """Run 'launchctl <args...>'. Returns the exit code.
+
+        *timeout*, in seconds, bounds the call so a wedged launchctl cannot stall
+        the caller forever; a timeout counts as failure (rc=1), same as the
+        FileNotFoundError branch below -- this method's contract is "always
+        returns an int," never raises. Omitted (None, the default) keeps every
+        existing caller's unbounded behaviour unchanged.
+        """
         try:
-            return subprocess.call(["launchctl", *args])
+            return subprocess.call(["launchctl", *args], timeout=timeout)
         except FileNotFoundError:
+            return 1
+        except subprocess.TimeoutExpired:
             return 1
 
     def plist(self, label: str, program_args: list, log_path: str,
@@ -236,12 +245,33 @@ class MacSupervisorBackend:
         (Hotkeyd teardown is in MacHotkeyBackend.uninstall.)"""
         if os.path.exists(LAUNCH_AGENT_PATH):
             self.launchctl(["unload", LAUNCH_AGENT_PATH])
+            # 'unload's own rc is not a signal: real launchctl (probed directly on
+            # this campaign's dev box, macOS 26) returns 0 for BOTH a genuine
+            # unload and an already-unloaded/failed one -- the only difference is
+            # text on stderr that this helper's subprocess.call does not capture.
+            # So ask launchd the fact that actually matters -- is the label still
+            # registered? -- the same signal daemon_is_launchd_job() already
+            # trusts. Bounded so a wedged launchctl cannot stall uninstall.
+            still_registered = self.launchctl(
+                ["list", LAUNCH_AGENT_LABEL], timeout=5.0) == 0
             try:
                 os.remove(LAUNCH_AGENT_PATH)
-                print("Removed LaunchAgent: {0}".format(LAUNCH_AGENT_PATH))
             except OSError as exc:
                 print("warning: could not remove {0}: {1}".format(
                     LAUNCH_AGENT_PATH, exc))
+            else:
+                if still_registered:
+                    # PROVISIONAL string — ear-batch-4. Deliberately does not say
+                    # "running": teardown.stop_daemon() (cli/install.py) reports
+                    # the daemon PROCESS's fate separately and authoritatively,
+                    # right after this call returns. This is the distinct fact
+                    # that launchd itself still thinks the job exists and (with
+                    # KeepAlive) could relaunch it even once that process is gone.
+                    print("warning: LaunchAgent {0} was removed, but launchd "
+                          "still shows {1} registered -- it may relaunch the "
+                          "daemon.".format(LAUNCH_AGENT_PATH, LAUNCH_AGENT_LABEL))
+                else:
+                    print("Removed LaunchAgent: {0}".format(LAUNCH_AGENT_PATH))
         else:
             print("No LaunchAgent installed.")
         path = _launcher_path()

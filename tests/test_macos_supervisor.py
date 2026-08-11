@@ -89,7 +89,10 @@ def test_uninstall_removes_launchagent_and_launcher(tmp_path, monkeypatch):
     monkeypatch.setattr(ms, "LAUNCH_AGENT_PATH", str(plist))
     monkeypatch.setattr(ms, "_launcher_path", lambda: str(launcher))
     sup = ms.MacSupervisorBackend()
-    monkeypatch.setattr(sup, "launchctl", lambda a: 0)
+    # accepts the optional timeout kwarg uninstall()'s post-unload verification
+    # call now passes (see test_macos_uninstall_rc.py for the rc-vs-registration
+    # behaviour this stub doesn't care about here).
+    monkeypatch.setattr(sup, "launchctl", lambda a, timeout=None: 0)
     sup.uninstall()
     assert not plist.exists() and not launcher.exists()
 
