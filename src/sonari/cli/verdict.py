@@ -21,7 +21,11 @@ def verdict(rows) -> str:
         return _NONE
     failed = [c for c, ok, _ in rows if not ok and not checkmeta.is_warn(c)]
     if not failed:
-        n = len(rows)
+        # Count what actually PASSED, not len(rows). A warn-class row is
+        # excluded from the spoken failure list by design, but it did not pass
+        # — counting it said "21 checks passed" when 20 did, which is a spoken
+        # statement of fact that is false.
+        n = sum(1 for _, ok, _ in rows if ok)
         return _HEALTHY.format(n=n, s="" if n == 1 else "s")
     n = len(failed)
     return _UNHEALTHY.format(
