@@ -1,3 +1,5 @@
+import inspect
+import re
 import json
 import os
 import signal
@@ -76,3 +78,26 @@ def test_a_pid_too_large_for_the_os_does_not_crash_uninstall(tmp_path):
          mock.patch("os.kill", side_effect=OverflowError()), \
          mock.patch.object(teardown, "_singleton_free", return_value=True):
         assert teardown.stop_daemon() == "stopped"
+
+
+def test_the_proof_window_outlasts_the_daemons_own_shutdown_budget():
+    """Found live: uninstall said "STILL RUNNING" while pgrep showed zero.
+
+    Not a flake — arithmetic. host.py's shutdown burns `speak_thread.join(
+    timeout=5.0)` in full whenever the speak thread is inside proc.wait(), and
+    the persistence-thread join before it has no timeout at all, so a daemon
+    that is MID-UTTERANCE at SIGTERM needs > 5.0 s to exit. A 5.0 s proof
+    window always lost that race and told an eyes-free user the opposite of the
+    truth about whether his daemon was gone. The proof must outlast the
+    shutdown it is proving.
+    """
+    from sonari.daemon import host as host_mod
+    src = inspect.getsource(host_mod.SpeechDaemon.run)
+    m = re.search(r"speak_thread\.join\(timeout=([0-9.]+)\)", src)
+    assert m, "speak_thread.join(timeout=...) moved — re-derive the budget"
+    daemon_budget = float(m.group(1))
+    proof_window = inspect.signature(teardown.stop_daemon).parameters["timeout"].default
+    assert proof_window > daemon_budget, (
+        f"stop_daemon's proof window ({proof_window}s) must exceed the daemon's "
+        f"own graceful-shutdown budget ({daemon_budget}s), or a daemon that is "
+        f"speaking when SIGTERM lands is reported as still-running after it died")

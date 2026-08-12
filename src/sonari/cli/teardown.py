@@ -62,10 +62,21 @@ def _singleton_free() -> bool:
     return True
 
 
-def stop_daemon(timeout: float = 5.0) -> str:
+def stop_daemon(timeout: float = 10.0) -> str:
     """SIGTERM the running daemon and wait for proof it died.
 
     Returns "not-running" | "stopped" | "still-running".
+
+    The window must OUTLAST the daemon's own graceful shutdown, or the proof
+    loses a race it was never told it was in. host.py's run() burns
+    `speak_thread.join(timeout=5.0)` in full whenever the speak thread is
+    inside proc.wait(), and the persistence-thread join before it has no
+    timeout at all — so a daemon that is MID-UTTERANCE at SIGTERM needs more
+    than 5 s to exit. At the old 5.0 s this reported "still-running" for a
+    daemon that had already died: found live, where `pgrep` showed zero the
+    moment after the warning printed. Costs nothing when the daemon is idle —
+    the poll returns the instant the flock frees, so the ceiling is only ever
+    paid when it really is still exiting.
     SIGTERM (never SIGKILL): host.py's handler exits into SP6's shutdown flush,
     so the pile survives the stop we are about to disclose to the user.
 
