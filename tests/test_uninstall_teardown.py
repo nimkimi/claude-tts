@@ -1,5 +1,6 @@
 import inspect
 import re
+from sonari import cli
 import json
 import os
 import signal
@@ -101,3 +102,27 @@ def test_the_proof_window_outlasts_the_daemons_own_shutdown_budget():
         f"stop_daemon's proof window ({proof_window}s) must exceed the daemon's "
         f"own graceful-shutdown budget ({daemon_budget}s), or a daemon that is "
         f"speaking when SIGTERM lands is reported as still-running after it died")
+
+
+def test_a_surviving_daemon_keeps_its_lockfile_so_it_stays_reachable(tmp_path):
+    """Deleting LOCK_PATH out from under a daemon that would NOT die strands it:
+    it is alive holding SINGLETON_PATH, but every client resolves the socket
+    through the lockfile, so nothing can reach it — including the next
+    `sonari install`, whose fresh daemons each lose the singleton to the orphan
+    and exit, are respawned by KeepAlive, and lose again. Permanent silence
+    until logout, which is the worst outcome this product has. Keep the
+    lockfile when the stop failed, so the survivor stays reachable and a
+    re-run of `sonari uninstall` can finish the job."""
+    lock = tmp_path / "daemon.lock"
+    lock.write_text("4242", encoding="utf-8")
+    sup = mock.MagicMock()
+    with mock.patch.object(cli.paths, "SONARI_DIR", tmp_path), \
+         mock.patch.object(cli.paths, "LOCK_PATH", lock), \
+         mock.patch.object(cli.paths, "STATE_PATH", tmp_path / "state.json"), \
+         mock.patch("sonari.cli.voiceout.speak"), \
+         mock.patch("sonari.cli.teardown.stop_daemon", return_value="still-running"), \
+         mock.patch("sonari.cli._platform", return_value=mock.MagicMock(supervisor=sup)):
+        cli.install.uninstall(purge=False)
+    assert lock.exists(), \
+        "the lockfile was deleted under a daemon that is still running — it is " \
+        "now unreachable and the next install crash-loops against its singleton"

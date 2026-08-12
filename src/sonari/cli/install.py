@@ -245,7 +245,6 @@ def uninstall(purge=None) -> int:
     # without ever asking.
     sonari_dir = paths.SONARI_DIR
     artifacts = [
-        paths.LOCK_PATH,
         paths.LOG_PATH,
         paths.HOTKEYD_RESOLVED_PATH,
         paths.INSTALL_RECORD_PATH,
@@ -254,6 +253,16 @@ def uninstall(purge=None) -> int:
         paths.DAEMON_ERR_PATH,
         paths.DAEMON_FAIL_MEMO_PATH,
     ]
+    # LOCK_PATH only when the daemon is genuinely gone. Deleting it under a
+    # SURVIVOR strands it: it stays alive holding SINGLETON_PATH while every
+    # client resolves the socket through the lockfile, so nothing can reach it
+    # — including the next `sonari install`, whose fresh daemons each lose the
+    # singleton to the orphan and exit, get respawned by KeepAlive, and lose
+    # again. That is permanent silence until logout. Keeping it leaves the
+    # survivor reachable and lets a re-run of uninstall finish the job.
+    if outcome != "still-running":
+        artifacts.insert(0, paths.LOCK_PATH)
+
     for artifact in artifacts:
         if os.path.exists(str(artifact)):
             try:
