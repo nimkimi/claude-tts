@@ -1,6 +1,8 @@
 import subprocess
 
-from sonari.speaker import Speaker
+import pytest
+
+from sonari.speaker import Speaker, SpeakFailure
 
 
 class FakePopen:
@@ -135,7 +137,18 @@ def test_cancel_terminates_proc_tracked_as_current():
 
 
 def test_speak_wait_timeout_terminates_hung_proc():
-    """A proc whose wait() always raises TimeoutExpired must be terminated."""
+    """A proc whose wait() always raises TimeoutExpired must be terminated.
+
+    NOTE (I3): FakePopen's `returncode` stays 0 after terminate() (a fake
+    artifact — it never models what a REAL subprocess.Popen does), so under
+    the new nonzero-exit-raises contract this still returns True/no-raise here.
+    That is a genuine divergence from production: a real Popen's returncode
+    stays None after terminate() (async signal, never re-reaped by a second
+    wait() call), so a real hung-then-killed proc now RAISES SpeakFailure —
+    see test_speak_wait_timeout_with_unreaped_returncode_raises_speak_failure
+    below, which models that Popen-faithfully. Deliberate generalization, not
+    explicitly required by the I3 brief: a hang we had to force-kill is the
+    same kind of broken speech path I3 exists to surface."""
 
     class HungPopen(FakePopen):
         def wait(self, timeout=None):
@@ -173,6 +186,33 @@ def test_speak_wait_timeout_terminates_hung_proc():
     assert procs[0].terminate_calls == 1
 
 
+def test_speak_wait_timeout_with_unreaped_returncode_raises_speak_failure():
+    """Popen-faithful hang: terminate() is an async signal and leaves
+    returncode None until a later wait()/poll() reaps it — speak() never
+    re-waits after the TimeoutExpired branch, so a real hung `say` reaches the
+    final check with returncode still None. No cancel() was ever called (the
+    epoch is untouched), so this is failure-shaped, not cancel-shaped: I3
+    generalization, see the NOTE on test_speak_wait_timeout_terminates_hung_proc."""
+
+    class HungRealisticPopen:
+        returncode = None
+
+        def __init__(self):
+            self.terminate_calls = 0
+
+        def wait(self, timeout=None):
+            if timeout is not None:
+                raise subprocess.TimeoutExpired(cmd=["say"], timeout=timeout)
+            return None
+
+        def terminate(self):
+            self.terminate_calls += 1   # real Popen: async signal, returncode stays None
+
+    sp = Speaker(say_runner=lambda t, v, r: HungRealisticPopen(), _wait_timeout=0.01)
+    with pytest.raises(SpeakFailure):
+        sp.speak("will hang")
+
+
 class _DoneProc:
     returncode = 0
     def wait(self, timeout=None):
@@ -196,10 +236,19 @@ def test_speak_returns_true_when_say_completes():
     assert s.speak("Hello there.") is True
 
 
-def test_speak_returns_false_when_say_terminated():
+def test_speak_raises_speak_failure_when_the_proc_exits_nonzero_uncancelled():
+    """I3: `_KilledProc`'s -15 used to be read as an ordinary "not completed"
+    (the old conflated contract — speak() returned False for BOTH a cancel and
+    a genuine failure). No cancel() is ever called here: this is the
+    AudioQueueStart(-66681) shape (say/afplay exits nonzero on its own), the
+    exact case a broken audio device produced with total silence and no trace.
+    It must now raise SpeakFailure, not silently return False. This rewrite of
+    a pre-existing test is a deliberate, brief-sanctioned contract change — the
+    old assertion encoded exactly the bug I3 closes."""
     from sonari.speaker import Speaker
     s = Speaker(say_runner=lambda text, voice, rate: _KilledProc())
-    assert s.speak("Hello there.") is False
+    with pytest.raises(SpeakFailure):
+        s.speak("Hello there.")
 
 
 def test_cancel_during_synthesis_aborts_before_play():
@@ -309,6 +358,59 @@ def test_speak_audio_path_honors_external_cancel_epoch_baseline():
     assert made[0].wait_calls == 0
 
 
-def test_speak_audio_path_runner_returns_none_is_false():
+def test_speak_audio_path_runner_returns_none_raises_speak_failure():
+    """I3: a spawn failure (afplay_runner returned None — 'the file vanished')
+    used to be conflated with an ordinary cancel (both False). It must now
+    raise SpeakFailure. Rewrite of a pre-existing test; see the rationale on
+    test_speak_raises_speak_failure_when_the_proc_exits_nonzero_uncancelled."""
     sp = Speaker(afplay_runner=lambda path: None)
-    assert sp.speak(audio_path="/missing.aiff") is False        # never derefs None
+    with pytest.raises(SpeakFailure):
+        sp.speak(audio_path="/missing.aiff")        # never derefs None
+
+
+# ---------------------------------------------------------------------------
+# I3: no-runner-configured and the failure/cancel disambiguation
+# ---------------------------------------------------------------------------
+
+
+def test_speak_with_no_say_runner_raises_speak_failure():
+    """I3: the third currently-conflated False case (brief fact 1) — no
+    say_runner configured at all. Production always configures both runners
+    (bootstrap.py), so this is a real "TTS backend missing" shape, not a
+    cancel; it must raise, not silently return False."""
+    sp = Speaker()   # neither runner configured
+    with pytest.raises(SpeakFailure):
+        sp.speak("hello")
+
+
+def test_speak_audio_path_with_no_afplay_runner_raises_speak_failure():
+    sp = Speaker(say_runner=RecordingRunner())   # say configured, afplay is not
+    with pytest.raises(SpeakFailure):
+        sp.speak(audio_path="/x.aiff")
+
+
+def test_cancel_mid_wait_with_nonzero_returncode_does_not_raise():
+    """I3's hard-fail condition, at the Speaker level: a proc whose returncode
+    goes nonzero (SIGTERM, matching a real Popen) exactly BECAUSE our own
+    cancel() terminated it mid-wait must return False, and must NOT raise
+    SpeakFailure — a naive nonzero-exit-is-failure rule would fire the failure
+    cue on every ordinary barge-in. The epoch (bumped by cancel() strictly
+    before terminate() can touch returncode) is what exempts it, not the
+    returncode's sign."""
+    captured = {}
+
+    class CancelledMidWaitPopen(FakePopen):
+        returncode = None
+
+        def wait(self, timeout=None):
+            captured["sp"].cancel()      # barge-in lands while we're "playing"
+            self.returncode = -15        # Popen-faithful: SIGTERM sets a negative code
+            return self.returncode
+
+    def runner(text, voice, rate):
+        return CancelledMidWaitPopen()
+
+    sp = Speaker(say_runner=runner)
+    captured["sp"] = sp
+    completed = sp.speak("hello")
+    assert completed is False
