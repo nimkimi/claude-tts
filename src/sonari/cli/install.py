@@ -252,6 +252,7 @@ def uninstall(purge=None) -> int:
         paths.FAULTLOG_PATH,
         paths.DAEMON_ERR_PATH,
         paths.DAEMON_FAIL_MEMO_PATH,
+        paths.SPEAK_FAIL_MEMO_PATH,   # I3: same lifecycle as DAEMON_FAIL_MEMO_PATH
     ]
     # LOCK_PATH only when the daemon is genuinely gone. Deleting it under a
     # SURVIVOR strands it: it stays alive holding SINGLETON_PATH while every

@@ -11,7 +11,7 @@ from sonari.protocol import MsgType
 from sonari.queue import SpeechItem
 from sonari.cues import CUES
 from sonari.session_stream import SessionStream
-from sonari.paths import LOCK_PATH, ensure_sonari_dir
+from sonari.paths import LOCK_PATH, ensure_sonari_dir, SPEAK_FAIL_MEMO_PATH
 from sonari.platform import transport
 from sonari.daemon.state import SessionState
 from sonari.daemon.context import Ctx
@@ -26,6 +26,31 @@ PERMISSION_WAIT_TIMEOUT = 120.0   # daemon's own wait; MUST be < the hook's clie
 EXPIRED_WORD = "That ask timed out — check the terminal."
 SPEAK_FAILURE_WORD = "Speech failed; kept unheard."
 ALARM_HOTKEYS_WORDS = "Hotkeys are down."   # §7 witness alarm — ratified (ear-batch-2)
+
+
+def _mark_speak_failure() -> None:
+    """Touch SPEAK_FAIL_MEMO_PATH so doctor's speech-path row can see a broken
+    audio path even though nothing on the speak thread can safely retry (I3).
+    Mirrors client.py's DAEMON_FAIL_MEMO_PATH write: mtime-based, on-disk (this
+    crosses a daemon-process/CLI-process boundary — an in-memory flag would
+    never reach `sonari doctor`), total — never raises. Called from inside
+    _signal_speak_failure, which is itself called from an except block already
+    handling a real failure; a second exception here must not replace it."""
+    try:
+        SPEAK_FAIL_MEMO_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SPEAK_FAIL_MEMO_PATH.touch()
+    except OSError:
+        pass
+
+
+def _clear_speak_failure_memo() -> None:
+    """Forget a recorded speak failure. Called from note_spoken() on the next
+    utterance that actually COMPLETES (I3), so a stale FAIL doesn't survive a
+    since-fixed audio path. Total — never raises."""
+    try:
+        SPEAK_FAIL_MEMO_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
 # Side-effect imports: importing each feature module runs its @handler
 # decorators, populating the registry (assert_complete in __init__ guards it).
 from sonari.daemon.features import control  # noqa: F401
@@ -602,6 +627,13 @@ class SpeechDaemon:
         # observe-only write never adds latency to or contends with the lock path.
         # A float write is atomic in CPython; no lock needed for a diagnostic field.
         self._last_drain = time.monotonic()
+        if completed:
+            # I3: a COMPLETED utterance is live proof the audio path works again —
+            # clear any previously recorded failure so doctor's speech-path row
+            # doesn't keep reporting a since-fixed problem. Gated on `completed`
+            # (not just "reached here"): an ordinary requeue/barge-in is not
+            # evidence of anything and must not paper over a real failure.
+            _clear_speak_failure_memo()
         with self._lock:
             self._state._current_item = None
             entry = self._state._pending_heard.pop(item.id, None)
@@ -933,7 +965,14 @@ class SpeechDaemon:
         branch only); both call sites run on the speak thread OUTSIDE the
         lock, so the lock is taken here. Never raises — error signaling must
         not itself re-break the loop. Call only from within an active
-        `except` block (print_exc reads the handled exception)."""
+        `except` block (print_exc reads the handled exception).
+
+        I3: also records SPEAK_FAIL_MEMO_PATH — a swallowed exception used to
+        leave NO trace at all (#41's silent no-op, plus no way for `sonari
+        doctor` to ever see it after the fact). Written FIRST, before any of
+        the audible signaling below, so the memo lands even if something past
+        this point misbehaves."""
+        _mark_speak_failure()
         hint = ""
         if self._faultcue.should_fire("speak"):
             hint = " Things seem off — try sonari doctor."  # PROVISIONAL (ear-batch-4)

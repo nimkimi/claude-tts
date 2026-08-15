@@ -142,6 +142,17 @@ def _isolate_sonari_dir(tmp_path, monkeypatch):
     import sonari.daemon.host as daemon_host
     import sonari.daemon.bootstrap as daemon_bootstrap
     monkeypatch.setattr(daemon_host, "LOCK_PATH", sonari_dir / "daemon.lock", raising=False)
+    # SPEAK_FAIL_MEMO_PATH is SONARI_DIR/"speak.fail_memo" bound at import (same
+    # trap as DAEMON_FAIL_MEMO_PATH above): daemon/host.py's `from sonari.paths
+    # import SPEAK_FAIL_MEMO_PATH` is a by-value bind, so without repointing both
+    # the paths module's copy AND host's copy, speak-failure-memo tests would
+    # read/write the developer's real ~/.sonari/speak.fail_memo. doctor.py reads
+    # it live off `paths.SPEAK_FAIL_MEMO_PATH` (no by-value bind of its own), so
+    # the paths-module repoint alone covers it there.
+    monkeypatch.setattr(
+        paths, "SPEAK_FAIL_MEMO_PATH", sonari_dir / "speak.fail_memo", raising=False)
+    monkeypatch.setattr(
+        daemon_host, "SPEAK_FAIL_MEMO_PATH", sonari_dir / "speak.fail_memo", raising=False)
     monkeypatch.setattr(daemon_bootstrap, "SINGLETON_PATH", sonari_dir / "daemon.singleton", raising=False)
     monkeypatch.setattr(daemon_bootstrap, "_SINGLETON", None, raising=False)
 
