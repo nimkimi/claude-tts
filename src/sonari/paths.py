@@ -34,6 +34,16 @@ DAEMON_FAIL_MEMO_PATH = SONARI_DIR / "daemon.fail_memo"
 # cli/doctor.py's speech-path row.
 SPEAK_FAIL_MEMO_PATH = SONARI_DIR / "speak.fail_memo"
 KOKORO_VENV = SONARI_DIR / "venv"   # opt-in uv-managed venv for neural voices
+# macOS-only LaunchAgent plist paths (platform/macos/supervisor.py and
+# platform/macos/hotkeys.py each bind their own module-level LAUNCH_AGENT_PATH
+# from these, str()-converted, at import time -- a by-value bind, so their
+# module copies need their own conftest repoint too, same pattern as
+# HOTKEYD_BIN_PATH). Centralized here rather than left as each module's
+# private os.path.expanduser() call so the paths.py-vs-conftest hermeticity
+# guard (test_paths_conftest_isolation.py) covers them like every other
+# constant, instead of relying on per-test discipline.
+SPEECHD_LAUNCH_AGENT_PATH = Path.home() / "Library" / "LaunchAgents" / "com.sonari.speechd.plist"
+HOTKEYD_LAUNCH_AGENT_PATH = Path.home() / "Library" / "LaunchAgents" / "com.sonari.hotkeyd.plist"
 
 
 def kokoro_venv_python() -> str:

@@ -155,5 +155,43 @@ def _isolate_sonari_dir(tmp_path, monkeypatch):
         daemon_host, "SPEAK_FAIL_MEMO_PATH", sonari_dir / "speak.fail_memo", raising=False)
     monkeypatch.setattr(daemon_bootstrap, "SINGLETON_PATH", sonari_dir / "daemon.singleton", raising=False)
     monkeypatch.setattr(daemon_bootstrap, "_SINGLETON", None, raising=False)
+    # KOKORO_VENV is SONARI_DIR/"venv" bound at import (same trap as APP_DIR/
+    # STATE_PATH above): kokoro_provision.uninstall_kokoro() rmtree()s it, and
+    # every existing test that reaches that call currently only stays safe by
+    # remembering to patch this locally. Without this repoint, a new test
+    # that forgets the local patch deletes the developer's real ~/.sonari/venv
+    # (a multi-hundred-MB neural-voice environment).
+    monkeypatch.setattr(paths, "KOKORO_VENV", sonari_dir / "venv", raising=False)
+    # RAISE_BIN_PATH is SONARI_DIR/"sonari-raise" bound at import (same trap):
+    # MacRaiseBackend.build() writes the compiled helper there. Its sibling
+    # HOTKEYD_BIN_PATH already gets this treatment above; this one was simply
+    # missed when introduced later -- without this repoint, a rebuild
+    # overwrites the developer's real compiled helper and silently drops the
+    # macOS Automation grant they already approved (a rebuild changes the
+    # binary's cdhash).
+    monkeypatch.setattr(paths, "RAISE_BIN_PATH", sonari_dir / "sonari-raise", raising=False)
+    # SPEECHD_LAUNCH_AGENT_PATH / HOTKEYD_LAUNCH_AGENT_PATH are
+    # ~/Library/LaunchAgents/com.sonari.{speechd,hotkeyd}.plist. Real files:
+    # install() writes + launchctl-loads them, uninstall() launchctl-unloads
+    # + os.remove()s them. Both supervisor.py and hotkeys.py bind their own
+    # module-level LAUNCH_AGENT_PATH from these BY VALUE at import (same trap
+    # as APP_DIR/INSTALL_RECORD_PATH above), so patching paths.* alone would
+    # not redirect them -- repoint each module's copy too. Sibling under
+    # tmp_path (not sonari_dir): a real LaunchAgents dir is not Sonari-owned,
+    # same reasoning as local_bin below.
+    launch_agents_dir = tmp_path / "LaunchAgents"
+    monkeypatch.setattr(
+        paths, "SPEECHD_LAUNCH_AGENT_PATH",
+        launch_agents_dir / "com.sonari.speechd.plist", raising=False)
+    monkeypatch.setattr(
+        paths, "HOTKEYD_LAUNCH_AGENT_PATH",
+        launch_agents_dir / "com.sonari.hotkeyd.plist", raising=False)
+    monkeypatch.setattr(
+        _sup, "LAUNCH_AGENT_PATH",
+        str(launch_agents_dir / "com.sonari.speechd.plist"), raising=False)
+    import sonari.platform.macos.hotkeys as _hotkeys
+    monkeypatch.setattr(
+        _hotkeys, "LAUNCH_AGENT_PATH",
+        str(launch_agents_dir / "com.sonari.hotkeyd.plist"), raising=False)
 
     yield
