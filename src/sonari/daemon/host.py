@@ -414,17 +414,22 @@ class SpeechDaemon:
           which clears the queue before its seek-and-play, so the whole stream IS
           the requested content).
         - False — a confirmation or fallback that merely LANDED there because its
-          destination falls back to workspace(): the settings readbacks, the
-          jump-waiting empty case, repeat/skip/jump-decision fallbacks, the
-          chooser preview (RR-2), the answer-permission approve/deny confirm
-          (decisions.py, RR-3 — fix-wave E), and ⌃⌘S-start's "Resumed." on a
-          dead MUTED workspace (playback.py, RR-4 — fix-wave E, re-adjudicated
-          from a false "pre-existing" label to the A-release regression it
-          measurably was: the start branch TAKES the voice itself, so R-1's
-          release strands it same as any other dead fg). Exactly the front
-          item is delivered, then the mark is spent (_release_dead_speaker). A
-          rate nudge is not a request to be read a closed session's pile, and
-          neither is un-muting one.
+          destination falls back to whatever accessor the handler's own routing
+          already resolved to. workspace(), at most sites: the settings
+          readbacks, the jump-waiting empty case, repeat/skip/jump-decision
+          fallbacks, the chooser preview (RR-2), the answer-permission
+          approve/deny confirm (decisions.py, RR-3 — fix-wave E), ⌃⌘S-start's
+          "Resumed." on a dead MUTED workspace (playback.py, RR-4 — fix-wave E,
+          re-adjudicated from a false "pre-existing" label to the A-release
+          regression it measurably was: the start branch TAKES the voice
+          itself, so R-1's release strands it same as any other dead fg), and
+          T2's closing pair — the learn-mode toggle and the query-actions
+          readout (teaching.py, owner-ruled 2026-08-15). But foreground(),
+          where the handler routes there instead: T2's third site, decisions.py
+          on_reread_options, both its enqueues — the different accessor.
+          Exactly the front item is delivered, then the mark is spent
+          (_release_dead_speaker). A rate nudge is not a request to be read a
+          closed session's pile, and neither is un-muting one.
 
         Re-sanctioning the SAME stream keeps the wider grain: a readback arriving
         mid-⌃⌘W must not truncate the whole read already running.
