@@ -775,8 +775,15 @@ class SpeechDaemon:
             ws = self.sessions.workspace()
             if ws is not None:
                 from sonari.daemon.features.teaching import LEARN_OFF
+                # Item E (wave1-T4): this enqueue is its OWN site, separate from
+                # the manual toggle's (teaching.py on_learn_mode) — T2 wired that
+                # one but deliberately left this one alone, out of its scope. Same
+                # RR-2 conjunction: composed into workspace() unconditionally, so
+                # a dead workspace with the idle voice strands it without the
+                # single-item sanction.
                 self._enqueue(ws, "prose", LEARN_OFF, False,
-                              mute_exempt=True, pause_exempt=True)
+                              mute_exempt=True, pause_exempt=True,
+                              at_front=self._sanction_dead_read(ws, whole=False))
 
     def handle_message(self, msg):
         self._ctx.bind(msg)

@@ -37,6 +37,12 @@ are different questions (fix-wave D):
   fallback, are sanctioned) — are wired below too, same grain. A rate nudge
   is not a request to be read a closed session's pile, and neither is
   un-muting one.
+
+Wave1-T4 item E, same day: T2's implementer found, but deliberately left out
+of scope, one more single-item site one level down — the learn-mode idle
+auto-exit (`_learn_mode_expired`) enqueues its own LEARN_OFF, separately from
+the manual toggle T2 just wired, and had the identical `workspace()`-falls-
+back gap. Wired below too, same grain, same day.
 """
 import threading
 
@@ -65,6 +71,26 @@ def _msg(t, session, **kw):
 def _drain(daemon, n):
     for _ in range(n):
         daemon._speak_loop_once()
+
+
+def _fake_learn_timer(monkeypatch):
+    """Replace threading.Timer with a no-real-thread fake (test_teaching.py's
+    own pattern): .fn() fires the idle callback synchronously, so item E's
+    120s idle auto-exit is testable without waiting or leaving a live daemon
+    timer running past the test."""
+    class _FakeTimer:
+        def __init__(self, interval, fn):
+            self.interval = interval
+            self.fn = fn
+            self.daemon = False
+
+        def start(self):
+            pass
+
+        def cancel(self):
+            pass
+
+    monkeypatch.setattr(threading, "Timer", _FakeTimer)
 
 
 def _dead_workspace(monkeypatch, folder="web", tty="/dev/ttysW"):
@@ -521,3 +547,43 @@ def test_the_three_closing_sites_are_byte_identical_on_a_live_workspace():
     daemon.handle_message({"type": "reread_options"})
     assert queue._items[0].text == "earlier item"
     assert queue._items[-1].text == "No options right now."
+
+
+# --- item E (wave1-T4, found by T2's implementer, deliberately left for a
+# separate task): the idle auto-exit's OWN LEARN_OFF is a SEPARATE enqueue,
+# one level below the manual toggle T2 just closed above ---
+def test_learn_mode_idle_auto_exit_on_a_dead_workspace_is_voiced(monkeypatch):
+    """_learn_mode_expired composes LEARN_OFF into workspace() unconditionally,
+    the identical RR-2 conjunction as the manual toggle — but it is its own
+    enqueue that T2 never touched (out of its scope). The realistic shape:
+    learn mode goes on while the workspace is still live, the terminal closes
+    (or the voice simply goes idle) before the 120s idle window elapses, and
+    the auto-exit's own announcement then lands on a now-dead stream nothing
+    adopts. Unheard, this strands more than silence: learn mode changes what
+    every key DOES, so a user who never hears the exit believes keys still
+    describe themselves, presses one, and it ACTS instead."""
+    _fake_learn_timer(monkeypatch)
+    dead = set()
+    _liveness(monkeypatch, dead)
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    sessions.register("ws", cwd="/x/web")
+    sessions.set_foreground("ws")
+    _ident(sessions, "ws", "/dev/ttysW")
+    daemon.handle_message(_msg("learn_mode", "ws"))        # ON while ws is still LIVE
+    assert daemon._learn_mode is True
+    _drain(daemon, 3)                                       # the ON announcement is heard live
+    assert any(s and s.startswith("Learn mode.") for s in speaker.spoken)
+    speaker.spoken.clear()
+    sessions.set_speaker(None)                              # the voice goes idle
+    dead.add("/dev/ttysW")                                  # ... and the terminal closes
+    assert sessions.liveness("ws") == "dead"
+    daemon._enqueue("ws", "prose", "backlog one", False)
+    daemon._enqueue("ws", "prose", "backlog two", False)
+    daemon._learn_timer.fn()                                # the idle timer fires
+    _drain(daemon, 6)
+    assert daemon._learn_mode is False
+    assert "Learn mode off." in speaker.spoken
+    assert not any(s and "backlog" in s for s in speaker.spoken)
+    assert len(daemon._stream("ws").queue) == 2             # kept, never destroyed
+    assert sessions.speaker() is None                       # released at the next boundary
+    assert daemon._deliberate_dead_read is None             # spent by its one item
