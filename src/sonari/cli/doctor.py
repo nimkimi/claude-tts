@@ -121,9 +121,13 @@ def doctor() -> list:
             results.append(("speech path", True,
                             "idle (nothing claimed by the speak loop)"))
         elif age is not None and age > WEDGE_S:
+            # I2: `age` is last_drain_age_s — time since anything last DRAINED,
+            # NOT how long the current item has been claimed. STATUS carries no
+            # claim timestamp, so name what was measured: after a quiet spell the
+            # drain age is already large the instant the next item is claimed.
             results.append(("speech path", False,
-                            f"wedged: an utterance has been claimed for "
-                            f"{age:.0f}s without draining"))
+                            f"wedged: nothing has drained for {age:.0f}s "
+                            f"while an utterance is claimed"))
         else:
             results.append(("speech path", True, "draining normally"))
     except Exception as exc:  # noqa: BLE001 - doctor must never raise

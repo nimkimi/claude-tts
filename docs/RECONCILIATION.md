@@ -71,7 +71,10 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
          on_stop_session` — RR-4, fix-wave E), and — owner-ruled
          2026-08-15, closing the family — the learn-mode toggle and the
          query-actions readout (`teaching.py on_learn_mode` /
-         `on_query_actions`, both targeting `workspace()`) and re-read
+         `on_query_actions`, both targeting `workspace()`), the learn-mode
+         IDLE AUTO-EXIT (`host.py` `_learn_mode_expired`, its OWN site: the
+         toggle's wiring never reached it, and wave1-T4 item E closed it in
+         code without this list being updated), and re-read
          options (`decisions.py on_reread_options`, targeting `foreground()`
          instead — the different accessor; both of its enqueues, the
          cached-options branch and the "No options right now." fallback, are
@@ -93,11 +96,16 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
        pre-existing; it is wired above, not listed here. Fix-wave E's
        re-review also found the answer-permission confirm, which had
        appeared in NEITHER the wired nor the unwired list at any point — it
-       is wired above too.) The family is now fully wired: the three sites
-       once carried here as an explicit HONEST LIMIT (learn mode,
-       query-actions, re-read options — measured pre-existing, left for an
-       owner-adjacent ruling) were ruled on 2026-08-15 and closed above,
-       single-item grain, wave1-T2.
+       is wired above too.) The three sites once carried here as an explicit
+       HONEST LIMIT (learn mode, query-actions, re-read options — measured
+       pre-existing, left for an owner-adjacent ruling) were ruled on
+       2026-08-15 and closed above, single-item grain, wave1-T2. That does
+       NOT make the family fully wired — this paragraph said so and was
+       wrong. `host.py` `_raise_failed` — the "Bring X forward to type."
+       line — enqueues with `at_front=True` and no `_sanction_dead_read`;
+       the wave1 whole-branch review measured it as the remaining single-item
+       site without one, and no wider re-audit has been run since. Wiring it
+       needs its own RED test and is booked, not done.
      - **prose gating** (`prose.py`) — no gate in the handler. R1 clears the
        pending tier at the dispatch chokepoint, so `on_prose` never buffers
        into a quarantined stream. A dead session's prose still buffers, by

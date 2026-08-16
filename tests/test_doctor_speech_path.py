@@ -28,6 +28,21 @@ def test_a_claimed_item_that_never_drains_is_a_wedge():
     assert "wedged" in detail
 
 
+def test_the_wedge_row_reports_the_quantity_it_actually_measured():
+    """I2: `age` is last_drain_age_s — time since anything last DRAINED — but the
+    row asserted "an utterance has been claimed for {age}s", a different
+    quantity. After any quiet spell the drain age is already large the instant
+    the next item is claimed, so the old wording overstated a fresh claim by the
+    length of the preceding silence. STATUS carries no claim timestamp (adding
+    one is a design change, booked for the next wave), so the honest row is the
+    one that names the drain age and reports the claim as the condition it is."""
+    ok, detail = _rows({"ok": True, "current_item": True,
+                        "last_drain_age_s": 900.0})["speech path"]
+    assert ok is False
+    assert "claimed for" not in detail, detail
+    assert "nothing has drained for 900s" in detail, detail
+
+
 def test_a_claimed_item_draining_normally_is_healthy():
     ok, _ = _rows({"ok": True, "current_item": True,
                    "last_drain_age_s": 0.5})["speech path"]
