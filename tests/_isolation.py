@@ -21,7 +21,8 @@ Script usage -- `tests/` is not a package, so put it on sys.path first, the same
 way `tests/test_sonari_hook_bin.py` reaches the repo's `bin/`:
 
     import sys, tempfile
-    from pathlib import Path
+    import os
+from pathlib import Path
 
     REPO = Path("/path/to/sonari")
     sys.path.insert(0, str(REPO / "tests"))
@@ -38,18 +39,32 @@ test:
 
     isolate_paths(tmp_path / ".sonari", monkeypatch)
 
-LIMIT — this is IN-PROCESS ONLY, and the limit is real, not theoretical. These
-repoints live in this interpreter's module objects; a SUBPROCESS re-imports
-sonari from scratch and gets the real ~/.sonari back. daemon/bootstrap.py's
-`ensure_running()` does `subprocess.Popen(...)`, so any path that starts or relaunches
-a daemon escapes isolation entirely. Demonstrated: importing
-`sonari.daemon.__main__` (its `main()` is unguarded, unlike cli/__main__.py)
-under full isolation still overwrote the real ~/.sonari/faulthandler.log. A
-script that only reads and writes paths is safe; a script that SPAWNS is not.
-The paths.py accessor refactor will not change this either -- only a real
-HOME/env override would, and that is deliberately not on the table (a stray env
-var splits the CLI from the launchd daemon, which is the same failure family).
+READ THIS BEFORE TRUSTING THE LIST — attribute repoints are IN-PROCESS ONLY.
+
+Every `_setattr` below rebinds a name in *this* interpreter. A SUBPROCESS
+re-imports sonari from scratch and would get the real ~/.sonari straight back.
+That is not theoretical and it is not cheap: `ensure_running()` does
+`subprocess.Popen(...)`, so any path that starts or relaunches a daemon spawns a
+child the attribute repoints cannot reach. On 2026-08-16 an escaped `uninstall()`
+DELETED the developer's real `~/.sonari/app` (the daemon's whole PYTHONPATH
+target) and `~/.local/bin/sonari`. The daemon kept speaking only because Python
+had already loaded its modules; with KeepAlive=true, the next restart would have
+been total silence for a blind user, at whatever hour it happened.
+
+That is why this function also repoints **HOME**, and why HOME is the single
+most important line in it. `paths.py` derives from `Path.home()`, so a child
+process inherits the sandbox through the environment — the one repoint that
+survives a fork. Measured, not assumed: running the full suite under a
+sacrificial HOME creates `$HOME/.sonari` WITHOUT the HOME repoint and never
+creates it WITH the repoint. Some test already spawns a child that reaches the
+real home; it is benign today, and it is the same door.
+
+Still not covered, so do not assume it is: a launchd job (launchd does not
+inherit your environment), anything with a hardcoded absolute path, and any
+process you start with a scrubbed env. Belt and braces for ad-hoc scripts: run
+them under a sacrificial HOME *as well* as calling this.
 """
+import os
 from pathlib import Path
 
 
@@ -62,17 +77,27 @@ def isolate_paths(root, monkeypatch=None) -> None:
     they are placed BESIDE `root`, in `root.parent` -- give `root` a parent you
     own (a tmp_path, a mkdtemp), never a directory you care about.
 
+    `HOME` is repointed to `root.parent` as well, so processes SPAWNED from here
+    land in the sandbox too -- see the module docstring for why that one line
+    carries most of the safety.
+
     With `monkeypatch`, the repoints revert when the test ends. Without it they
     last for the life of the process, which is what an ad-hoc script wants.
     """
     if monkeypatch is not None:
         def _setattr(obj, name, value):
             monkeypatch.setattr(obj, name, value, raising=False)
+
+        def _setenv(name, value):
+            monkeypatch.setenv(name, value)
     else:
         # Plain setattr is the exact analogue of monkeypatch's raising=False:
         # it binds the name whether or not the module already had one.
         def _setattr(obj, name, value):
             setattr(obj, name, value)
+
+        def _setenv(name, value):
+            os.environ[name] = value
 
     # Do NOT pre-create the directory: several tests (test_config,
     # test_paths, test_cli_uninstall) assert SONARI_DIR does not yet exist and
@@ -82,6 +107,15 @@ def isolate_paths(root, monkeypatch=None) -> None:
     # ~/.local/bin and ~/Library/LaunchAgents are the user's, not Sonari's, so
     # their stand-ins are siblings of sonari_dir rather than children of it.
     sibling_root = sonari_dir.parent
+
+    # HOME too, and this one is the only repoint that survives a fork: every
+    # line below rebinds an attribute in THIS interpreter, which a subprocess
+    # never sees. paths.py derives from Path.home(), so a child that re-imports
+    # sonari resolves to the sandbox instead of the real home. That closes the
+    # gap the rest of this list structurally cannot -- ensure_running() does
+    # subprocess.Popen, and an escaped uninstall() child is what deleted the
+    # developer's real ~/.sonari/app and ~/.local/bin/sonari on 2026-08-16.
+    _setenv("HOME", str(sibling_root))
 
     import sonari.paths as paths
 

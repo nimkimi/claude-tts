@@ -23,12 +23,20 @@ in both modes:
 import ast
 import importlib
 import json
+import os
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+# Captured at module import, which happens before any fixture runs -- so this is
+# the home the developer actually has, even though the isolation fixture
+# repoints HOME for the duration of each test. The standalone probe models an
+# ad-hoc script run on a real machine, so it must be handed a HOME that is NOT
+# already sandboxed, or its "did this escape to the real home?" assertions
+# become tautologies.
+HOME_AT_IMPORT = Path.home()
 SRC = REPO / "src" / "sonari"
 
 
@@ -124,6 +132,10 @@ _PROBE = textwrap.dedent(
             install_record.INSTALL_RECORD_PATH),
     }}
     copies_before = _copies()
+    # BEFORE isolating: isolate_paths repoints HOME as well, so Path.home()
+    # read afterwards would be the sandbox and every "did it escape?" check
+    # would compare the sandbox against itself.
+    home_before = str(Path.home())
 
     from _isolation import isolate_paths
 
@@ -147,7 +159,7 @@ _PROBE = textwrap.dedent(
         if name.isupper() and isinstance(value, Path)
     }}
     print(json.dumps({{
-        "home": str(Path.home()),
+        "home": home_before,
         "root": str(root),
         "before": before,
         "after": after,
@@ -162,10 +174,12 @@ _PROBE = textwrap.dedent(
 def _run_probe(sandbox):
     script = _PROBE.format(tests=str(REPO / "tests"), src=str(REPO / "src"))
     pairs = json.dumps(_module_level_by_value_binds())
+    env = dict(os.environ, HOME=str(HOME_AT_IMPORT))
     proc = subprocess.run(
         [sys.executable, "-c", script, str(sandbox), pairs],
         capture_output=True,
         text=True,
+        env=env,
     )
     assert proc.returncode == 0, (
         "standalone isolation probe failed:\nstdout={0}\nstderr={1}".format(
@@ -294,6 +308,30 @@ def test_suite_isolation_covers_every_module_level_by_value_bind(tmp_path):
         "{0}. A missing module-copy repoint is the exact 2026-08-15 failure "
         "mode -- add _setattr(<module>, \"<NAME>\", ...) to isolate_paths()."
         .format(stray))
+
+
+def test_suite_isolation_repoints_home_so_spawned_children_are_covered(tmp_path):
+    """The only repoint that survives a fork, so it gets its own test.
+
+    A child re-imports sonari from scratch: attribute repoints cannot reach it,
+    HOME can, because paths.py derives from Path.home(). `ensure_running()` does
+    subprocess.Popen, and an escaped uninstall() child is what deleted the
+    developer's real ~/.sonari/app and ~/.local/bin/sonari on 2026-08-16 — so
+    this is proven by actually spawning a child, not by reading os.environ.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.path.insert(0, {0!r}); "
+         "from sonari.paths import INSTALL_RECORD_PATH; "
+         "print(INSTALL_RECORD_PATH)".format(str(REPO / "src"))],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    child_path = Path(proc.stdout.strip())
+    assert child_path.is_relative_to(tmp_path), (
+        "a subprocess spawned from a test resolved INSTALL_RECORD_PATH to {0}, "
+        "outside this test's tmp_path -- isolate_paths() is no longer "
+        "repointing HOME, so anything the suite spawns can reach the real "
+        "~/.sonari".format(child_path))
 
 
 def test_suite_isolation_is_atomic_for_every_paths_constant(tmp_path):
