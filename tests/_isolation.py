@@ -1,5 +1,34 @@
 """The one Sonari isolation list: repoint every path, or repoint none.
 
+READ THIS FIRST — attribute repoints are IN-PROCESS ONLY, and this call is
+NOT by itself enough to make a script safe.
+
+Every `_setattr` below rebinds a name in *this* interpreter. A SUBPROCESS
+re-imports sonari from scratch and would get the real ~/.sonari straight back.
+That is not theoretical and it is not cheap: `ensure_running()` does
+`subprocess.Popen(...)`, so any path that starts or relaunches a daemon spawns a
+child the attribute repoints cannot reach. On 2026-08-16 an escaped `uninstall()`
+DELETED the developer's real `~/.sonari/app` (the daemon's whole PYTHONPATH
+target) and `~/.local/bin/sonari`. The daemon kept speaking only because Python
+had already loaded its modules; with KeepAlive=true, the next restart would have
+been total silence for a blind user, at whatever hour it happened.
+
+That is why this function also repoints **HOME**, and why HOME is the single
+most important line in it. `paths.py` derives from `Path.home()`, so a child
+process inherits the sandbox through the environment -- the one repoint that
+survives a fork. Measured, not assumed: running the full suite under a
+sacrificial HOME creates `$HOME/.sonari` WITHOUT the HOME repoint and never
+creates it WITH the repoint. Some test already spawns a child that reaches the
+real home; it is benign today, and it is the same door.
+
+Still not covered, so do not assume it is: a launchd job (launchd does not
+inherit your environment), anything with a hardcoded absolute path, and any
+process you start with a scrubbed env. **So: run ad-hoc scripts under a
+sacrificial HOME as well as calling this.** Belt and braces, in that order --
+the environment is mechanical, the list below is only as good as its coverage.
+
+---
+
 `tests/conftest.py`'s autouse fixture calls this, and so must any ad-hoc script
 that runs Sonari code against a sacrificial directory. It exists because
 PARTIAL isolation caused a real outage on 2026-08-15: a probe script repointed
@@ -18,11 +47,11 @@ Underscore-prefixed so pytest does not collect it (same as `_fakeplatform.py`,
 `_fakeclient/`).
 
 Script usage -- `tests/` is not a package, so put it on sys.path first, the same
-way `tests/test_sonari_hook_bin.py` reaches the repo's `bin/`:
+way `tests/test_sonari_hook_bin.py` reaches the repo's `bin/`. Run it with
+`HOME` pointed at the sandbox too, per the warning above:
 
     import sys, tempfile
-    import os
-from pathlib import Path
+    from pathlib import Path
 
     REPO = Path("/path/to/sonari")
     sys.path.insert(0, str(REPO / "tests"))
@@ -38,31 +67,6 @@ Under pytest, pass the test's monkeypatch instead so the repoints revert per
 test:
 
     isolate_paths(tmp_path / ".sonari", monkeypatch)
-
-READ THIS BEFORE TRUSTING THE LIST — attribute repoints are IN-PROCESS ONLY.
-
-Every `_setattr` below rebinds a name in *this* interpreter. A SUBPROCESS
-re-imports sonari from scratch and would get the real ~/.sonari straight back.
-That is not theoretical and it is not cheap: `ensure_running()` does
-`subprocess.Popen(...)`, so any path that starts or relaunches a daemon spawns a
-child the attribute repoints cannot reach. On 2026-08-16 an escaped `uninstall()`
-DELETED the developer's real `~/.sonari/app` (the daemon's whole PYTHONPATH
-target) and `~/.local/bin/sonari`. The daemon kept speaking only because Python
-had already loaded its modules; with KeepAlive=true, the next restart would have
-been total silence for a blind user, at whatever hour it happened.
-
-That is why this function also repoints **HOME**, and why HOME is the single
-most important line in it. `paths.py` derives from `Path.home()`, so a child
-process inherits the sandbox through the environment — the one repoint that
-survives a fork. Measured, not assumed: running the full suite under a
-sacrificial HOME creates `$HOME/.sonari` WITHOUT the HOME repoint and never
-creates it WITH the repoint. Some test already spawns a child that reaches the
-real home; it is benign today, and it is the same door.
-
-Still not covered, so do not assume it is: a launchd job (launchd does not
-inherit your environment), anything with a hardcoded absolute path, and any
-process you start with a scrubbed env. Belt and braces for ad-hoc scripts: run
-them under a sacrificial HOME *as well* as calling this.
 """
 import os
 from pathlib import Path
