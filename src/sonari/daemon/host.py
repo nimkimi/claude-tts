@@ -273,6 +273,10 @@ class SpeechDaemon:
         # appended to _signal_speak_failure's word (below).
         from sonari.daemon.faultcue import FaultCue
         self._faultcue = FaultCue()
+        # C1: sessions with a spoken failure word still outstanding — see
+        # _signal_speak_failure. Speak-thread-only state (both writers are the
+        # speak loop), touched under self._lock like the rest of the queue side.
+        self._speak_failure_outstanding: "set[str]" = set()
 
     # --- Ledger shims (Step 7): storage lives on SessionState. The hot path
     # (speak loop + kernel ops) goes through self._state._X directly; these
@@ -641,6 +645,14 @@ class SpeechDaemon:
             _clear_speak_failure_memo()
         with self._lock:
             self._state._current_item = None
+            if completed:
+                # C1: re-arm the spoken failure word for this session, on the same
+                # proof of life the memo clear above rests on. Gated on `completed`
+                # for the same reason: clearing on ANY drain would re-arm on the
+                # failure word's OWN not-completed drain, which is the amplifying
+                # loop again. Folded into this existing locked region — no new
+                # lock, no new gap (M1).
+                self._speak_failure_outstanding.discard(item.session)
             entry = self._state._pending_heard.pop(item.id, None)
             if entry is not None and completed:
                 entry.heard = True
@@ -983,34 +995,67 @@ class SpeechDaemon:
         leave NO trace at all (#41's silent no-op, plus no way for `sonari
         doctor` to ever see it after the fact). Written FIRST, before any of
         the audible signaling below, so the memo lands even if something past
-        this point misbehaves."""
+        this point misbehaves.
+
+        C1: AT MOST ONE word may be outstanding per session. The word rides the
+        FAILING session's own queue, so on a persistent fault (a dead audio
+        device: `say` exiting nonzero fast, AudioQueueStart(-66681)) the speak
+        loop pops the word, speaks it through the same broken speaker, raises,
+        and lands back here — enqueueing another. The queue never empties, so
+        `item is None` is never true, the loop never reaches its wait, and every
+        turn costs a `say` spawn, an `afplay` spawn and a traceback, unbounded;
+        it also pins _stream_quiescent false, so keep-going never adopts another
+        session. Suppressing the SECOND word does not reopen the silence I3
+        closed: the memo above and the tone below still fire on every failure,
+        and the first word already said it out loud. The flag clears in
+        note_spoken on the next utterance that COMPLETES — the same proof of
+        life the memo clear rests on."""
         _mark_speak_failure()
-        hint = ""
-        if self._faultcue.should_fire("speak"):
-            hint = " Things seem off — try sonari doctor."  # PROVISIONAL (ear-batch-4)
-        word = SPEAK_FAILURE_WORD + hint
-        spoken = False
-        try:
-            if session is not None:
-                with self._lock:
-                    self.cue("error_system", word=word, session=session)
-            else:
-                # #54 gap A: this branch used to fire a BARE tone (W6). An
-                # eyes-free user got a sound with no account of what failed.
-                self.cue("error_system")
-                from sonari.cli import voiceout
-                voiceout.speak_direct(word)
-            spoken = True
-        except Exception:  # noqa: BLE001 - signaling must not wedge the loop
-            pass
-        if not spoken:
-            # #54 gap B: the word was routed through the very TTS path that
-            # just failed. Same reasoning as hotkeyd's raw shell-out alarm.
+        outstanding = False
+        if session is not None:
+            with self._lock:
+                outstanding = session in self._speak_failure_outstanding
+        if outstanding:
+            # Tone only: the instant half of the signal is exactly the half that
+            # survives a dead voice, and it enqueues nothing. No gap-B fallback
+            # either — a raw `say` per failure is the same spin in another shape.
             try:
-                from sonari.cli import voiceout
-                voiceout.speak_direct(word)
-            except Exception:  # noqa: BLE001 - last resort; nothing to escalate to
+                self.cue("error_system")
+            except Exception:  # noqa: BLE001 - signaling must not wedge the loop
                 pass
+        else:
+            hint = ""
+            if self._faultcue.should_fire("speak"):
+                # Computed only on this path: the hint is fire-once-per-class, so
+                # spending it on a suppressed failure would buy a word nobody hears.
+                hint = " Things seem off — try sonari doctor."  # PROVISIONAL (ear-batch-4)
+            word = SPEAK_FAILURE_WORD + hint
+            spoken = False
+            try:
+                if session is not None:
+                    with self._lock:
+                        self.cue("error_system", word=word, session=session)
+                        # Marked outstanding only once the enqueue has actually
+                        # happened: if cue() raised (gap B below) no word rode
+                        # the queue, so nothing is outstanding to suppress.
+                        self._speak_failure_outstanding.add(session)
+                else:
+                    # #54 gap A: this branch used to fire a BARE tone (W6). An
+                    # eyes-free user got a sound with no account of what failed.
+                    self.cue("error_system")
+                    from sonari.cli import voiceout
+                    voiceout.speak_direct(word)
+                spoken = True
+            except Exception:  # noqa: BLE001 - signaling must not wedge the loop
+                pass
+            if not spoken:
+                # #54 gap B: the word was routed through the very TTS path that
+                # just failed. Same reasoning as hotkeyd's raw shell-out alarm.
+                try:
+                    from sonari.cli import voiceout
+                    voiceout.speak_direct(word)
+                except Exception:  # noqa: BLE001 - last resort; nothing to escalate to
+                    pass
         try:
             import sys
             import traceback
@@ -1082,6 +1127,7 @@ class SpeechDaemon:
                 self._state._wake.clear()
                 return
             vkw = {"voice": item.voice} if item.voice is not None else {}
+            failed = False
             try:
                 # Same atomic-unit rule as the normal branch: a pause-exempt cue
                 # with a prelude (e.g. the answer chirp) plays whole or not at all.
@@ -1101,7 +1147,10 @@ class SpeechDaemon:
             except Exception:  # noqa: BLE001 - one bad cue must not wedge the hold
                 self._signal_speak_failure(item.session)
                 completed = False
+                failed = True
             self.note_spoken(item, completed)
+            if failed:
+                self._back_off_after_failure()
             return
         # Pop and CLAIM the speaker stream's next item atomically under the lock.
         # speaker() is read here too, so a switch arriving on another connection
@@ -1196,6 +1245,7 @@ class SpeechDaemon:
             self._state._wake.clear()
             return
         vkw = {"voice": item.voice} if item.voice is not None else {}
+        failed = False
         try:
             # ATOMIC UNIT (D8 law 2): prelude parts + content share the claim and
             # the cancel epoch. Any part not completing abandons the rest, so the
@@ -1217,6 +1267,7 @@ class SpeechDaemon:
         except Exception:  # noqa: BLE001 - one bad utterance must not abort the item
             self._signal_speak_failure(item.session)
             completed = False
+            failed = True
         requeued = False
         with self._lock:
             # Re-check INSIDE the lock (L2). A FLUSH also runs under this lock and
@@ -1238,6 +1289,24 @@ class SpeechDaemon:
                 self._state._last_utterance = (text, item.audio_path)
         if not requeued:
             self.note_spoken(item, completed)
+        if failed:
+            self._back_off_after_failure()
+
+    def _back_off_after_failure(self) -> None:
+        """C1: pause one poll interval after a failure-SHAPED turn, on both loop
+        branches, so a persistent fault degrades to a slow retry instead of a
+        spin. Only the raised shape backs off: speak() returning False is a
+        barge-in, and making an interrupt pay this wait would be felt.
+
+        The clear before the wait is load-bearing. _wake is a plain Event, and
+        the failure word's own _enqueue set it — a bare wait() would return
+        instantly and throttle nothing. Clearing costs no work: the loop finds
+        queued items by polling the stream, and _wake only shortens the IDLE
+        wait, so at worst a just-enqueued item is popped on the next turn
+        anyway. Shutdown is unaffected — _on_shutdown_signal clears _running
+        before it sets _wake, so the loop exits after at most one interval."""
+        self._state._wake.clear()
+        self._state._wake.wait(self._poll_interval)
 
     def _handle_message_guarded(self, msg):
         """Dispatch one socket message under the lock; if the handler asks to block
