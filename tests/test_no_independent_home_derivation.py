@@ -43,20 +43,21 @@ ALLOWLIST = {
         "claude-binary fallback dirs probe (LaunchAgent PATH is bare); "
         "read-only isfile()/access(), never writes",
     # platform/macos/supervisor.py's _launcher_path()/_local_bin_dir() are the
-    # ALREADY-FIXED 53850cc case: conftest.py's _isolate_sonari_dir fixture
-    # replaces these two FUNCTIONS wholesale with lambdas (not a
-    # path-constant patch), so they are structurally isolated today by a
-    # different mechanism than this repo's paths.py-vs-conftest diff guard
+    # ALREADY-FIXED 53850cc case: the shared isolation list (tests/_isolation.py,
+    # applied by conftest.py's _isolate_sonari_dir fixture) replaces these two
+    # FUNCTIONS wholesale with lambdas (not a path-constant patch), so they are
+    # structurally isolated today by a different mechanism than this repo's
+    # paths.py-vs-isolation-list diff guard
     # (test_paths_conftest_isolation.py). Not moved into paths.py here: this
     # task's scope is guards + isolation only, no production-code behavior
     # change (see task-5-report.md). The allowlist-rot test below asserts the
-    # conftest lambda replacements are still in place, so if that mechanism
+    # lambda replacements are still in place, so if that mechanism
     # is ever removed, this entry fails loudly instead of silently
     # re-opening the 53850cc hazard.
     "platform/macos/supervisor.py":
-        "_launcher_path()/_local_bin_dir() -- isolated via conftest's "
-        "function-object replacement (53850cc), not a path-constant patch; "
-        "see the allowlist-rot test for the trip-wire on that mechanism",
+        "_launcher_path()/_local_bin_dir() -- isolated via the isolation "
+        "list's function-object replacement (53850cc), not a path-constant "
+        "patch; see the allowlist-rot test for the trip-wire on that mechanism",
 }
 
 
@@ -94,22 +95,25 @@ def test_allowlist_entries_still_exist_and_still_match():
             .format(rel))
 
 
-def test_supervisor_launch_path_functions_still_isolated_via_conftest():
+def test_supervisor_launch_path_functions_still_isolated():
     """Trip-wire for the supervisor.py allowlist entry's actual justification:
-    it is safe ONLY because conftest.py replaces _local_bin_dir/_launcher_path
-    wholesale. If that replacement is ever removed, this must fail loudly --
-    a silent ALLOWLIST entry would otherwise re-open the 53850cc hazard
-    (running the suite deletes the developer's real ~/.local/bin/sonari)."""
-    conftest_text = (
-        pathlib.Path(__file__).resolve().parent / "conftest.py"
+    it is safe ONLY because the isolation list replaces
+    _local_bin_dir/_launcher_path wholesale. If that replacement is ever
+    removed, this must fail loudly -- a silent ALLOWLIST entry would otherwise
+    re-open the 53850cc hazard (running the suite deletes the developer's real
+    ~/.local/bin/sonari). Reads tests/_isolation.py, where the repoints live;
+    test_paths_conftest_isolation.py holds the trip-wire that conftest still
+    applies that list at all."""
+    isolation_text = (
+        pathlib.Path(__file__).resolve().parent / "_isolation.py"
     ).read_text(encoding="utf-8")
-    assert '"_local_bin_dir"' in conftest_text, (
-        "conftest.py no longer patches supervisor._local_bin_dir -- the "
+    assert '"_local_bin_dir"' in isolation_text, (
+        "tests/_isolation.py no longer patches supervisor._local_bin_dir -- the "
         "platform/macos/supervisor.py entry in this guard's ALLOWLIST is "
         "now UNSAFE (see 53850cc); either restore the patch or close the "
         "gap some other way before removing the trip-wire")
-    assert '"_launcher_path"' in conftest_text, (
-        "conftest.py no longer patches supervisor._launcher_path -- the "
+    assert '"_launcher_path"' in isolation_text, (
+        "tests/_isolation.py no longer patches supervisor._launcher_path -- the "
         "platform/macos/supervisor.py entry in this guard's ALLOWLIST is "
         "now UNSAFE (see 53850cc); either restore the patch or close the "
         "gap some other way before removing the trip-wire")
