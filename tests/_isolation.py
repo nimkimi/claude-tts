@@ -37,6 +37,18 @@ Under pytest, pass the test's monkeypatch instead so the repoints revert per
 test:
 
     isolate_paths(tmp_path / ".sonari", monkeypatch)
+
+LIMIT — this is IN-PROCESS ONLY, and the limit is real, not theoretical. These
+repoints live in this interpreter's module objects; a SUBPROCESS re-imports
+sonari from scratch and gets the real ~/.sonari back. daemon/bootstrap.py's
+`ensure_running()` does `subprocess.Popen(...)`, so any path that starts or relaunches
+a daemon escapes isolation entirely. Demonstrated: importing
+`sonari.daemon.__main__` (its `main()` is unguarded, unlike cli/__main__.py)
+under full isolation still overwrote the real ~/.sonari/faulthandler.log. A
+script that only reads and writes paths is safe; a script that SPAWNS is not.
+The paths.py accessor refactor will not change this either -- only a real
+HOME/env override would, and that is deliberately not on the table (a stray env
+var splits the CLI from the launchd daemon, which is the same failure family).
 """
 from pathlib import Path
 
@@ -99,15 +111,22 @@ def isolate_paths(root, monkeypatch=None) -> None:
     # Modules that bound these names at import time need their copies repointed too.
     import sonari.config as config
 
+    # NOTE: config.py does not actually import SONARI_DIR (only CONFIG_PATH and
+    # ensure_sonari_dir), so this line CREATES the attribute rather than
+    # redirecting one -- it is defensive, not load-bearing. Kept because it
+    # costs nothing and covers config.py growing the bind later; the comment is
+    # here because the original claimed a bind that does not exist.
     _setattr(config, "SONARI_DIR", sonari_dir)
     _setattr(config, "CONFIG_PATH", sonari_dir / "config.json")
 
-    # keymap.py binds KEYMAP_PATH/HOTKEYD_RESOLVED_PATH/SONARI_DIR by value at
-    # import time, so patching paths.* alone does not redirect it. Repoint the
-    # keymap module's copies too so no test (e.g. the `keymap` subcommand, which
-    # reads load_keymap()) can ever read or write the real ~/.sonari.
+    # keymap.py binds KEYMAP_PATH/HOTKEYD_RESOLVED_PATH by value at import time,
+    # so patching paths.* alone does not redirect it. Repoint the keymap
+    # module's copies too so no test (e.g. the `keymap` subcommand, which reads
+    # load_keymap()) can ever read or write the real ~/.sonari.
     import sonari.keymap as keymap
 
+    # Same as config.SONARI_DIR above: keymap.py does not import SONARI_DIR, so
+    # this creates the attribute rather than redirecting one. Defensive only.
     _setattr(keymap, "SONARI_DIR", sonari_dir)
     _setattr(keymap, "KEYMAP_PATH", sonari_dir / "keymap.json")
     _setattr(keymap, "HOTKEYD_RESOLVED_PATH", sonari_dir / "hotkeyd.resolved.json")
