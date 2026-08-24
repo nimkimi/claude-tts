@@ -919,3 +919,25 @@ Binding corrections (Tasks 3–5 build on THIS contract):
   daemon lock and must call ONLY `set_active(...)` (which never reaps); `tick()`
   runs solely from the lock-free speak-loop site and manager timer threads, so a
   wedged afplay's bounded reap can never stall the daemon lock.
+
+## Amendment to Task 4 (2026-08-24, controller ruling after Task 3's fix round — BINDING)
+
+The SET_KEEPALIVE handler runs under the daemon lock, and `set_enabled(False)`
+reaps on the calling thread (the reap left the manager lock in df35a1a, not the
+caller). Therefore the handler must NOT call `set_enabled` at all:
+- Handler (`on_set_keepalive`): validate `isinstance(v, bool)`, then ONLY
+  `ctx.host.config["keepalive_enabled"] = v; save_config(ctx.host.config)`.
+  No manager calls.
+- Application happens at the lock-free speak-loop site: `_keepalive_recheck`
+  gains, before its `set_active` call,
+  `self.keepalive.set_enabled(bool(self.config.get("keepalive_enabled", True)))`.
+  At 10Hz (`_poll_interval = 0.1`) the toggle applies effectively immediately;
+  repeated same-value calls are cheap flag writes (and `set_enabled(False)` on an
+  already-empty manager reaps nothing).
+- `__init__`'s construction-time seed stays (pins the pre-first-tick state).
+- Task 4's tests change accordingly: after `handle_message(SET_KEEPALIVE, ...)`
+  assert only the config mutation + persistence; then drive
+  `daemon._keepalive_recheck(reap=True)` and assert the manager effect
+  (terminated players / spawn on re-enable). The handler-alone must NOT
+  terminate players — that absence is itself asserted (single-writer discipline:
+  only the tick applies config to the manager).
