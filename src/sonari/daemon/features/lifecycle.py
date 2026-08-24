@@ -154,6 +154,10 @@ def on_set_foreground(ctx, msg):
                 ctx.host._enqueue(session, "prose", line, False,
                                   mute_exempt=True, pause_exempt=True)
             ctx.host._restore_pending = False
+        # A new live session is the keep-alive's start signal — push the policy
+        # verdict now instead of waiting up to one speak-loop tick for the device
+        # to open. No reap: this runs under the daemon lock (see _keepalive_recheck).
+        ctx.host._keepalive_recheck()
     return None
 
 
@@ -162,6 +166,10 @@ def on_session_end(ctx, msg):
     session = ctx.session
     was_speaker = (session == ctx.host.sessions.speaker())
     ctx.host.sessions.unregister(session)
+    # Departure re-evaluates the roster: the last live session leaving arms the
+    # trailing hold (it does NOT tear the device down — the user may be back).
+    # No reap: this runs under the daemon lock (see _keepalive_recheck).
+    ctx.host._keepalive_recheck()
     # F1/M1: if the departing session WAS the muted speaker holding a quiet-hold, the
     # enum would otherwise stay "quiet-hold" with _speaker now None -> keep-going
     # permanently skipped (voice dead) and ⌃⌘W inverts into an error tone. Lift it.

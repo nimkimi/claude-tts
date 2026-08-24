@@ -79,6 +79,41 @@ class FakeSpeaker:
         self.voices.append(v)
 
 
+class InertKeepaliveProc:
+    """A keep-alive player that never was: no process, nothing to reap.
+
+    Roughly half the suite goes make_daemon() -> handle_message(SESSION_START),
+    which now pushes set_active(True) into the keep-alive manager. On the DEFAULT
+    seam that spawns a REAL afplay playing 300s of silence — orphaned past the
+    suite and nondeterministic under the sandbox (where afplay is blocked and the
+    manager would flip to "degraded"). poll() returning None keeps it "running"
+    so the manager never scores a fast death.
+    """
+
+    def poll(self):
+        return None
+
+    def wait(self, timeout=None):
+        return 0
+
+    def terminate(self):
+        pass
+
+
+class InertKeepaliveTimer:
+    """Records nothing, fires never — the overlap/hold timers must not schedule
+    real threading.Timers that outlive the test that armed them."""
+
+    def __init__(self, interval, fn):
+        self.daemon = False
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        pass
+
+
 class FakeSummarizer:
     """Records the slice text; returns a scripted SummarizeResult (default: ok)."""
     def __init__(self, result=None):
@@ -107,6 +142,12 @@ def make_daemon(verbosity: str = "everything", foreground: "str | None" = "fg",
     config["summarizer"] = "off"      # SP5: no test may ever reach a real `claude`
     daemon = SpeechDaemon(speaker, sessions, config, spearcons=FakeSpearconCache(),
                           summarizer=summarizer)
+    # Inert before ANY handler can run: no real afplay child, no real Timer thread.
+    # __init__ itself never spawns (set_enabled only flips a flag), so injecting
+    # here — before the caller's first handle_message — is early enough. The
+    # keep-alive tests overwrite both seams with their recording fakes.
+    daemon.keepalive._popen = lambda cmd: InertKeepaliveProc()
+    daemon.keepalive._timer_factory = InertKeepaliveTimer
     daemon._voices_provider = lambda: []      # SP5: hermetic renders — no `say -v ?`
     queue = daemon._stream(foreground).queue if foreground is not None else SpeechQueue()
     return daemon, queue, speaker, sessions, config

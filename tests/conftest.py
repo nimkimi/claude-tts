@@ -151,3 +151,36 @@ def _isolate_sonari_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(daemon_bootstrap, "_SINGLETON", None, raising=False)
 
     yield
+
+
+@pytest.fixture(autouse=True)
+def _inert_keepalive_seams(monkeypatch):
+    """No test may spawn a REAL keep-alive player or arm a real Timer.
+
+    Any SpeechDaemon now builds a KeepAliveManager, and a SESSION_START (or one
+    speak-loop tick) pushes set_active(True) into it — which on the DEFAULT seams
+    launches `afplay` on 300 s of silence and arms a 295 s threading.Timer that
+    outlives the test. 19 tests construct SpeechDaemon directly instead of via
+    make_daemon (test_frontier, test_concurrency_guards, test_e2e_pipeline,
+    test_blackbox_net, test_speaker_cancel_2b) and hit exactly that — measured,
+    not assumed. Patching every construction site would leave the next new test
+    file unprotected, so neutralise the DEFAULTS at the class instead: a manager
+    that was handed explicit seams (test_keepalive_manager, and the keep-alive
+    wiring tests, which overwrite theirs after construction) keeps them.
+    """
+    import subprocess
+    import threading
+
+    import sonari.daemon.keepalive as keepalive
+    from tests.daemon_helpers import InertKeepaliveProc, InertKeepaliveTimer
+
+    real_init = keepalive.KeepAliveManager.__init__
+
+    def _inert_init(self, popen=None, timer_factory=None, clock=None):
+        real_init(self, popen=popen, timer_factory=timer_factory, clock=clock)
+        if self._popen is subprocess.Popen:
+            self._popen = lambda cmd: InertKeepaliveProc()
+        if self._timer_factory is threading.Timer:
+            self._timer_factory = InertKeepaliveTimer
+
+    monkeypatch.setattr(keepalive.KeepAliveManager, "__init__", _inert_init)

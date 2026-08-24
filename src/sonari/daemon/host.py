@@ -19,6 +19,7 @@ from sonari.daemon.registry import handler, dispatch
 from sonari.daemon.server import Server
 from sonari.daemon.limits import RATE_MIN, RATE_MAX, MINQUEUE_MIN, MINQUEUE_MAX
 from sonari.daemon.persistence import StateStore, PersistenceWriter, STATE_VERSION
+from sonari.daemon.keepalive import KeepAliveManager
 
 PERMISSION_WAIT_TIMEOUT = 120.0   # daemon's own wait; MUST be < the hook's client send timeout (130s)
 # D7a (§4) spontaneous-failure words — the tone is the instant part, the word is
@@ -212,6 +213,13 @@ class SpeechDaemon:
         # thread is NOT started here — run() starts it AFTER restore (§8).
         self._persistence = PersistenceWriter(
             self._store, self._snapshot_state, self._lock)
+        # Bluetooth keep-alive: a silent afplay child holds the output device open
+        # while any session is live, so A2DP never suspends and swallows the head
+        # of the next utterance. Owns its own lock and raw spawns — it never touches
+        # self._lock or the Speaker. Policy (who counts as live) stays here, in
+        # _keepalive_recheck; the manager only obeys.
+        self.keepalive = KeepAliveManager()
+        self.keepalive.set_enabled(bool(self.config.get("keepalive_enabled", True)))
         # D2 §6.4/§6.5: DEFER a restart-line delivery — every restored session
         # was muted, so no playable stream existed at boot. A bool, not the
         # composed string (F2): state can shift between boot and the first
@@ -985,6 +993,30 @@ class SpeechDaemon:
         self._witness_alarmed = True
         self._fire_alarm("alarm_hotkeys_down", ALARM_HOTKEYS_WORDS)
 
+    def _keepalive_recheck(self, reap: bool = False) -> None:
+        """Push the policy verdict — "is any session live?" — into the keep-alive
+        manager, and reap only where reaping is safe.
+
+        Called from the lifecycle handlers (which run UNDER the daemon lock, at
+        handle_message's callers) and once per speak-loop tick. set_active() never
+        blocks beyond a spawn; tick() CAN block up to ~2s per player reaping a
+        wedged afplay, so only the lock-free speak-loop caller passes reap=True.
+        A handler that reaped would stall the daemon lock — every socket message,
+        hotkey and speak-loop claim behind it — on a hung child.
+
+        The reads are lock-free by the same discipline as _check_witness:
+        session_ids() returns a snapshot copy and is_live() only reads.
+
+        A keep-alive bug must never take down speech: swallow everything."""
+        try:
+            alive = any(self.sessions.is_live(s)
+                        for s in self.sessions.session_ids())
+            self.keepalive.set_active(alive)
+            if reap:
+                self.keepalive.tick()
+        except Exception:  # noqa: BLE001 - keep-alive must never wedge the loop
+            pass
+
     def _fire_alarm(self, kind: str, words: str) -> None:
         """Queue-bypassing alarm playback (§7): raw afplay + say spawns,
         deliberately NOT Speaker/queue/arbiter — the alarm exists for when
@@ -1015,6 +1047,9 @@ class SpeechDaemon:
         independently."""
         self._drain_catchup_inbox()
         self._check_witness()
+        # The ONE reaping caller: this site holds no lock, so the manager's bounded
+        # ~2s-per-player reap of a wedged afplay can stall nothing but this tick.
+        self._keepalive_recheck(reap=True)
         fg0 = self.sessions.speaker()
         st0 = self._state._streams.get(fg0)
         if st0 is not None and st0.stopped:
@@ -1430,6 +1465,14 @@ class SpeechDaemon:
             # the final synchronous flush.
             self._persistence.stop()
             speak_thread.join(timeout=5.0)
+            # Terminate the silent players before the interpreter goes: an orphaned
+            # afplay would hold the device open past the daemon's life. AFTER the
+            # speak-thread join, not alongside _persistence.stop(): the loop's tick
+            # calls set_active(True) while any session is still registered, so a
+            # stop() before the join could be undone by one last in-flight tick
+            # (self.stop() only clears the flag the loop checks BETWEEN iterations).
+            # Safe here — run()'s finally holds no lock and stop()'s reap is bounded.
+            self.keepalive.stop()
             self._persistence.flush()
             try:
                 os.unlink(LOCK_PATH)
