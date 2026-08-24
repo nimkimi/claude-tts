@@ -56,7 +56,18 @@ class KeepAliveManager:
     """Owns the silent afplay children. Policy (who is live) stays in the
     daemon; this class only obeys set_enabled/set_active/tick/stop. Never
     touches the daemon lock or Speaker state — raw spawns via the _popen seam,
-    the same isolation the §7 witness alarm uses."""
+    the same isolation the §7 witness alarm uses.
+
+    WHICH BOUND ACTUALLY HOLDS IN PRODUCTION: BACKOFF_S paces the TICK path
+    only. On the wired 10 Hz path (host._keepalive_recheck) every tick also
+    calls set_active(True) while a session is live, and its ensure-semantics
+    respawn the moment the list reads empty — before tick's BACKOFF_S gate ever
+    gets a say, because a child that died is only pruned by tick() itself. So
+    the effective anti-spin bound there is GIVEUP_N: a bounded burst of at most
+    GIVEUP_N fast spawns, then "degraded" and no more. That is the accepted
+    design — the burst is bounded and short, and the alternative (gating the
+    ensure path on backoff) would cost real silence after an ordinary player
+    exit. BACKOFF_S still governs the tick path, where the timer thread reaps."""
 
     HOLD_S = 600.0
     OVERLAP_S = 5.0
@@ -85,13 +96,26 @@ class KeepAliveManager:
 
     def set_enabled(self, on: bool) -> None:
         """Config knob. Disabling stops everything and pins status "disabled";
-        re-enabling only flips the flag — the next set_active/tick re-evaluates."""
+        re-enabling only flips the flag — the next set_active/tick re-evaluates.
+
+        The False->True EDGE also forgives a give-up, mirroring set_active's:
+        a Bluetooth dropout latches _degraded mid-session, the session stays
+        live, so no set_active(False)->(True) edge is coming — `sonari keepalive
+        off` then `on` is the user's ONLY recovery lever, and without this it
+        changed nothing. EDGE, never level: _keepalive_recheck re-applies the
+        SAME config value here at the speak loop's ~10 Hz cadence, and clearing
+        per CALL would erase the GIVEUP_N bound ten times a second.
+        """
         doomed = ()
         with self._lock:
+            was = self._enabled
             self._enabled = bool(on)
             if not self._enabled:
                 self._cancel_hold_locked()
                 doomed = self._detach_players_locked()
+            elif not was:
+                self._fast_deaths = 0
+                self._degraded = False
         self._reap(doomed)
 
     def set_active(self, active: bool) -> None:

@@ -16,4 +16,8 @@ first fraction of each utterance (and whole short earcons) can be swallowed.
 Costs while active: the headset's radio streams continuously (battery use
 comparable to music playback) and the Mac will not idle-sleep.
 
+If `sonari doctor` reports the keep-alive as **degraded** — its silent-stream
+spawns kept dying, so clipping is back — retry it by running this command with
+`off` and then `on` again.
+
 Print the command's output to the user verbatim. If the command errors, report it briefly.

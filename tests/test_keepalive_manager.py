@@ -1,7 +1,5 @@
 """KeepAliveManager unit tests — all subprocess/timer/clock seams faked.
 Spec: docs/superpowers/specs/2026-08-24-bt-keepalive-design.md."""
-import threading
-
 from sonari.daemon.keepalive import KeepAliveManager
 
 
@@ -48,7 +46,7 @@ class FakeTimer:
             self.fn()
 
 
-def make_mgr(now=None):
+def make_mgr():
     FakeTimer.instances = []
     spawned = []
     clock = {"t": 0.0}
@@ -61,10 +59,6 @@ def make_mgr(now=None):
     mgr = KeepAliveManager(popen=popen, timer_factory=FakeTimer,
                            clock=lambda: clock["t"])
     return mgr, spawned, clock
-
-
-def _timers(kind=None):
-    return [t for t in FakeTimer.instances if not t.cancelled and t.started]
 
 
 def test_activation_spawns_one_player_and_arms_overlap_timer():
@@ -153,6 +147,59 @@ def test_five_consecutive_fast_deaths_degrade_and_stop_spawning():
     mgr.set_active(True)                          # fresh False->True edge resets the give-up
     assert len(spawned) == n + 1
     assert mgr.status() == "running"
+
+
+def _drive_to_degraded(mgr, spawned, clock):
+    """GIVEUP_N consecutive fast deaths — the cadence of
+    test_five_consecutive_fast_deaths_degrade_and_stop_spawning."""
+    for _ in range(KeepAliveManager.GIVEUP_N):
+        spawned[-1].die()
+        clock["t"] += 0.5                         # died 0.5s after spawn: FAST
+        mgr.tick()                                # observe death, counter++
+        clock["t"] += 1.0                         # past BACKOFF_S
+        mgr.tick()                                # respawn (until degraded)
+
+
+def test_enable_edge_forgives_a_give_up_so_the_toggle_is_a_recovery_lever():
+    """`sonari keepalive off` then `on` is the user's ONLY way back from degraded.
+
+    A Bluetooth dropout latches the give-up mid-session, and the session stays
+    live — so no set_active(False)->(True) edge is coming to forgive it. Without
+    the reset on the enable EDGE the documented recovery did nothing at all and
+    the headset kept clipping until the daemon restarted.
+    """
+    mgr, spawned, clock = make_mgr()
+    mgr.set_active(True)
+    _drive_to_degraded(mgr, spawned, clock)
+    assert mgr.status() == "degraded"
+    n = len(spawned)
+
+    mgr.set_enabled(False)
+    mgr.set_enabled(True)
+    assert len(spawned) == n                      # the flag flip alone spawns nothing
+    mgr.set_active(True)                          # the next policy push re-ensures it
+    assert len(spawned) == n + 1
+    assert mgr.status() == "running"
+
+
+def test_same_value_enable_calls_do_not_forgive_a_give_up():
+    """EDGE-gated, never level-gated. host._keepalive_recheck re-applies the SAME
+    config value to set_enabled at the speak loop's ~10 Hz cadence, so a reset per
+    CALL would erase the give-up bound ten times a second — turning a permanently
+    broken spawn into exactly the storm GIVEUP_N exists to stop.
+    """
+    mgr, spawned, clock = make_mgr()
+    mgr.set_active(True)
+    _drive_to_degraded(mgr, spawned, clock)
+    n = len(spawned)
+
+    for _ in range(3):                            # the recheck's per-tick sequence
+        mgr.set_enabled(True)                     # same value, as the tick applies it
+        mgr.set_active(True)
+        clock["t"] += 100.0                       # far past BACKOFF_S
+        mgr.tick()
+    assert mgr.status() == "degraded"
+    assert len(spawned) == n                      # still no storm
 
 
 def test_slow_death_does_not_count_toward_degraded():

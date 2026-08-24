@@ -38,7 +38,8 @@ def _keepalive_row(st):
         return ("keepalive", True, state)
     if state == "degraded":
         return ("keepalive", False,
-                "degraded: silent-stream spawns kept dying; Bluetooth clipping is back")
+                "degraded: silent-stream spawns kept dying; Bluetooth clipping "
+                "is back — run 'sonari keepalive off' then 'on' to retry")
     return ("keepalive", False, "daemon reported no keepalive state")
 
 
@@ -94,6 +95,11 @@ def doctor() -> list:
     # speak loop still reports "reachable" — this row is the one that can tell
     # a wedge from silence. STATUS already carries both facts we need.
     WEDGE_S = 120.0
+    # Bound BEFORE the try: an unreachable daemon (the exact case doctor exists
+    # for) raises inside it, and the keepalive row below reads `st`. Unbound, it
+    # raised UnboundLocalError there and the row rendered "error: cannot access
+    # local variable 'st'..." — a sentence doctor's verdict SPEAKS aloud.
+    st = {}
     try:
         from sonari import client
         st = client.send({"v": PROTOCOL_VERSION, "type": MsgType.STATUS},
