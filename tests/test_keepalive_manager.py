@@ -268,3 +268,74 @@ def test_spawn_failure_goes_degraded_not_raise():
                            clock=lambda: 0.0)
     mgr.set_active(True)                          # must not raise
     assert mgr.status() == "degraded"
+
+
+class LockProbeProc(FakeProc):
+    """Records whether the manager lock was FREE at terminate()/wait() time.
+
+    threading.Lock is not reentrant, so acquire(blocking=False) from the reaping
+    thread itself returns False iff the manager still holds it.
+    """
+
+    def __init__(self, cmd, box):
+        FakeProc.__init__(self, cmd)
+        self._box = box
+        self.lock_free_at_terminate = None
+        self.lock_free_at_wait = None
+
+    def _probe(self):
+        lock = self._box["mgr"]._lock
+        got = lock.acquire(blocking=False)
+        if got:
+            lock.release()
+        return got
+
+    def terminate(self):
+        self.lock_free_at_terminate = self._probe()
+        FakeProc.terminate(self)
+
+    def wait(self, timeout=None):
+        self.lock_free_at_wait = self._probe()
+        return FakeProc.wait(self, timeout)
+
+
+def test_manager_lock_is_never_held_across_a_child_reap():
+    """THE contention invariant. terminate()+wait(2.0) per player is unbounded-ish
+    work; holding self._lock across it makes every other manager entry point queue
+    behind it — including set_active(), which lifecycle handlers call while holding
+    the DAEMON lock. Two overlapped wedged players would then stall the whole daemon
+    for ~4s. Every reaping path must compute what to kill under the lock and kill it
+    outside."""
+    def run(trigger):
+        box = {}
+        FakeTimer.instances = []
+        procs = []
+
+        def popen(cmd):
+            proc = LockProbeProc(cmd, box)
+            procs.append(proc)
+            return proc
+
+        mgr = KeepAliveManager(popen=popen, timer_factory=FakeTimer,
+                               clock=lambda: 0.0)
+        box["mgr"] = mgr
+        mgr.set_active(True)
+        # Two overlapped players: the chain hands over before the file ends, so a
+        # real shutdown can find more than one child to reap.
+        [t for t in FakeTimer.instances if t.interval == 295.0][0].fire()
+        assert len(procs) == 2
+        trigger(mgr)
+        assert all(p.lock_free_at_terminate for p in procs), \
+            "manager lock held across terminate()"
+        assert all(p.lock_free_at_wait for p in procs), \
+            "manager lock held across the bounded wait() — daemon-lock stall"
+
+    def expire_hold(mgr):
+        mgr.set_active(False)
+        holds = [t for t in FakeTimer.instances
+                 if t.interval == KeepAliveManager.HOLD_S and not t.cancelled]
+        holds[-1].fire()
+
+    run(lambda mgr: mgr.stop())
+    run(lambda mgr: mgr.set_enabled(False))
+    run(expire_hold)

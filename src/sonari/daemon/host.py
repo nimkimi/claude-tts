@@ -220,6 +220,7 @@ class SpeechDaemon:
         # _keepalive_recheck; the manager only obeys.
         self.keepalive = KeepAliveManager()
         self.keepalive.set_enabled(bool(self.config.get("keepalive_enabled", True)))
+        self._keepalive_reported = False   # fire-once latch, see _keepalive_recheck
         # D2 §6.4/§6.5: DEFER a restart-line delivery — every restored session
         # was muted, so no playable stream existed at boot. A bool, not the
         # composed string (F2): state can shift between boot and the first
@@ -1007,7 +1008,11 @@ class SpeechDaemon:
         The reads are lock-free by the same discipline as _check_witness:
         session_ids() returns a snapshot copy and is_live() only reads.
 
-        A keep-alive bug must never take down speech: swallow everything."""
+        A keep-alive bug must never take down speech: swallow everything — but
+        LOUDLY ONCE. This runs at the loop's ~10 Hz cadence, so a persistently
+        raising is_live() would either be invisible (silent swallow) or flood the
+        daemon log with 10 identical tracebacks a second. Latch it like
+        _witness_alarmed: the first failure prints, the rest are silent."""
         try:
             alive = any(self.sessions.is_live(s)
                         for s in self.sessions.session_ids())
@@ -1015,7 +1020,14 @@ class SpeechDaemon:
             if reap:
                 self.keepalive.tick()
         except Exception:  # noqa: BLE001 - keep-alive must never wedge the loop
-            pass
+            if not self._keepalive_reported:
+                self._keepalive_reported = True
+                try:
+                    import sys
+                    import traceback
+                    traceback.print_exc(file=sys.stderr)
+                except Exception:  # noqa: BLE001 - logging must not wedge it either
+                    pass
 
     def _fire_alarm(self, kind: str, words: str) -> None:
         """Queue-bypassing alarm playback (§7): raw afplay + say spawns,
@@ -1465,16 +1477,21 @@ class SpeechDaemon:
             # the final synchronous flush.
             self._persistence.stop()
             speak_thread.join(timeout=5.0)
-            # Terminate the silent players before the interpreter goes: an orphaned
-            # afplay would hold the device open past the daemon's life. AFTER the
-            # speak-thread join, not alongside _persistence.stop(): the loop's tick
-            # calls set_active(True) while any session is still registered, so a
-            # stop() before the join could be undone by one last in-flight tick
-            # (self.stop() only clears the flag the loop checks BETWEEN iterations).
-            # Safe here — run()'s finally holds no lock and stop()'s reap is bounded.
-            self.keepalive.stop()
             self._persistence.flush()
             try:
                 os.unlink(LOCK_PATH)
             except FileNotFoundError:
+                pass
+            # Terminate the silent players LAST. Two orderings are load-bearing:
+            # AFTER the speak-thread join, because the loop's tick calls
+            # set_active(True) while sessions are still registered and would
+            # respawn what an earlier stop() had just killed (self.stop() only
+            # clears the flag the loop checks BETWEEN iterations); and after the
+            # flush + lockfile unlink, because a wedged afplay costs ~2s per player
+            # of the SIGTERM grace budget — ahead of them it could eat the final
+            # state save and strand a stale lockfile. Nothing below depends on it,
+            # and an orphaned player only outlives us if the reap itself hangs.
+            try:
+                self.keepalive.stop()
+            except Exception:  # noqa: BLE001 - shutdown must not raise past here
                 pass

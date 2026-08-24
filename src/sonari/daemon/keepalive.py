@@ -86,11 +86,13 @@ class KeepAliveManager:
     def set_enabled(self, on: bool) -> None:
         """Config knob. Disabling stops everything and pins status "disabled";
         re-enabling only flips the flag — the next set_active/tick re-evaluates."""
+        doomed = ()
         with self._lock:
             self._enabled = bool(on)
             if not self._enabled:
                 self._cancel_hold_locked()
-                self._stop_players_locked()
+                doomed = self._detach_players_locked()
+        self._reap(doomed)
 
     def set_active(self, active: bool) -> None:
         """Policy verdict from the daemon: True == at least one live session."""
@@ -122,6 +124,7 @@ class KeepAliveManager:
 
     def tick(self) -> None:
         """Reap dead players, respawn after backoff, bound consecutive failures."""
+        doomed = ()
         with self._lock:
             now = self._clock()
             self._observe_deaths_locked(now)
@@ -130,19 +133,20 @@ class KeepAliveManager:
                 # spawn itself is broken (no afplay, no output device, ...).
                 # Stop until the next set_active(False)->(True) edge.
                 self._degraded = True
-                self._stop_players_locked()   # defensive: nothing should be left
-                return
-            if (self._want and self._enabled and not self._degraded
+                doomed = self._detach_players_locked()   # defensive: none expected
+            elif (self._want and self._enabled and not self._degraded
                     and not self._players
                     and now - (self._last_death or 0.0) >= self.BACKOFF_S):
                 self._spawn_locked()
+        self._reap(doomed)
 
     def stop(self) -> None:
         """Shutdown: cancel timers, terminate players, bounded reap."""
         with self._lock:
             self._cancel_hold_locked()
-            self._stop_players_locked()
+            doomed = self._detach_players_locked()
             self._want = False
+        self._reap(doomed)
 
     def status(self) -> str:
         with self._lock:
@@ -184,8 +188,9 @@ class KeepAliveManager:
         """Prune players that have EXITED, scoring each death fast or slow.
 
         Fast/slow is measured from ``now - spawned_at`` at OBSERVATION time.
-        Deliberate terminations can never be scored here: _stop_players_locked()
-        clears the list itself, so nothing is left for a later tick to observe.
+        Deliberate terminations can never be scored here: _detach_players_locked()
+        empties the list under the lock before the reap, so nothing a shutdown or a
+        hold expiry killed is left for a later tick to observe.
         """
         alive = []
         for proc, spawned_at in self._players:
@@ -204,26 +209,47 @@ class KeepAliveManager:
         is still running — the overlap window exists so A and B stream together."""
         self._players = [(p, t) for (p, t) in self._players if p.poll() is None]
 
-    def _stop_players_locked(self) -> None:
-        # The overlap chain dies with the players it was chaining. Without this
-        # cancel, a hold expiry (or a give-up) would leave an armed overlap timer
-        # that spawns a fresh player minutes later — its callback intentionally
-        # ignores _want, because the hold has to outlast one file.
+    def _detach_players_locked(self) -> list:
+        """Cancel the chain and hand the players to the caller to reap UNLOCKED.
+
+        THE INVARIANT: self._lock is NEVER held across a child wait(). The reap is
+        terminate() + up to 2s of wait() per player, and every other entry point
+        queues on this lock — including set_active(), which the daemon's lifecycle
+        handlers call while holding the DAEMON lock. Reaping under the manager lock
+        therefore leaks a ~2s-per-player stall into the daemon's transaction lock
+        (every socket message, hotkey and speak-loop claim), which is exactly what
+        the Task-2 wiring rule exists to prevent. So: decide here, kill outside.
+
+        The player list is emptied HERE, under the lock, so status()/_live_locked()
+        see the truth immediately and a concurrent set_active(True) re-spawns rather
+        than adopting a doomed child.
+
+        The overlap chain dies with the players it was chaining. Without this cancel,
+        a hold expiry (or a give-up) would leave an armed overlap timer that spawns a
+        fresh player minutes later — its callback intentionally ignores _want,
+        because the hold has to outlast one file.
+        """
         if self._overlap_timer is not None:
             self._overlap_timer.cancel()
             self._overlap_timer = None
-        for proc, _ in self._players:
+        doomed = [proc for proc, _ in self._players]
+        self._players = []
+        return doomed
+
+    @staticmethod
+    def _reap(players) -> None:
+        """Terminate + bounded wait. MUST run with self._lock released (see
+        _detach_players_locked). Bounded so a wedged afplay cannot hang shutdown —
+        mirrors _AfplayHandle.terminate in platform/macos/tts.py."""
+        for proc in players:
             try:
                 proc.terminate()
             except Exception:
                 pass
             try:
-                # Bounded reap so a wedged afplay cannot hang shutdown — mirrors
-                # _AfplayHandle.terminate in platform/macos/tts.py.
                 proc.wait(timeout=2.0)
             except Exception:
                 pass
-        self._players = []
 
     # ---- timers ---------------------------------------------------------
     # Both timers use host.py's _arm_learn_timer identity discipline: the
@@ -276,10 +302,15 @@ class KeepAliveManager:
             self._hold_timer = None
 
     def _hold_expired(self, timer) -> None:
+        doomed = ()
         with self._lock:
             # Still ours, and still unwanted: a re-activation that cancelled us a
             # beat too late must not tear down the stream it just kept.
             if self._hold_timer is not timer or self._want:
                 return
             self._hold_timer = None
-            self._stop_players_locked()
+            doomed = self._detach_players_locked()
+        # Outside the lock (see _detach_players_locked): this runs on a Timer
+        # thread, and a wedged child here would otherwise block the daemon's next
+        # lifecycle handler for ~2s per player.
+        self._reap(doomed)
