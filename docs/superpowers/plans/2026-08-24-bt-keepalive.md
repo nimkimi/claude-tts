@@ -897,3 +897,25 @@ git commit -m "feat(keepalive): STATUS field + doctor row"
 - Placeholder scan: every step carries real code or an exact copy-source pointer (`on_set_minqueue`, `commands/minqueue.md`, learn-timer). Two deliberate "read the neighbor and mirror" instructions remain (CLI send helper shape, conftest entry style) — those are copy-exact-from-named-source instructions, not gaps. ✔
 - Type consistency: `keepalive.status()` strings (`running|hold|idle|degraded|disabled`) match T5's row logic and T3's assertions; `set_active/set_enabled/tick/stop` signatures consistent across T2→T5; `KEEPALIVE_WAV_PATH`/`ensure_silence_wav` consistent T1→T2. FakeProc/FakeTimer imported from T2's test module in T3/T4/T5 tests (cross-test-module import is the repo's existing pattern via `tests.daemon_helpers`). ✔
 - Known risk flagged for implementers: expected suite counts between tasks (1536/1547/... — corrected 2026-08-24: Task 2 defines 11 tests, prose said 12) assume no collisions with existing tests; treat drift as investigate-first, and the exact numbers as expectations, not gates to force.
+
+## Post-review amendment to Task 2 (2026-08-24, fix round 1 — controller ruling)
+
+Task 2's review found the brief's own pseudocode carried a hole: `set_active(False)`
+arms the hold only "if players exist" while the overlap callback is ungated on
+`_want` — so a player that dies on its own in the pre-respawn window leaves an
+armed overlap timer that resurrects a player chain forever on an idle manager.
+Binding corrections (Tasks 3–5 build on THIS contract):
+- `_overlap_due` gates: after the identity check and timer-null, `if not
+  self._want and self._hold_timer is None: return` — the chain continues only
+  while wanted or while a hold is in flight (mid-hold crash-resurrection is
+  DESIGNED behavior: the hold's purpose is keeping the device open for a
+  returning user).
+- `status()` hold arm is `self._players or self._hold_timer is not None` — an
+  armed hold with a momentarily-empty player list reads "hold", not "idle".
+- Timer-identity guards (hold + overlap) carry direct tests that invoke a stale
+  timer's callback (`timer.fn()`, bypassing FakeTimer.fire's cancelled guard),
+  plus asserts that both arms set `timer.daemon = True`.
+- Wiring rule for Task 3 (review Important 2): lifecycle handlers run under the
+  daemon lock and must call ONLY `set_active(...)` (which never reaps); `tick()`
+  runs solely from the lock-free speak-loop site and manager timer threads, so a
+  wedged afplay's bounded reap can never stall the daemon lock.
