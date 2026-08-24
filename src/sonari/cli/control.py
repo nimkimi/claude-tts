@@ -72,6 +72,14 @@ def _cmd_minqueue(args) -> int:
     return 0
 
 
+def _cmd_keepalive(args) -> int:
+    from sonari.cli import _send
+    enabled = args.state == "on"
+    _send({"v": PROTOCOL_VERSION, "type": MsgType.SET_KEEPALIVE, "enabled": enabled})
+    print("keepalive {0}".format("on" if enabled else "off"))
+    return 0
+
+
 def _cmd_voice(args) -> int:
     from sonari.cli import _platform
     from sonari.cli import _send

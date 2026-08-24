@@ -113,7 +113,7 @@ ALL_TYPES = [
     _MsgType.STOP_ALL,
     _MsgType.JUMP_DECISION, _MsgType.JUMP_WAITING,
     _MsgType.SET_RATE, _MsgType.SET_VERBOSITY, _MsgType.SET_VOICE,
-    _MsgType.SET_MINQUEUE, _MsgType.STATUS, _MsgType.PING,
+    _MsgType.SET_MINQUEUE, _MsgType.SET_KEEPALIVE, _MsgType.STATUS, _MsgType.PING,
     _MsgType.REREAD_OPTIONS, _MsgType.CYCLE_VERBOSITY, _MsgType.RELOAD_KEYMAP,
     _MsgType.OS_FOCUS, _MsgType.WHERE_AM_I,
     _MsgType.PERMISSION_REQUEST, _MsgType.ANSWER_PERMISSION,

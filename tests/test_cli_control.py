@@ -87,6 +87,35 @@ def test_minqueue_rejects_non_integer():
     send.assert_not_called()
 
 
+def test_keepalive_on_sends_bool_set_keepalive(capsys):
+    with mock.patch("sonari.client.send", return_value=None) as send:
+        rc = cli.main(["keepalive", "on"])
+    msg, _, _ = _sent(send)
+    assert rc == 0
+    assert msg == {"v": PROTOCOL_VERSION, "type": MsgType.SET_KEEPALIVE,
+                   "enabled": True}
+    assert msg["enabled"] is True
+    assert "on" in capsys.readouterr().out
+
+
+def test_keepalive_off_sends_bool_set_keepalive(capsys):
+    with mock.patch("sonari.client.send", return_value=None) as send:
+        rc = cli.main(["keepalive", "off"])
+    msg, _, _ = _sent(send)
+    assert rc == 0
+    assert msg == {"v": PROTOCOL_VERSION, "type": MsgType.SET_KEEPALIVE,
+                   "enabled": False}
+    assert msg["enabled"] is False
+    assert "off" in capsys.readouterr().out
+
+
+def test_keepalive_rejects_bad_choice():
+    with mock.patch("sonari.client.send") as send:
+        with pytest.raises(SystemExit):
+            cli.main(["keepalive", "maybe"])
+    send.assert_not_called()
+
+
 def test_voice_sends_set_voice():
     with mock.patch("sonari.client.send", return_value=None) as send:
         rc = cli.main(["voice", "Ava (Premium)"])

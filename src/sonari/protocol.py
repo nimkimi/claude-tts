@@ -28,6 +28,7 @@ class MsgType:
     SET_VERBOSITY = "set_verbosity"
     SET_VOICE = "set_voice"
     SET_MINQUEUE = "set_minqueue"
+    SET_KEEPALIVE = "set_keepalive"
     STATUS = "status"
     PING = "ping"
     REREAD_OPTIONS = "reread_options"

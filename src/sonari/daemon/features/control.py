@@ -277,6 +277,24 @@ def on_set_minqueue(ctx, msg):
     return None
 
 
+@handler(MsgType.SET_KEEPALIVE)
+def on_set_keepalive(ctx, msg):
+    # SINGLE-WRITER DISCIPLINE (plan amendment, 2026-08-24, binding): this
+    # handler runs under the daemon lock. It must NEVER call
+    # ctx.host.keepalive directly — KeepAliveManager.set_enabled(False) reaps
+    # on the CALLING thread, and a handler-side reap would stall every socket
+    # message, hotkey and speak-loop claim behind the daemon lock on a hung
+    # child. Config mutation + persistence ONLY; the lock-free speak-loop
+    # site (`_keepalive_recheck`'s `if reap:` branch) is the ONLY writer that
+    # applies this value to the manager.
+    v = msg.get("enabled")
+    if not isinstance(v, bool):
+        return None
+    ctx.host.config["keepalive_enabled"] = v
+    save_config(ctx.host.config)
+    return None
+
+
 @handler(MsgType.CYCLE_VERBOSITY)
 def on_cycle_verbosity(ctx, msg):
     order = ["everything", "medium", "quiet"]

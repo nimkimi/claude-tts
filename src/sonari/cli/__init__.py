@@ -91,6 +91,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("n", type=int)
     sp.set_defaults(func=control._cmd_minqueue)
 
+    sp = sub.add_parser(
+        "keepalive",
+        help="Hold the audio device open while sessions are live (fixes Bluetooth clipping)")
+    sp.add_argument("state", choices=["on", "off"])
+    sp.set_defaults(func=control._cmd_keepalive)
+
     sub.add_parser("stop", help="stop all speech and clear the queue").set_defaults(
         func=control._cmd_stop)
     sub.add_parser("skip", help="skip the current item").set_defaults(

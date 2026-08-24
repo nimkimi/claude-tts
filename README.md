@@ -232,6 +232,7 @@ and, where it makes sense inside a session, as namespaced slash commands.
 |---|---|---|
 | `/sonari:doctor` | `sonari doctor` | Run Sonari health checks (TTS, voice, daemon, hooks, hotkeys) |
 | `/sonari:install` | `sonari install` | One-time Sonari setup — autostart, global hotkeys, control CLI |
+| `/sonari:keepalive` | `sonari keepalive` | Toggle the Bluetooth keep-alive (holds the audio device open while sessions are live; fixes clipped speech on Bluetooth headsets) |
 | `/sonari:keymap` | `sonari keymap` | List Sonari hotkey bindings (incl. unbound); '<action> clear' to unbind |
 | `/sonari:minqueue` | `sonari minqueue` | Set how many items Sonari batches before reading (1 = read immediately) |
 | `/sonari:rate` | `sonari rate` | Set Sonari speech rate in words per minute |

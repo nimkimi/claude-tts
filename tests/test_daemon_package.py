@@ -103,7 +103,7 @@ def test_control_handlers_registered_in_features_control():
 
     expected_module = "sonari.daemon.features.control"
     for key in (MsgType.SET_RATE, MsgType.SET_VOICE, MsgType.SET_VERBOSITY,
-                MsgType.SET_MINQUEUE, MsgType.CYCLE_VERBOSITY,
+                MsgType.SET_MINQUEUE, MsgType.SET_KEEPALIVE, MsgType.CYCLE_VERBOSITY,
                 MsgType.STATUS, MsgType.PING):
         fn = registry.HANDLERS[key]
         assert fn.__module__ == expected_module, (

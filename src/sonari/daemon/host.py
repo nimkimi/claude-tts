@@ -1005,6 +1005,17 @@ class SpeechDaemon:
         A handler that reaped would stall the daemon lock — every socket message,
         hotkey and speak-loop claim behind it — on a hung child.
 
+        SINGLE-WRITER DISCIPLINE (plan amendment, 2026-08-24, binding): this is
+        also the ONLY place the "keepalive_enabled" config value is applied to
+        the manager, and it is applied ONLY inside the `if reap:` branch, before
+        set_active/tick. SET_KEEPALIVE's handler (features/control.py) writes
+        the config key but deliberately never calls set_enabled itself — that
+        handler runs under the daemon lock, and set_enabled(False) reaps on the
+        CALLING thread, so an ungated (or handler-side) placement would
+        reintroduce the very stall this discipline exists to prevent. At the
+        speak loop's 10 Hz cadence the toggle still applies effectively
+        immediately; repeated same-value calls are cheap flag writes.
+
         The reads are lock-free by the same discipline as _check_witness:
         session_ids() returns a snapshot copy and is_live() only reads.
 
@@ -1016,6 +1027,9 @@ class SpeechDaemon:
         try:
             alive = any(self.sessions.is_live(s)
                         for s in self.sessions.session_ids())
+            if reap:
+                self.keepalive.set_enabled(
+                    bool(self.config.get("keepalive_enabled", True)))
             self.keepalive.set_active(alive)
             if reap:
                 self.keepalive.tick()
@@ -1477,21 +1491,30 @@ class SpeechDaemon:
             # the final synchronous flush.
             self._persistence.stop()
             speak_thread.join(timeout=5.0)
-            self._persistence.flush()
+            # Task-4 amendment hardening: flush() and the lockfile unlink can
+            # both raise on a hostile filesystem (ENOSPC, PermissionError) —
+            # unlink already swallows the expected FileNotFoundError, but not
+            # those. An uncaught raise here would propagate straight out of
+            # finally and skip keepalive.stop() below, leaking the silent
+            # afplay child. try/finally makes the keepalive stop UNSKIPPABLE
+            # while keeping the same post-flush-then-unlink order.
             try:
-                os.unlink(LOCK_PATH)
-            except FileNotFoundError:
-                pass
-            # Terminate the silent players LAST. Two orderings are load-bearing:
-            # AFTER the speak-thread join, because the loop's tick calls
-            # set_active(True) while sessions are still registered and would
-            # respawn what an earlier stop() had just killed (self.stop() only
-            # clears the flag the loop checks BETWEEN iterations); and after the
-            # flush + lockfile unlink, because a wedged afplay costs ~2s per player
-            # of the SIGTERM grace budget — ahead of them it could eat the final
-            # state save and strand a stale lockfile. Nothing below depends on it,
-            # and an orphaned player only outlives us if the reap itself hangs.
-            try:
-                self.keepalive.stop()
-            except Exception:  # noqa: BLE001 - shutdown must not raise past here
-                pass
+                self._persistence.flush()
+                try:
+                    os.unlink(LOCK_PATH)
+                except FileNotFoundError:
+                    pass
+            finally:
+                # Terminate the silent players LAST. Two orderings are load-bearing:
+                # AFTER the speak-thread join, because the loop's tick calls
+                # set_active(True) while sessions are still registered and would
+                # respawn what an earlier stop() had just killed (self.stop() only
+                # clears the flag the loop checks BETWEEN iterations); and after the
+                # flush + lockfile unlink, because a wedged afplay costs ~2s per player
+                # of the SIGTERM grace budget — ahead of them it could eat the final
+                # state save and strand a stale lockfile. Nothing below depends on it,
+                # and an orphaned player only outlives us if the reap itself hangs.
+                try:
+                    self.keepalive.stop()
+                except Exception:  # noqa: BLE001 - shutdown must not raise past here
+                    pass
