@@ -928,9 +928,12 @@ caller). Therefore the handler must NOT call `set_enabled` at all:
 - Handler (`on_set_keepalive`): validate `isinstance(v, bool)`, then ONLY
   `ctx.host.config["keepalive_enabled"] = v; save_config(ctx.host.config)`.
   No manager calls.
-- Application happens at the lock-free speak-loop site: `_keepalive_recheck`
-  gains, before its `set_active` call,
-  `self.keepalive.set_enabled(bool(self.config.get("keepalive_enabled", True)))`.
+- Application happens at the lock-free speak-loop site ONLY: `_keepalive_recheck`
+  gains, **inside its `if reap:` branch** (the lifecycle sites run under the
+  daemon lock and `set_enabled(False)` reaps on the calling thread — an ungated
+  placement would reintroduce the stall this amendment exists to prevent),
+  `self.keepalive.set_enabled(bool(self.config.get("keepalive_enabled", True)))`
+  executed BEFORE `set_active`/`tick`.
   At 10Hz (`_poll_interval = 0.1`) the toggle applies effectively immediately;
   repeated same-value calls are cheap flag writes (and `set_enabled(False)` on an
   already-empty manager reaps nothing).
@@ -941,3 +944,13 @@ caller). Therefore the handler must NOT call `set_enabled` at all:
   (terminated players / spawn on re-enable). The handler-alone must NOT
   terminate players — that absence is itself asserted (single-writer discipline:
   only the tick applies config to the manager).
+
+Note on Task 2 body drift: the Task 2 sections still describe the pre-df35a1a
+reap shape (reap under the manager lock). df35a1a's contract supersedes them:
+detach under the lock, reap outside it ("the manager lock is NEVER held across a
+child wait"). Read the code + task-2/3 reports as authoritative over those lines.
+
+Carried item for Task 4 (from Task 3 re-review, Minor): in run()'s finally,
+`_persistence.flush()` / the LOCK_PATH unlink can raise (ENOSPC, PermissionError)
+and would then skip `keepalive.stop()`. Harden: wrap flush+unlink so the
+keepalive stop is unskippable (try/finally), keeping the post-flush order.
