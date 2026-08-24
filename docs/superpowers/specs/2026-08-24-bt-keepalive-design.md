@@ -40,9 +40,13 @@ strong RSSI). That is environmental; no Sonari change can affect it.
 
 ### Component
 
-`KeepAlive` manager, owned by the daemon Host, single responsibility: keep exactly
+`KeepAliveManager`, owned by the `SpeechDaemon` (the class `ctx.host` exposes — the
+daemon has no class literally named "Host"), single responsibility: keep exactly
 one (briefly two, during overlap) silent `afplay` child running whenever policy says
-the device must stay open; kill them all when it says stop.
+the device must stay open; kill them all when it says stop. Child processes are
+spawned through a dedicated instance seam (`_keepalive_popen`, default
+`subprocess.Popen`) mirroring the §7 witness alarm's `_alarm_popen` pattern — raw
+spawns, deliberately outside `Speaker`'s locks and bookkeeping.
 
 ### Policy inputs (the liveness seam — load-bearing)
 
@@ -54,10 +58,28 @@ sessions linger up to `restore_max_age_hours=24`), silently defeating the sleep
 tradeoff the owner chose. Any test suite for this feature MUST cover: a
 restored/pending-only roster does NOT start keep-alive.
 
-Re-evaluation triggers: session register, session unregister, and any event that
-flips liveness for an existing session (reconnect confirm / tty eviction) — the
-manager exposes one idempotent `poke()` (re-evaluate now) rather than distinct
-started/stopped entry points, so call sites cannot get the edge-direction wrong.
+Re-evaluation triggers (recon-amended 2026-08-24): liveness is a **lazy,
+uncached** computation (`liveness()` re-checks `os.path.exists(tty)` on every
+call) and a force-killed terminal never sends `SESSION_END` — so a purely
+event-driven design would hold the stream open forever for a ghost session, and
+would miss silent tty-eviction deaths that fire no lifecycle message at all.
+Therefore two trigger classes, both feeding one idempotent re-evaluate (so call
+sites cannot get the edge-direction wrong):
+1. **Event-driven (prompt start):** the `SESSION_START` handler body and the
+   `SESSION_END` handler (right after `sessions.unregister`) call the re-evaluate —
+   a new live session starts the stream immediately.
+2. **Tick-driven (eventual stop):** the speak loop re-evaluates once per tick,
+   mirroring `_check_witness()`'s per-tick call — this is what eventually notices
+   ghost sessions and tty evictions. The loop's idle wait has a bounded timeout,
+   so worst-case stop latency is one tick beyond the trailing hold; acceptable.
+
+Locking: handlers call the re-evaluate while already holding the daemon lock
+(`SessionState.transaction()` — a non-reentrant `threading.Lock`), so the manager
+must never re-acquire it. The manager's own internal lock guards only its own
+state (players, timer), ordered strictly AFTER the daemon lock everywhere
+(handler → daemon lock → manager lock; timer expiry → daemon transaction →
+manager lock; never the reverse), and is never held across a call back into
+daemon/session state.
 
 ### Trailing hold
 
@@ -75,9 +97,16 @@ boundaries (2/2 marks). The spawn latency of the next `afplay` can exceed the
 ~1.1s suspend grace. Therefore:
 
 - Silent asset: 300s of silence, 8kHz mono 16-bit WAV (~4.7MB), generated at
-  runtime with the stdlib `wave` module into the Sonari dir (via `paths.py`; never
-  a hardcoded `~`). Generated if missing, at daemon start or first keep-alive
-  start. 8kHz proven sufficient to hold the stream (the probe used 8kHz files);
+  runtime with the stdlib `wave` module (parameters mirror
+  `scripts/gen_pitch_tones.py`'s writer) into `SONARI_DIR / "keepalive.wav"` via a
+  `paths.py` constant (never a hardcoded `~`; the constant gets a
+  `tests/conftest.py` repoint entry the moment it exists, per the by-value-bind
+  rule). Generated if missing on first keep-alive activation, idempotent.
+  Decision note: a committed build-time asset (the pitch-tone precedent) was
+  considered and rejected — committing ~5MB of literal zeros to the repo to avoid
+  ~15 lines of generation code is the wrong trade, and the spearcon cache is the
+  established precedent for runtime-generated audio artifacts under `SONARI_DIR`.
+  8kHz proven sufficient to hold the stream (the probe used 8kHz files);
   CoreAudio mixes/resamples independently of the speech clients.
 - Player cadence: spawn player A; `OVERLAP_S = 5` seconds before A's file ends,
   spawn player B; reap A when it exits; repeat. At least one player is always
@@ -100,21 +129,31 @@ boundaries (2/2 marks). The spawn latency of the next `afplay` can exceed the
   `_signal_speak_failure` Critical (unbounded respawn), reviewed accordingly.
 - No spoken cue on keep-alive failure (over-cueing; nothing is lost that speech
   itself won't reveal). Surface state via: one `sonari doctor` row (running /
-  idle-by-policy / degraded / disabled) and the daemon log.
+  idle-by-policy / degraded / disabled) and the daemon log. Mechanically: the
+  daemon's `on_status` STATUS reply grows a `keepalive` state field; the doctor
+  row reads it off the STATUS reply (doctor's established IPC idiom).
+- Daemon shutdown terminates the players from `run()`'s `finally` (the one
+  guaranteed teardown path for both SIGTERM and normal exit), with a bounded
+  reap — the daemon must never hang on shutdown because afplay wedged.
 - Keep-alive children are fully independent of the Speaker's process bookkeeping —
   no shared handles, no queue interaction, no `_play_lock`. The Speaker must be
   able to wedge, restart, or fail without the keep-alive noticing, and vice versa.
 
 ### Config
 
-`config.json` key `keepalive: "on" | "off"`, default `"on"`. Read the way the
-nearest existing boolean knob (`focus_follow`) is read (same cadence: if that knob
-is live-read per use, this one is; if boot-cached, this one is — mirror, don't
-innovate). `off` ⇒ manager never spawns, doctor row says "disabled". User-facing
-setter: `sonari:keepalive` command analog to existing knob skills (verbosity/rate),
-plus README one-liner documenting the two disclosed costs: while active, the
-headset's radio streams continuously (battery like music playback) and the Mac
-won't idle-sleep (coreaudiod assertion).
+`config.json` key `keepalive_enabled: true | false`, default `true`, in
+`config.DEFAULTS`. Recon fact: config is loaded ONCE at boot into a mutable
+in-memory dict — a config-only knob (the `focus_follow` precedent) would need a
+daemon restart to apply, which is the wrong UX for an eyes-free user. So this knob
+follows the `minqueue` precedent instead, end to end: a `SET_KEEPALIVE` `MsgType` +
+daemon handler that mutates `ctx.host.config` in place, calls `save_config`, and
+re-evaluates the manager immediately; a CLI subcommand; a `commands/keepalive.md`
+slash command. The generated README command table must be regenerated
+(`scripts/gen_docs.py` — `tests/test_docs_sync.py` fails the suite otherwise).
+`false` ⇒ manager terminates players and never spawns; doctor row says "disabled".
+The command doc discloses the two costs: while active, the headset's radio streams
+continuously (battery like music playback) and the Mac won't idle-sleep
+(coreaudiod assertion).
 
 ### Platform scope
 
