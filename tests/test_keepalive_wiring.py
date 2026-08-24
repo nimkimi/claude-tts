@@ -122,7 +122,9 @@ def test_directly_constructed_daemon_gets_inert_keepalive_seams():
 
 
 def test_config_disables_keepalive_at_construction():
-    """__init__ is the ONE place the config key is read (nothing re-reads it)."""
+    """__init__ SEEDS the manager from the config key, so a daemon that boots
+    with keepalive_enabled=false is disabled from its first breath — before the
+    speak loop's first recheck re-applies the same key (Task-4 amendment)."""
     daemon = _direct_daemon(keepalive_enabled=False)
     assert daemon.keepalive.status() == "disabled"
 

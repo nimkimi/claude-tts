@@ -1006,8 +1006,9 @@ class SpeechDaemon:
         hotkey and speak-loop claim behind it — on a hung child.
 
         SINGLE-WRITER DISCIPLINE (plan amendment, 2026-08-24, binding): this is
-        also the ONLY place the "keepalive_enabled" config value is applied to
-        the manager, and it is applied ONLY inside the `if reap:` branch, before
+        also the only place the "keepalive_enabled" config value is applied to
+        the manager AFTER construction (__init__ seeds it once from the same
+        key), and it is applied ONLY inside the `if reap:` branch, before
         set_active/tick. SET_KEEPALIVE's handler (features/control.py) writes
         the config key but deliberately never calls set_enabled itself — that
         handler runs under the daemon lock, and set_enabled(False) reaps on the
