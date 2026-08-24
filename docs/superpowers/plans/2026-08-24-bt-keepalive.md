@@ -333,29 +333,32 @@ def test_five_consecutive_fast_deaths_degrade_and_stop_spawning():
     mgr.set_active(True)
     for _ in range(5):
         spawned[-1].die()
-        clock["t"] += 3.0                         # past BACKOFF_S each round
-        mgr.tick()
+        clock["t"] += 0.5                         # died 0.5s after spawn: FAST
+        mgr.tick()                                # observe death, counter++
+        clock["t"] += 1.0                         # past BACKOFF_S
+        mgr.tick()                                # respawn (until degraded)
     assert mgr.status() == "degraded"
-    n = len(spawned)
+    n = len(spawned)                              # 5: initial + 4 respawns
     clock["t"] += 100.0
     mgr.tick()
     assert len(spawned) == n                      # gave up — no spawn storm
-    mgr.set_active(False)
-    hold = [t for t in FakeTimer.instances if t.interval == 600.0 and not t.cancelled][-1]
-    hold.fire()
-    mgr.set_active(True)                          # fresh edge resets the counter
+    mgr.set_active(False)                         # no players left: no hold timer needed
+    mgr.set_active(True)                          # fresh False->True edge resets the give-up
     assert len(spawned) == n + 1
+    assert mgr.status() == "running"
 
 
 def test_slow_death_does_not_count_toward_degraded():
     mgr, spawned, clock = make_mgr()
     mgr.set_active(True)
     for _ in range(6):
-        clock["t"] += 50.0                        # died long after spawn
+        clock["t"] += 50.0                        # died long after spawn: SLOW
         spawned[-1].die()
-        clock["t"] += 2.0
-        mgr.tick()
+        mgr.tick()                                # observe: counter resets
+        clock["t"] += 1.5                         # past BACKOFF_S
+        mgr.tick()                                # respawn
     assert mgr.status() == "running"
+    assert len(spawned) == 7                      # initial + 6 respawns
 
 
 def test_disabled_never_spawns_and_terminates_running():
@@ -429,14 +432,15 @@ class KeepAliveManager:
 ```
 
 Implementation notes the code must follow (write real code, these are the invariants):
-- `set_active(True)`: under `self._lock` — cancel+clear `_hold_timer`; if `_want` already true, return; set `_want`; if a hold was pending with players still alive, just continue (no new spawn); reset `_fast_deaths`/`_degraded` **only on a False→True edge**; if no live player and not degraded and enabled → `_spawn_locked()`.
+- `set_active(True)` has **ensure semantics, no early return on `_want` already true**: under `self._lock` — cancel+clear `_hold_timer`; on a **False→True edge only**, reset `_fast_deaths`/`_degraded`; set `_want = True`; then ensure: if `_enabled` and not `_degraded` and there is no player with `poll() is None` → `_spawn_locked()`. (Idempotence falls out: a live player blocks the spawn. A hold-in-progress just continues — its player is alive. After `set_enabled(False)`→`set_enabled(True)`, the players list is already empty because `_stop_players_locked()` cleared it, so the next `set_active(True)` respawns even though `_want` never went False.)
 - `set_active(False)`: under lock — if not `_want`, return; clear `_want`; if players exist, arm `_hold_timer = timer_factory(HOLD_S, callback)` with the learn-timer identity discipline (callback closes over the timer object; under lock it bails unless `self._hold_timer is timer and not self._want`; then `_stop_players_locked()`, state → idle).
 - `_spawn_locked()`: `proc = self._popen(["afplay", ensure_silence_wav()])` in try/except `Exception` → on failure set `_degraded = True` (a spawn that cannot even start is an immediate give-up; the OSError test pins this); on success append `(proc, self._clock())`, cancel any old `_overlap_timer`, arm a new one at `SILENCE_S - OVERLAP_S` (295.0) whose callback (identity-checked) spawns the next player via `_spawn_locked()` and prunes exited players (`poll() is not None` → drop; never `terminate()` a player that hasn't exited — the overlap exists so A and B run together).
 - `tick()`: under lock — prune exited players, recording each observed death: if `now - spawned_at < FAST_DEATH_S` increment `_fast_deaths` else reset it to 0; if `_fast_deaths >= GIVEUP_N` set `_degraded = True` and `_stop_players_locked()` (defensive) — degraded spawns nothing until reset by a False→True edge; else if `_want and _enabled and not _players and not _degraded` and `now - (_last_death or 0) >= BACKOFF_S` → `_spawn_locked()`.
 - `set_enabled(False)`: under lock — `_enabled = False`, cancel timers, `_stop_players_locked()`. `set_enabled(True)`: just flips the flag (the next `set_active`/`tick` re-evaluates).
 - `stop()`: under lock — cancel both timers, `_stop_players_locked()`, clear `_want`.
 - `_stop_players_locked()`: for each `(proc, _)`: `proc.terminate()` in try/except, then `proc.wait(timeout=2.0)` in try/except (bounded reap — mirror `_AfplayHandle.terminate`); clear the list.
-- `status()`: `"disabled"` if not enabled; `"degraded"` if degraded; `"running"` if `_want` and players; `"hold"` if players and not `_want`; else `"idle"`.
+- `status()` precedence: `"disabled"` if not enabled; `"degraded"` if degraded; `"running"` if `_want` (even during a momentary backoff gap with no player — the manager is actively trying); `"hold"` if players remain and not `_want`; else `"idle"`.
+- `tick()` death-observation detail: a death is counted (fast vs slow) from `now - spawned_at` at OBSERVATION time; `_stop_players_locked()` clears the list before anything can observe those exits, so deliberate terminations never count toward degraded.
 
 - [ ] **Step 4: Run tests to verify they pass, then the full suite**
 
@@ -457,6 +461,7 @@ git commit -m "feat(keepalive): manager — overlapped players, trailing hold, b
 **Files:**
 - Modify: `src/sonari/daemon/host.py` (`__init__`, `_speak_loop_once`, `run()`'s `finally`)
 - Modify: `src/sonari/daemon/features/lifecycle.py` (both handlers)
+- Modify: `tests/daemon_helpers.py` (`make_daemon` injects inert keep-alive seams — **hermeticity-critical, see Step 3**)
 - Test: `tests/test_keepalive_wiring.py`
 
 **Interfaces:**
@@ -591,11 +596,45 @@ def _keepalive_recheck(self) -> None:
 
 `lifecycle.py`: at the end of the `if t == MsgType.SESSION_START:` body add `ctx.host._keepalive_recheck()`; in `on_session_end`, directly after `ctx.host.sessions.unregister(session)` add `ctx.host._keepalive_recheck()`.
 
+**`tests/daemon_helpers.py` — hermeticity-critical, do this in the same commit as the wiring.** Roughly half the existing suite goes `make_daemon()` → `handle_message(SESSION_START)`; the moment the wiring lands, every one of those tests would hit `set_active(True)` on the DEFAULT seam and spawn a REAL `afplay` playing 300s of silence (orphaned past the suite, nondeterministic under the sandbox where afplay is blocked and the manager would flip to degraded). Every daemon built by `make_daemon` must therefore come out inert by default; the keep-alive tests override the seams afterward with their recording fakes, exactly as their `_seam()` helpers already do. Add to `daemon_helpers.py` (next to `FakeSpeaker`):
+
+```python
+class InertKeepaliveProc:
+    def poll(self):
+        return None
+
+    def wait(self, timeout=None):
+        return 0
+
+    def terminate(self):
+        pass
+
+
+class InertKeepaliveTimer:
+    def __init__(self, interval, fn):
+        self.daemon = False
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        pass
+```
+
+and in `make_daemon`, right after `daemon = SpeechDaemon(...)`:
+
+```python
+daemon.keepalive._popen = lambda cmd: InertKeepaliveProc()
+daemon.keepalive._timer_factory = InertKeepaliveTimer
+```
+
+Note for the pending-roster test: read `SessionManager.load_state`'s actual signature in `src/sonari/sessions.py` (~line 358) before writing the call — the plan's `{"ghost": "folder"}` assumes the roster is an id→folder mapping; if the real shape differs, match it (the point of the test is only: restored ⇒ `_provisional` ⇒ not live ⇒ no spawn).
+
 - [ ] **Step 4: Run tests to verify they pass, then the full suite**
 
 Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_wiring.py` → PASS (6)
 Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1554 passed, 1 skipped
-(If an unrelated daemon test fails because a real `afplay` would have spawned via the default seam: those tests build daemons through `make_daemon` with no live sessions, so no spawn happens — but if any existing test registers a live session, patch its daemon's `_popen` seam the way `_seam` does, or set `keepalive_enabled: False` in that test's config. Investigate before patching; do not blanket-disable.)
+(The `make_daemon` inert seams from Step 3 are what keep the existing ~1532 green — any real-`afplay` symptom here means those seams were skipped or a test constructs `SpeechDaemon` without `make_daemon`; grep for direct `SpeechDaemon(` constructions in tests/ and give any such site the same inert seams.)
 
 - [ ] **Step 5: Commit**
 
