@@ -444,8 +444,8 @@ Implementation notes the code must follow (write real code, these are the invari
 
 - [ ] **Step 4: Run tests to verify they pass, then the full suite**
 
-Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_manager.py` → PASS (11)
-Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1547 passed, 1 skipped
+Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_manager.py` → PASS (15)
+Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1551 passed, 1 skipped
 
 - [ ] **Step 5: Commit**
 
@@ -633,7 +633,7 @@ Note for the pending-roster test: read `SessionManager.load_state`'s actual sign
 - [ ] **Step 4: Run tests to verify they pass, then the full suite**
 
 Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_wiring.py` → PASS (6)
-Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1553 passed, 1 skipped
+Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1557 passed, 1 skipped
 (The `make_daemon` inert seams from Step 3 are what keep the existing ~1532 green — any real-`afplay` symptom here means those seams were skipped or a test constructs `SpeechDaemon` without `make_daemon`; grep for direct `SpeechDaemon(` constructions in tests/ and give any such site the same inert seams.)
 
 - [ ] **Step 5: Commit**
@@ -778,7 +778,7 @@ comparable to music playback) and the Mac will not idle-sleep.
 - [ ] **Step 4: Run tests to verify they pass, then the full suite (docs-sync test included)**
 
 Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_toggle.py` → PASS (4)
-Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1557 passed, 1 skipped (test_docs_sync green proves the regen)
+Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1561 passed, 1 skipped (test_docs_sync green proves the regen)
 
 - [ ] **Step 5: Commit**
 
@@ -874,7 +874,7 @@ Check whether any existing test pins the doctor row COUNT (`grep -rn "doctor" te
 - [ ] **Step 4: Run tests to verify they pass, then the full suite**
 
 Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_doctor.py` → PASS (2)
-Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1559 passed, 1 skipped
+Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1563 passed, 1 skipped
 
 - [ ] **Step 5: Commit**
 
