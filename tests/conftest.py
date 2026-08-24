@@ -113,6 +113,11 @@ def _isolate_sonari_dir(tmp_path, monkeypatch):
     # sonari.paths.FAULTLOG_PATH would read/write the developer's real
     # ~/.sonari/faulthandler.log.
     monkeypatch.setattr(paths, "FAULTLOG_PATH", sonari_dir / "faulthandler.log", raising=False)
+    # KEEPALIVE_WAV_PATH is SONARI_DIR/"keepalive.wav". keepalive.py's
+    # ensure_silence_wav() reads it live off the `paths` module (import inside
+    # the function, no by-value bind), but without this repoint it would still
+    # generate the silent WAV under the developer's real ~/.sonari.
+    monkeypatch.setattr(paths, "KEEPALIVE_WAV_PATH", sonari_dir / "keepalive.wav", raising=False)
     # ~/.local/bin/sonari is built from os.path.expanduser("~") inside the macOS
     # supervisor, NOT from SONARI_DIR, so none of the repoints above reach it.
     # Un-isolated, MacSupervisorBackend.uninstall() deletes the DEVELOPER'S REAL
