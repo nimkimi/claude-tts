@@ -154,7 +154,9 @@ class KeepAliveManager:
                 # "running" even in a momentary backoff gap with no player: the
                 # manager is actively trying, which is what an operator asks about.
                 return "running"
-            if self._players:
+            if self._players or self._hold_timer is not None:
+                # An armed hold with a momentarily empty list (a player crashed and
+                # the chain has not replaced it yet) is still a hold, not idle.
                 return "hold"
             return "idle"
 
@@ -250,8 +252,14 @@ class KeepAliveManager:
             self._overlap_timer = None
             if not self._enabled or self._degraded:
                 return
-            # NOT gated on _want: during the trailing hold the stream must keep
-            # chaining, and HOLD_S outlasts a single file.
+            # Chain only while the stream is WANTED, or while a hold is in flight.
+            # Not gated on _want alone: HOLD_S outlasts a single file, so the hold
+            # would break mid-chain. But not ungated either — a player that crashed
+            # on its own is pruned by tick(), so the next set_active(False) arms no
+            # hold and nothing cancels this timer; without this line the callback
+            # would spawn a player AND re-arm itself on an idle manager, forever.
+            if not self._want and self._hold_timer is None:
+                return
             self._spawn_locked()
             self._prune_exited_locked()
 
