@@ -352,6 +352,8 @@ def on_status(ctx, msg):
             time.monotonic() - host._witness_last_ping
             if host._witness_last_ping is not None else None
         ),
+        # Bluetooth keep-alive state (disabled|degraded|running|hold|idle).
+        "keepalive": host.keepalive.status(),
     }
 
 

@@ -28,6 +28,20 @@ def should_speak(args) -> bool:
         return False
 
 
+def _keepalive_row(st):
+    """Render STATUS's 'keepalive' field as a doctor row. idle/hold/disabled
+    are healthy-by-policy (not errors — the manager is doing its job); only
+    'degraded' (spawns kept dying) or a missing field (old daemon / STATUS
+    unreachable) fails the row."""
+    state = st.get("keepalive")
+    if state in ("running", "idle", "hold", "disabled"):
+        return ("keepalive", True, state)
+    if state == "degraded":
+        return ("keepalive", False,
+                "degraded: silent-stream spawns kept dying; Bluetooth clipping is back")
+    return ("keepalive", False, "daemon reported no keepalive state")
+
+
 def doctor() -> list:
     """Return a list of (check, ok, detail) health-check tuples."""
     from sonari.cli import _platform, _resolve_python
@@ -97,6 +111,14 @@ def doctor() -> list:
             results.append(("speech path", True, "draining normally"))
     except Exception as exc:  # noqa: BLE001 - doctor must never raise
         results.append(("speech path", False, f"cannot read daemon status: {exc}"))
+
+    # Bluetooth keep-alive state. idle/hold/disabled are healthy-by-policy;
+    # only 'degraded' (the silent-stream spawn giving up) or a missing field
+    # (old daemon / STATUS unreachable) fails the row.
+    try:
+        results.append(_keepalive_row(st))
+    except Exception as exc:  # noqa: BLE001 - doctor must never raise
+        results.append(("keepalive", False, f"error: {exc}"))
 
     # Restore health (P17): you can lose the whole backlog to the crash/upgrade
     # path and still get an all-green doctor today.
