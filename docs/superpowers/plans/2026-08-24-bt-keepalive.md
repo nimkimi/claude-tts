@@ -444,8 +444,8 @@ Implementation notes the code must follow (write real code, these are the invari
 
 - [ ] **Step 4: Run tests to verify they pass, then the full suite**
 
-Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_manager.py` → PASS (12)
-Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1548 passed, 1 skipped
+Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_manager.py` → PASS (11)
+Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1547 passed, 1 skipped
 
 - [ ] **Step 5: Commit**
 
@@ -633,7 +633,7 @@ Note for the pending-roster test: read `SessionManager.load_state`'s actual sign
 - [ ] **Step 4: Run tests to verify they pass, then the full suite**
 
 Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_wiring.py` → PASS (6)
-Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1554 passed, 1 skipped
+Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1553 passed, 1 skipped
 (The `make_daemon` inert seams from Step 3 are what keep the existing ~1532 green — any real-`afplay` symptom here means those seams were skipped or a test constructs `SpeechDaemon` without `make_daemon`; grep for direct `SpeechDaemon(` constructions in tests/ and give any such site the same inert seams.)
 
 - [ ] **Step 5: Commit**
@@ -778,7 +778,7 @@ comparable to music playback) and the Mac will not idle-sleep.
 - [ ] **Step 4: Run tests to verify they pass, then the full suite (docs-sync test included)**
 
 Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_toggle.py` → PASS (4)
-Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1558 passed, 1 skipped (test_docs_sync green proves the regen)
+Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1557 passed, 1 skipped (test_docs_sync green proves the regen)
 
 - [ ] **Step 5: Commit**
 
@@ -874,7 +874,7 @@ Check whether any existing test pins the doctor row COUNT (`grep -rn "doctor" te
 - [ ] **Step 4: Run tests to verify they pass, then the full suite**
 
 Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q tests/test_keepalive_doctor.py` → PASS (2)
-Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1560 passed, 1 skipped
+Run: `SAC=$(mktemp -d "$TMPDIR/sac.XXXX") && HOME="$SAC" pytest -q` → 1559 passed, 1 skipped
 
 - [ ] **Step 5: Commit**
 
@@ -896,4 +896,4 @@ git commit -m "feat(keepalive): STATUS field + doctor row"
 - Spec coverage: policy (T3), overlap/no-gap (T2), degraded/anti-spin (T2), config + live toggle + docs regen (T4), doctor/STATUS (T5), WAV + conftest repoint (T1), shutdown teardown (T3), version files untouched (global constraint). Trailing-hold ratified value (600s) is a T2 class constant. ✔
 - Placeholder scan: every step carries real code or an exact copy-source pointer (`on_set_minqueue`, `commands/minqueue.md`, learn-timer). Two deliberate "read the neighbor and mirror" instructions remain (CLI send helper shape, conftest entry style) — those are copy-exact-from-named-source instructions, not gaps. ✔
 - Type consistency: `keepalive.status()` strings (`running|hold|idle|degraded|disabled`) match T5's row logic and T3's assertions; `set_active/set_enabled/tick/stop` signatures consistent across T2→T5; `KEEPALIVE_WAV_PATH`/`ensure_silence_wav` consistent T1→T2. FakeProc/FakeTimer imported from T2's test module in T3/T4/T5 tests (cross-test-module import is the repo's existing pattern via `tests.daemon_helpers`). ✔
-- Known risk flagged for implementers: expected suite counts between tasks (1536/1548/...) assume no collisions with existing tests; treat drift as investigate-first, and the exact numbers as expectations, not gates to force.
+- Known risk flagged for implementers: expected suite counts between tasks (1536/1547/... — corrected 2026-08-24: Task 2 defines 11 tests, prose said 12) assume no collisions with existing tests; treat drift as investigate-first, and the exact numbers as expectations, not gates to force.
