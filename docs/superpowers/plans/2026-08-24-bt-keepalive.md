@@ -954,3 +954,54 @@ Carried item for Task 4 (from Task 3 re-review, Minor): in run()'s finally,
 `_persistence.flush()` / the LOCK_PATH unlink can raise (ENOSPC, PermissionError)
 and would then skip `keepalive.stop()`. Harden: wrap flush+unlink so the
 keepalive stop is unskippable (try/finally), keeping the post-flush order.
+
+## Task 6 (added 2026-08-25, owner-ratified at the gate): presence window — never-closed tabs must not mean always-on
+
+**Why:** the owner rarely closes terminal tabs, so tty-anchored liveness makes
+"session-scoped" degrade to always-on for him: the Mac never idle-sleeps
+(coreaudiod assertion held 24/7). Owner facts: headset is powered off/cased
+overnight (headset battery is NOT the concern); the Mac-sleep cost is.
+
+**Policy change (daemon-side only; the manager stays policy-free):**
+`_keepalive_recheck` computes `active = alive AND present` where
+`present = spoke_recently OR input_recently`:
+- `spoke_recently`: `self._keepalive_last_spoke` (monotonic), stamped by the
+  speak loop whenever any utterance/earcon playback is dispatched or completes
+  (implementer picks the cleanest existing site; a 20-min window makes either
+  edge equivalent). None (fresh boot) ⇒ not spoke-recently.
+- `input_recently`: system HID idle seconds < window, sampled via
+  `ioreg -c IOHIDSystem` (parse `HIDIdleTime`, nanoseconds), through an
+  injectable seam (e.g. `self._hid_idle_s` callable) so tests fake it.
+  The sampler is CACHED with a coarse TTL (~30s) because it shells out —
+  but the TTL is BYPASSED (fresh sample) whenever the presence verdict would
+  transition keep-alive OFF→ON or when there are queued items waiting to
+  speak, so a returning user's first utterance re-arms the stream promptly.
+  Sampler failure/unparseable ⇒ fail-OPEN (treat as present): a broken
+  sampler must degrade to the current build's behavior (stream held), never
+  to silent clipping; log once via the existing latched-traceback pattern.
+- Window: `KEEPALIVE_PRESENCE_S = 1200.0` (20 min), module/class constant with
+  an ear-adjustable comment (LEARN_MODE_IDLE_S precedent). NO new config key.
+  Composition with the manager's 10-min hold is by design: walk away ⇒
+  release after ~20+10 min; the Mac's own sleep timer stacks after that.
+- The sampler runs on the lock-free speak-loop site only (it can block ~tens
+  of ms on ioreg); it must never run under the daemon lock — same discipline
+  as the reap. Lifecycle handlers' bare `_keepalive_recheck()` calls must NOT
+  trigger a fresh ioreg sample (they may use the cached value or skip the
+  presence check and let the next tick settle it — implementer's choice,
+  stated in a comment).
+
+**Also fold into this task (recorded follow-up pins from the final re-review):**
+(a) append `mgr.tick()` + re-asserts ("running", replacement player not
+terminated) to `test_enable_edge_forgives_a_give_up...` — pins the
+load-bearing `_fast_deaths = 0` at keepalive.py:117; (b) a test pinning the
+`if reap:` gate placement in `_keepalive_recheck` (config application must not
+run on bare/handler calls — assert via a set_enabled-counting stub driven
+through handle_message vs reap=True, the sibling of the tick-counting test).
+
+**Tests (RED-first, sacrificial HOME):** live+spoke-recently ⇒ active even with
+HID idle huge; live+stale-speech+HID idle > window ⇒ set_active(False) (hold
+arms); HID fresh again ⇒ re-arms; sampler raising ⇒ fail-open active; handler
+path never samples fresh (counting-stub on the seam). Plus the two pins above.
+`commands/keepalive.md` gains one sentence: the stream releases ~30 min after
+you stop speaking/typing and re-arms on return (front-matter untouched ⇒ no
+README regen; verify with gen_docs check).
