@@ -155,6 +155,30 @@ def test_lifecycle_handlers_never_reap_only_the_loop_does():
     assert len(ticks) == 1
 
 
+def test_config_is_applied_only_on_the_reaping_tick():
+    """The `if reap:` GATE, pinned (plan amendment to Task 4, binding).
+
+    set_enabled(False) reaps on the CALLING thread, and every bare
+    _keepalive_recheck() call runs UNDER the daemon lock — so applying the config
+    must sit INSIDE the `if reap:` branch, not beside set_active. One indent out
+    and nothing else in the suite notices: the manager effect is byte-identical,
+    only the thread it happens on changes, and the stall it causes needs a hung
+    afplay to show. Counted, like its tick-counting sibling above."""
+    daemon, queue, speaker, sessions, config = make_daemon(foreground=None)
+    _seam(daemon)
+    applied = []
+    daemon.keepalive.set_enabled = lambda on: applied.append(on)
+
+    daemon.handle_message(_msg(MsgType.SESSION_START))
+    daemon.handle_message(_msg(MsgType.SET_KEEPALIVE, enabled=False))
+    daemon.handle_message(_msg(MsgType.SESSION_END))
+    daemon._keepalive_recheck()                   # a bare, lifecycle-shaped call
+    assert applied == []
+
+    daemon._keepalive_recheck(reap=True)          # the lock-free speak-loop site
+    assert applied == [False]
+
+
 def test_recheck_logs_the_first_failure_then_stays_silent(monkeypatch, capsys):
     """A silent swallow at 10 Hz is undiagnosable; a traceback at 10 Hz is a log
     flood. Fire once, like _witness_alarmed."""
