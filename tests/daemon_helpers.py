@@ -114,6 +114,19 @@ class InertKeepaliveTimer:
         pass
 
 
+def inert_hid_idle() -> float:
+    """conftest's default HID-idle seam: 0.0 == "the user just typed".
+
+    The keep-alive presence check shells out to `ioreg` on every reaping tick
+    whose cache has expired. Un-neutralised, the suite would spawn a real
+    subprocess from ~40 tests AND — on a machine that has genuinely been idle
+    past KEEPALIVE_PRESENCE_S, which is exactly the unattended run — read back
+    "absent" and flip keep-alive off under tests that assert "running". A named
+    function, not a lambda, so the hermeticity guard can assert it by identity.
+    """
+    return 0.0
+
+
 class FakeSummarizer:
     """Records the slice text; returns a scripted SummarizeResult (default: ok)."""
     def __init__(self, result=None):

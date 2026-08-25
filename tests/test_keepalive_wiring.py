@@ -113,9 +113,16 @@ def test_directly_constructed_daemon_gets_inert_keepalive_seams():
     import subprocess
     import threading
 
+    from tests.daemon_helpers import inert_hid_idle
+
     daemon = _direct_daemon()
     assert daemon.keepalive._popen is not subprocess.Popen
     assert daemon.keepalive._timer_factory is not threading.Timer
+    # Same guard for the presence sampler (Task 6): a reaping tick shells out to
+    # `ioreg`, so fail by NAME here if a refactor ever stops honouring conftest's
+    # repoint — the alternative is ~40 tests quietly spawning subprocesses and
+    # going nondeterministic on an idle machine.
+    assert daemon._hid_idle_s is inert_hid_idle
     daemon.handle_message(_msg(MsgType.SESSION_START))
     assert daemon.keepalive.status() == "running"
     assert type(daemon.keepalive._players[0][0]).__name__ == "InertKeepaliveProc"

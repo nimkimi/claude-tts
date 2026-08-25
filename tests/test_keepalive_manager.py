@@ -180,6 +180,14 @@ def test_enable_edge_forgives_a_give_up_so_the_toggle_is_a_recovery_lever():
     mgr.set_active(True)                          # the next policy push re-ensures it
     assert len(spawned) == n + 1
     assert mgr.status() == "running"
+    # ...and it SURVIVES the very next tick. Forgiving _degraded alone would pass
+    # every assert above and still be broken: the give-up COUNTER would carry the
+    # five old deaths into tick(), which re-latches degraded on sight and detaches
+    # the player it just spawned. The recovery lever would light up for one tick
+    # and die — indistinguishable, from the user's side, from doing nothing.
+    mgr.tick()
+    assert mgr.status() == "running"
+    assert not spawned[-1].terminated
 
 
 def test_same_value_enable_calls_do_not_forgive_a_give_up():

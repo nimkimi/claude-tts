@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import secrets
 import subprocess
 import threading
@@ -40,6 +41,29 @@ from sonari.daemon.features import hotkeys  # noqa: F401
 from sonari.daemon.features import chooser  # noqa: F401
 from sonari.daemon.features import catchup  # noqa: F401
 from sonari.daemon.features import teaching  # noqa: F401
+
+
+_HID_IDLE_RE = re.compile(r'"HIDIdleTime"\s*=\s*(\d+)')
+
+
+def _hid_idle_seconds() -> "float | None":
+    """Seconds since the last system-wide HID event (keyboard, trackpad, mouse).
+
+    `ioreg -c IOHIDSystem -d 4 -r` prints `"HIDIdleTime" = <nanoseconds>` on the
+    HID system entry; `-d 1` prints only the Root node and matches nothing
+    (measured on this machine, not assumed). Several entries can carry the key,
+    so take the SMALLEST — the most recent activity, which is also the direction
+    that errs toward keeping the stream held.
+
+    Returns None when nothing parses (a macOS release renaming the key); the
+    caller treats that as PRESENT, same as a raise. The 1 s timeout is the
+    important part: this runs on the speak-loop tick (measured ~10 ms), and a
+    wedged ioreg must cost one bounded stall, not the loop.
+    """
+    out = subprocess.run(["ioreg", "-c", "IOHIDSystem", "-d", "4", "-r"],
+                         capture_output=True, text=True, timeout=1.0).stdout
+    vals = [int(m) for m in _HID_IDLE_RE.findall(out)]
+    return min(vals) / 1e9 if vals else None
 
 
 def _stream_quiescent(st) -> bool:
@@ -221,6 +245,25 @@ class SpeechDaemon:
         self.keepalive = KeepAliveManager()
         self.keepalive.set_enabled(bool(self.config.get("keepalive_enabled", True)))
         self._keepalive_reported = False   # fire-once latch, see _keepalive_recheck
+        # PRESENCE WINDOW (see _keepalive_present): a live session is not enough —
+        # terminal tabs that are never closed would otherwise hold the audio
+        # assertion (and block the Mac's idle sleep) around the clock.
+        # _keepalive_last_spoke: monotonic stamp of the last item the loop played,
+        # None until the first (a fresh boot is NOT spoke-recently). Bare float
+        # write on the speak thread, read lock-free — the _last_drain discipline.
+        self._keepalive_last_spoke: "float | None" = None
+        # The HID-idle sampler seam (tests fake it; conftest neutralises it for the
+        # whole suite) and its coarse cache: verdict + the monotonic stamp of the
+        # sample it came from. The verdict SEEDS to True so every path that reads
+        # it before the first sample — every bare, under-the-lock handler call —
+        # fails open to "present" and can never cut the stream on no evidence.
+        # Written only by the speak thread, read by handler threads: a bool/float
+        # pair, no lock, exactly as _last_drain and _witness_last_ping are. A torn
+        # read is impossible and a stale one costs at most one 100 ms tick.
+        self._hid_idle_s = _hid_idle_seconds
+        self._keepalive_hid_present = True
+        self._keepalive_hid_at: "float | None" = None
+        self._keepalive_hid_reported = False   # the sampler's OWN fire-once latch
         # D2 §6.4/§6.5: DEFER a restart-line delivery — every restored session
         # was muted, so no playable stream existed at boot. A bool, not the
         # composed string (F2): state can shift between boot and the first
@@ -611,6 +654,16 @@ class SpeechDaemon:
         # observe-only write never adds latency to or contends with the lock path.
         # A float write is atomic in CPython; no lock needed for a diagnostic field.
         self._last_drain = time.monotonic()
+        # PRESENCE: the same stamp doubles as "the ear was served recently". THIS
+        # site, and only this site, because every item the loop plays funnels
+        # through here — both speak-loop branches, prelude/spearcon/earcon and
+        # content alike — one call after the audio, next to the heartbeat write it
+        # mirrors. Dispatch vs completion is indistinguishable under a 20-minute
+        # window (plan's own words), and completion is the single funnel.
+        # UNGATED on `completed` on purpose: a cut utterance still made sound, and
+        # a cut is a hotkey press — presence twice over. The one item that skips
+        # note_spoken is a stop-requeued one, which is that same hotkey press.
+        self._keepalive_last_spoke = self._last_drain
         with self._lock:
             self._state._current_item = None
             entry = self._state._pending_heard.pop(item.id, None)
@@ -994,9 +1047,126 @@ class SpeechDaemon:
         self._witness_alarmed = True
         self._fire_alarm("alarm_hotkeys_down", ALARM_HOTKEYS_WORDS)
 
+    # ---- keep-alive presence window -------------------------------------
+    # Ear-adjustable, like LEARN_MODE_IDLE_S: how long after the last utterance
+    # or the last keypress the user still counts as PRESENT. 20 minutes composes
+    # deliberately with the manager's 600 s trailing hold — walk away and the
+    # device is released after ~30 min, after which the Mac's own sleep timer
+    # finally gets to run.
+    KEEPALIVE_PRESENCE_S = 1200.0
+    # The HID sample is a shell-out (~10 ms), and _keepalive_recheck runs at
+    # 10 Hz, so the verdict is cached coarsely. MIN_S is the floor the bypass
+    # below may shorten the TTL to — never to zero. See _keepalive_present.
+    KEEPALIVE_HID_TTL_S = 30.0
+    KEEPALIVE_HID_MIN_S = 2.0
+
+    def _keepalive_present(self, sample: bool) -> bool:
+        """Is the user actually THERE? `present = spoke_recently OR input_recently`.
+
+        WHY THIS EXISTS: tty liveness answers "is a session open?", and the owner
+        never closes terminal tabs — so without this, "hold the device while a
+        session is live" degraded to "hold it forever" and the Mac never
+        idle-slept. Presence is the second half of the verdict.
+
+        WHERE THE SHELL-OUT MAY RUN: only with sample=True, which only
+        _keepalive_recheck(reap=True) — the lock-free speak-loop site — ever
+        passes. `ioreg` can block for tens of ms; the lifecycle handlers call
+        _keepalive_recheck UNDER the daemon lock, so a sample there would stall
+        every socket message, hotkey and speak-loop claim behind it. Exactly the
+        discipline the reap already follows. A bare call therefore reads the
+        cached verdict (seeded True) and lets the next tick settle it — at most
+        100 ms later, and only ever in the stream-held direction.
+
+        FAIL-OPEN: a sampler that raises or returns nothing means PRESENT. A
+        broken sampler must degrade to this build's previous behaviour (the
+        stream stays held) and never to silent clipping, which is the failure the
+        whole feature exists to prevent. The fail-open verdict is cached like any
+        other, so a wedged ioreg costs one bounded stall per TTL, not per tick.
+
+        THE TTL BYPASS: with the cached verdict at "absent", keep-alive is (or is
+        about to be) off, and only a fresh sample can turn it back on — but a
+        returning user's first utterance must not be clipped waiting out a 30 s
+        TTL. So when something is queued to speak, the TTL is cut to
+        KEEPALIVE_HID_MIN_S. The floor is load-bearing, not caution: the plan's
+        bare "bypass whenever it would flip OFF->ON, or items are waiting" is
+        LEVEL-shaped, and this runs ten times a second — a queue that cannot
+        drain (every stream stopped, or a listener genuinely away) would then
+        spawn ioreg 10x/s for as long as it lasts, against the very cost this
+        cache exists for. Bypassing only from "absent" also drops the pure
+        OFF->ON half of that clause on purpose: with nothing queued there is
+        nothing audible to protect, and the plain TTL re-arms within 30 s
+        anyway; and with the cached verdict already "present" a fresh sample
+        could only confirm it or wrongly cut it.
+        """
+        now = time.monotonic()
+        spoke = self._keepalive_last_spoke
+        if spoke is not None and (now - spoke) < self.KEEPALIVE_PRESENCE_S:
+            # Speech in the window IS presence — an agent reading to a listener
+            # who has not touched the keyboard for an hour keeps its stream. This
+            # is also the common case, so the shell-out below never runs at all
+            # while the voice is working.
+            return True
+        if not sample:
+            # A bare call: UNDER the daemon lock. Cached verdict, no shell-out.
+            return self._keepalive_hid_present
+        at = self._keepalive_hid_at
+        if at is not None and (now - at) < self.KEEPALIVE_HID_TTL_S:
+            # Cache hit — unless the bypass applies: the cached verdict is
+            # "absent" (so keep-alive is being held off) and something is queued
+            # to be heard, so only a fresh sample can re-arm the stream before it
+            # plays. Ordered so the queue scan runs ONLY on the cached-absent
+            # branch, and only past the floor — see THE TTL BYPASS above.
+            bypass = (not self._keepalive_hid_present
+                      and (now - at) >= self.KEEPALIVE_HID_MIN_S
+                      and self._keepalive_items_waiting())
+            if not bypass:
+                return self._keepalive_hid_present
+        try:
+            idle = self._hid_idle_s()
+        except Exception:  # noqa: BLE001 - a broken sampler must not decide policy
+            present = True
+            self._report_hid_failure(with_traceback=True)
+        else:
+            present = True if idle is None else idle < self.KEEPALIVE_PRESENCE_S
+            if idle is None:
+                self._report_hid_failure(with_traceback=False)
+        self._keepalive_hid_at = now
+        self._keepalive_hid_present = present
+        return present
+
+    def _keepalive_items_waiting(self) -> bool:
+        """Is anything queued to be spoken, on any stream?
+
+        Lock-free by the same discipline as session_ids() one frame up:
+        list(dict.values()) is a single C-level copy under the GIL, so a
+        concurrent enqueue can neither tear it nor raise "changed size during
+        iteration", and len() on a deque is O(1).
+        """
+        return any(len(st.queue) > 0
+                   for st in list(self._state._streams.values()))
+
+    def _report_hid_failure(self, with_traceback: bool) -> None:
+        """Fire-once, like _witness_alarmed: at 10 Hz a persistently broken
+        sampler would otherwise flood the daemon log. Its OWN latch — a seam
+        failure must not consume the one _keepalive_recheck keeps for keep-alive
+        LOGIC bugs, or the first would hide the second."""
+        if self._keepalive_hid_reported:
+            return
+        self._keepalive_hid_reported = True
+        try:
+            import sys
+            if with_traceback:
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+            else:
+                print("sonari: HID idle sample unparseable; keep-alive presence "
+                      "fails open (stream held)", file=sys.stderr)
+        except Exception:  # noqa: BLE001 - logging must not wedge the loop
+            pass
+
     def _keepalive_recheck(self, reap: bool = False) -> None:
-        """Push the policy verdict — "is any session live?" — into the keep-alive
-        manager, and reap only where reaping is safe.
+        """Push the policy verdict — "is a session live AND is the user there?" —
+        into the keep-alive manager, and reap only where reaping is safe.
 
         Called from the lifecycle handlers (which run UNDER the daemon lock, at
         handle_message's callers) and once per speak-loop tick. set_active() never
@@ -1017,6 +1187,15 @@ class SpeechDaemon:
         speak loop's 10 Hz cadence the toggle still applies effectively
         immediately; repeated same-value calls are cheap flag writes.
 
+        PRESENCE (plan Task 6): the verdict is `alive AND present`, not `alive`.
+        The `and` short-circuits deliberately — a dead roster never reaches
+        _keepalive_present, so the daemon never shells out to ioreg for a machine
+        with no live session at all. The sampling rules (never under the daemon
+        lock, fail-open, the cache and its bypass) live in that method's
+        docstring; the one rule that belongs HERE is the same as the reap's: only
+        the lock-free speak-loop caller passes reap=True, and only that caller
+        samples.
+
         The reads are lock-free by the same discipline as _check_witness:
         session_ids() returns a snapshot copy and is_live() only reads.
 
@@ -1028,10 +1207,12 @@ class SpeechDaemon:
         try:
             alive = any(self.sessions.is_live(s)
                         for s in self.sessions.session_ids())
+            # Short-circuit: no live session => no presence check, no shell-out.
+            active = alive and self._keepalive_present(sample=reap)
             if reap:
                 self.keepalive.set_enabled(
                     bool(self.config.get("keepalive_enabled", True)))
-            self.keepalive.set_active(alive)
+            self.keepalive.set_active(active)
             if reap:
                 self.keepalive.tick()
         except Exception:  # noqa: BLE001 - keep-alive must never wedge the loop

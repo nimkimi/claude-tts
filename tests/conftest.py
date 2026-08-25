@@ -167,12 +167,24 @@ def _inert_keepalive_seams(monkeypatch):
     file unprotected, so neutralise the DEFAULTS at the class instead: a manager
     that was handed explicit seams (test_keepalive_manager, and the keep-alive
     wiring tests, which overwrite theirs after construction) keeps them.
+
+    Same job for the presence check's HID sampler (Task 6): the daemon binds
+    host._hid_idle_seconds at construction, and a reaping tick shells out to
+    `ioreg` whenever its cache is stale. Repointing the module global before any
+    daemon is built keeps the suite subprocess-free AND deterministic — an
+    unattended run on a machine idle past KEEPALIVE_PRESENCE_S would otherwise
+    read a REAL "absent" and turn keep-alive off under tests asserting "running".
+    Presence tests inject their own counting seam per-daemon on top of this.
     """
     import subprocess
     import threading
 
+    import sonari.daemon.host as daemon_host
     import sonari.daemon.keepalive as keepalive
-    from tests.daemon_helpers import InertKeepaliveProc, InertKeepaliveTimer
+    from tests.daemon_helpers import (InertKeepaliveProc, InertKeepaliveTimer,
+                                      inert_hid_idle)
+
+    monkeypatch.setattr(daemon_host, "_hid_idle_seconds", inert_hid_idle)
 
     real_init = keepalive.KeepAliveManager.__init__
 

@@ -16,6 +16,11 @@ first fraction of each utterance (and whole short earcons) can be swallowed.
 Costs while active: the headset's radio streams continuously (battery use
 comparable to music playback) and the Mac will not idle-sleep.
 
+It is not held around the clock, though: the stream is released roughly half an
+hour after you stop speaking *and* stop typing, and re-arms the moment you are
+back — so a terminal tab you never close is not by itself a reason to keep the
+Mac awake.
+
 If `sonari doctor` reports the keep-alive as **degraded** — its silent-stream
 spawns kept dying, so clipping is back — retry it by running this command with
 `off` and then `on` again.
