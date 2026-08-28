@@ -20,6 +20,70 @@ import pytest
 
 from _isolation import isolate_paths
 
+# --- D0.1 refusal: this suite may never run against the real home ------------
+# The suite has destroyed the owner's real install TWICE. ~/.sonari and
+# ~/.local/bin are outside git, so `git status` clean is not evidence, and a
+# test FAILURE arrives after the damage. So: abort before collection completes.
+#
+# pwd.getpwuid reads the password database and is immune to $HOME -- it is the
+# one source of truth an errant repoint cannot forge. This is the same guard
+# scratchpad/e3-review/probe_receipts.py and probe_counterfactual.py already
+# carry, promoted from the probe rigs into the suite itself.
+#
+# It REFUSES rather than silently repointing. Two reasons. A repoint would
+# make a bare `pytest` quietly work, which trains exactly the habit that
+# caused both outages. And the caller's `find "$SAC" -mindepth 1 | wc -l`
+# residue check is this suite's hermeticity witness -- moving $HOME out from
+# under it would make that check vacuous, because a leak would land in a
+# directory nobody is watching.
+import os
+import pathlib
+import pwd
+
+
+def _real_home() -> pathlib.Path:
+    """The real home, independent of $HOME. Never cache -- tests monkeypatch."""
+    return pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir)
+
+
+_REAL_HOME = _real_home()
+
+# Every path the suite has damaged, or could damage, derived from the REAL home
+# rather than from sonari.paths (which is repointed by the time tests run).
+_CANARY_PATHS = (
+    _REAL_HOME / ".sonari",
+    _REAL_HOME / ".local" / "bin" / "sonari",
+    _REAL_HOME / "Library" / "LaunchAgents" / "com.sonari.speechd.plist",
+    _REAL_HOME / "Library" / "LaunchAgents" / "com.sonari.hotkeyd.plist",
+)
+
+_REFUSAL = (
+    "REFUSING to run: {0}. This suite calls uninstall paths that rmtree "
+    "~/.sonari and remove ~/.local/bin/sonari and the LaunchAgents -- all "
+    "outside git. It has destroyed the live install twice. Re-run under a "
+    "sacrificial HOME:\n"
+    "    mktemp -d \"$TMPDIR/sonari-home.XXXXXX\"\n"
+    "    HOME=<that path> .venv/bin/python -m pytest -q"
+)
+
+_HOME = os.environ.get("HOME") or ""
+if not _HOME:
+    pytest.exit(_REFUSAL.format("$HOME is unset"), returncode=3)
+if pathlib.Path(_HOME) == _REAL_HOME:
+    pytest.exit(
+        _REFUSAL.format("$HOME is the real home ({0})".format(_REAL_HOME)),
+        returncode=3,
+    )
+# Belt to those braces: paths.py derives every constant from Path.home(), so a
+# Path.home() that disagrees with $HOME means the isolation is a fiction.
+if pathlib.Path.home() != pathlib.Path(_HOME):
+    pytest.exit(
+        _REFUSAL.format(
+            "Path.home() ({0}) disagrees with $HOME ({1})".format(
+                pathlib.Path.home(), _HOME)),
+        returncode=3,
+    )
+
 
 @pytest.fixture(autouse=True)
 def _no_blocking_prompts(monkeypatch):
@@ -103,3 +167,33 @@ def _inert_keepalive_seams(monkeypatch):
             self._timer_factory = InertKeepaliveTimer
 
     monkeypatch.setattr(keepalive.KeepAliveManager, "__init__", _inert_init)
+
+
+def _canary_stat(path: pathlib.Path):
+    """(exists, mtime_ns, inode, size) -- or None when absent. Never raises."""
+    try:
+        st = path.stat()
+    except (OSError, ValueError):
+        return None
+    return (st.st_mtime_ns, st.st_ino, st.st_size)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _real_home_canary():
+    """Detective to the refusal's preventive.
+
+    The refusal stops the suite from starting in the wrong place. This proves,
+    after the fact, that it did not touch the real install anyway -- and it is
+    the only thing that would have NAMED the culprit either of the two times
+    this happened.
+    """
+    before = {p: _canary_stat(p) for p in _CANARY_PATHS}
+    yield
+    changed = [
+        str(p) for p in _CANARY_PATHS if _canary_stat(p) != before[p]
+    ]
+    assert not changed, (
+        "THE SUITE TOUCHED THE REAL INSTALL: {0}. These paths are outside "
+        "git; `git status` clean is not evidence. Find the test that did it "
+        "before running anything else.".format(sorted(changed))
+    )
