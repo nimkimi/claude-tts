@@ -201,6 +201,25 @@ def _canary_stat(path: pathlib.Path):
     return (st.st_mtime_ns, st.st_ino, st.st_size)
 
 
+def _assert_real_home_untouched(before, after) -> None:
+    """The canary's verdict, on two snapshots of _CANARY_PATHS.
+
+    Separate from the fixture for the same reason _assert_no_silent_cues is --
+    a test cannot assert on its own teardown failure, and until this was
+    liftable the canary was the ONE guard on this branch with no receipt that
+    it fires: neutering `assert not changed` left the whole suite green.
+    Taking both snapshots as arguments is what keeps that receipt honest AND
+    safe: the test hands over fabricated stats and never has to manufacture a
+    real write into ~/.sonari to prove the guard bites.
+    """
+    changed = [str(p) for p in _CANARY_PATHS if after[p] != before[p]]
+    assert not changed, (
+        "THE SUITE TOUCHED THE REAL INSTALL: {0}. These paths are outside "
+        "git; `git status` clean is not evidence. Find the test that did it "
+        "before running anything else.".format(sorted(changed))
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _real_home_canary():
     """Detective to the refusal's preventive.
@@ -212,14 +231,8 @@ def _real_home_canary():
     """
     before = {p: _canary_stat(p) for p in _CANARY_PATHS}
     yield
-    changed = [
-        str(p) for p in _CANARY_PATHS if _canary_stat(p) != before[p]
-    ]
-    assert not changed, (
-        "THE SUITE TOUCHED THE REAL INSTALL: {0}. These paths are outside "
-        "git; `git status` clean is not evidence. Find the test that did it "
-        "before running anything else.".format(sorted(changed))
-    )
+    _assert_real_home_untouched(
+        before, {p: _canary_stat(p) for p in _CANARY_PATHS})
 
 
 def _assert_no_silent_cues(speakers, marker) -> None:

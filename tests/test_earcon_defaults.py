@@ -73,9 +73,15 @@ SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "sonari"
 
 def test_only_one_resolver_reads_the_earcon_table():
     """Three sources of truth for one table is the drift this receipt closes."""
+    scanned = sorted(SRC.rglob("*.py"))
+    # The corpus, not the violations. This literal grep is also the SOLE guard
+    # on two of the three collapsed resolvers (host._asset_path and
+    # keymap._witness_entry), so a scan that silently stops scanning takes
+    # those with it. Idiom from test_cue_contract.py's `assert lits`.
+    assert scanned, "no python files under {0} -- the scan is broken".format(SRC)
     hits = [
         "{0}:{1}".format(p.relative_to(SRC), i)
-        for p in SRC.rglob("*.py")
+        for p in scanned
         for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
         if "_FALLBACK_EARCONS" in line
     ]

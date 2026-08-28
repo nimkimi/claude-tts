@@ -133,10 +133,15 @@ def test_no_test_file_reaches_daemon_helpers_by_the_bare_module_name():
     here = pathlib.Path(__file__).resolve()
     root = here.parent
     bare = re.compile(r"^\s*(from daemon_helpers import|import daemon_helpers)", re.M)
+    scanned = [f for f in sorted(root.rglob("*.py")) if f.resolve() != here]
+    # The corpus, not the violations: `hits == []` is equally satisfied by a
+    # clean tree and by a scan that read nothing, and this guard is the reason
+    # the dead-asset detector is armed for all 83 files instead of one.
+    assert scanned, "no test files found under {0} -- the scan is broken".format(root)
     hits = [
         str(f.relative_to(root))
-        for f in sorted(root.rglob("*.py"))
-        if f.resolve() != here and bare.search(f.read_text(encoding="utf-8"))
+        for f in scanned
+        if bare.search(f.read_text(encoding="utf-8"))
     ]
     assert hits == [], (
         "these reach daemon_helpers by the bare name, splitting the registry "

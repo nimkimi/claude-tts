@@ -45,9 +45,15 @@ def test_a_control_cue_waiver_carries_a_reason():
 def test_the_legacy_exempt_flags_are_gone():
     """71 hits on the branch point. Two names for one idea is exactly the
     thing being deleted."""
+    scanned = sorted(SRC.rglob("*.py"))
+    # An empty corpus satisfies `hits == []` and reports success: a file move
+    # or an SRC that stops resolving retires this guard silently. Same idiom as
+    # test_cue_contract.py's `assert lits`. Asserted on the CORPUS, never on
+    # `hits` -- a guard that required violations would be the guard inverted.
+    assert scanned, "no python files under {0} -- the scan is broken".format(SRC)
     hits = [
         "{0}:{1}".format(p.relative_to(SRC), i)
-        for p in SRC.rglob("*.py")
+        for p in scanned
         for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
         if "mute_exempt" in line or "pause_exempt" in line
     ]
@@ -59,6 +65,11 @@ def test_every_hotkeyd_message_type_is_a_declared_gesture():
     them are operator gestures; they need a home in the registry too."""
     literals = set(re.findall(r'\\?"type\\?"\s*:\s*\\?"([a-z_]+)\\?"',
                               SWIFT.read_text(encoding="utf-8")))
+    # The corpus, not the violations: `undeclared == set()` is satisfied by a
+    # regex that stopped matching or a renamed hotkeyd source, and the guard
+    # would report success having read nothing.
+    assert literals, (
+        "no message types parsed out of {0} -- the scan is broken".format(SWIFT))
     declared = {m["type"] for m in ACTION_MESSAGES.values()}
     declared |= {m["message"]["type"] for m in CONTROL_GESTURES.values()}
     undeclared = literals - declared - MACHINERY
