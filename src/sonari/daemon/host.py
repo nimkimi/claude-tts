@@ -698,12 +698,18 @@ class SpeechDaemon:
         # a cut is a hotkey press — presence twice over. The one item that skips
         # note_spoken is a stop-requeued one, which is that same hotkey press.
         self._keepalive_last_spoke = self._last_drain
-        if completed:
+        if completed and item.audio_path is None:
             # I3: a COMPLETED utterance is live proof the audio path works again —
             # clear any previously recorded failure so doctor's speech-path row
             # doesn't keep reporting a since-fixed problem. Gated on `completed`
             # (not just "reached here"): an ordinary requeue/barge-in is not
             # evidence of anything and must not paper over a real failure.
+            # C1: gated on the ROUTE too. speaker.speak() dispatches on
+            # audio_path — an item carrying one is played by afplay, one without
+            # by say — so a completed spearcon proves only that afplay works.
+            # Every jump plays a cached spearcon, so without this half of the
+            # gate an ordinary press erases the record of a say-only outage and
+            # doctor goes back to calling the speech path healthy.
             _clear_speak_failure_memo()
         with self._lock:
             self._state._current_item = None

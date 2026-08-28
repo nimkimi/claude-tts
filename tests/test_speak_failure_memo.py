@@ -105,6 +105,36 @@ def test_an_incomplete_utterance_does_not_clear_the_memo(monkeypatch):
     assert paths.SPEAK_FAIL_MEMO_PATH.exists(), "an incomplete utterance must not clear the memo"
 
 
+def test_a_completed_spearcon_does_not_clear_a_say_path_failure_memo():
+    """C1: "completed" is only ever proof of the path the item actually took.
+
+    speaker.py:speak() routes on audio_path -- an item that carries one is
+    played by AFPLAY, and one that does not is played by SAY. They are separate
+    binaries over separate audio routes, so a completed spearcon proves afplay
+    works and says NOTHING about say. A say-only outage is precisely the shape
+    the memo exists to record (an eyes-free user hears nothing and has only
+    `sonari doctor` to ask), and every jump between sessions plays a cached
+    spearcon -- the owner has ~70 of them cached. Ungated on the route, one
+    ordinary jump wipes the memo and doctor's speech-path row goes back to
+    reporting the daemon healthy straight through a total speech outage.
+    """
+    import sonari.daemon.host as daemon_host
+    daemon, queue, speaker, *_ = make_daemon(foreground="fg")
+    daemon_host._mark_speak_failure()
+    assert paths.SPEAK_FAIL_MEMO_PATH.exists(), "setup: a failure should be recorded"
+
+    speaker.complete = True
+    daemon._enqueue("fg", "prose", "backend", False,
+                    audio_path="/cached/spearcons/backend.wav")
+    daemon._speak_loop_once()
+
+    assert speaker.audio_paths == ["/cached/spearcons/backend.wav"], (
+        "setup: the item must actually have taken the afplay route")
+    assert paths.SPEAK_FAIL_MEMO_PATH.exists(), (
+        "a completed spearcon plays through afplay -- it is no evidence the say "
+        "path recovered, so it must not clear the memo")
+
+
 # ---------------------------------------------------------------------------
 # (f) memo I/O is total — an unwritable SONARI_DIR must never raise
 # ---------------------------------------------------------------------------
