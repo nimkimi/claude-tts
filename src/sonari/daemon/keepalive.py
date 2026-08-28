@@ -195,11 +195,22 @@ class KeepAliveManager:
         SILENCE_S - OVERLAP_S, so no live player may ever be older than
         SILENCE_S + OVERLAP_S. Older means the chain stalled or a player was
         orphaned -- a state status() reports as "running".
+
+        LIVE is load-bearing and the filter is not defensive tidying. Exited
+        players are pruned only by _observe_deaths_locked, whose only caller is
+        tick(), whose only caller sits behind a BLOCKING speaker.speak() -- so
+        pruning halts for the whole duration of every utterance and _players
+        keeps its corpses. Reducing over those made a HEALTHY overlap chain read
+        ~305s+ and turned the doctor row RED, recommending a teardown of the
+        working chain, precisely while he was listening. Mirrors _live_locked().
+        An all-dead list holds no device open, so it reads None like an empty one.
         """
         with self._lock:
-            if not self._players:
+            spawns = [spawned for proc, spawned in self._players
+                      if proc.poll() is None]
+            if not spawns:
                 return None
-            return self._clock() - min(spawned for _, spawned in self._players)
+            return self._clock() - min(spawns)
 
     # ---- players --------------------------------------------------------
 
