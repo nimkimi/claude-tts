@@ -50,3 +50,24 @@ def test_unreachable_daemon_row_reads_as_no_state_not_a_python_error():
             rows = cli.doctor.doctor()
     assert [r for r in rows if r[0] == "keepalive"] == [
         ("keepalive", False, "daemon reported no keepalive state")]
+
+
+def test_keepalive_fails_on_a_player_older_than_305s():
+    """Each player plays 300s and its successor is armed at 295s, so no live
+    player may ever be older than 305s. Older means the chain stalled -- a
+    state status() reports as "running"."""
+    from sonari.cli.doctor import _keepalive_row
+
+    name, ok, detail = _keepalive_row(
+        {"keepalive": "running", "keepalive_oldest_player_age_s": 900.0})
+    assert (name, ok) == ("keepalive", False)
+    assert "overlap chain stalled" in detail
+    assert "sonari keepalive off" in detail
+
+
+def test_keepalive_stays_green_inside_the_overlap_invariant():
+    from sonari.cli.doctor import _keepalive_row
+
+    assert _keepalive_row(
+        {"keepalive": "running",
+         "keepalive_oldest_player_age_s": 120.0})[1] is True

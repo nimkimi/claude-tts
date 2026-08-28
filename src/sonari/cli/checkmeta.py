@@ -20,6 +20,8 @@ _SPOKEN = {
     "hotkeyd": "hotkeyd",
     "fault log": "fault log",
     "reachability": "reachability",
+    "voice": "voice",
+    "keepalive": "keepalive",
 }
 
 # Checks whose failure is advisory: printed, but never spoken and never

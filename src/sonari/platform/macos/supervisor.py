@@ -327,7 +327,7 @@ class MacSupervisorBackend:
     def doctor_rows(self) -> list:
         """Return macOS-specific [(name, ok, detail), ...] diagnostic rows.
 
-        Covers: say, afplay, enhanced voice, swiftc, hotkeyd binary,
+        Covers: say, afplay, swiftc, hotkeyd binary,
         hotkeyd resolved keymap, speechd LaunchAgent loaded,
         hotkeyd, sonari launcher.
         """
@@ -345,15 +345,6 @@ class MacSupervisorBackend:
         afplay = shutil.which("afplay")
         rows.append(("afplay", afplay is not None,
                      afplay or "not found (macOS 'afplay' required)"))
-
-        # enhanced voice
-        try:
-            from sonari.platform.macos.tts import MacTtsBackend
-            voice = MacTtsBackend().best_voice()
-            rows.append(("enhanced voice", bool(voice),
-                         voice or "none detected; will fall back to Samantha"))
-        except Exception as exc:  # noqa: BLE001 - doctor must never raise
-            rows.append(("enhanced voice", False, "error: {0}".format(exc)))
 
         # swiftc
         swiftc = shutil.which("swiftc")

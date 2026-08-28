@@ -15,6 +15,13 @@ from sonari.protocol import MsgType, PROTOCOL_VERSION
 # rather than pinning the literal (tests/test_uninstall_teardown.py's style).
 SPEAK_FAIL_FRESH_S = 24 * 3600.0
 
+WEDGE_S = 120.0        # lifted from doctor()'s locals, unchanged; the
+                       # claimed-but-stalled branch below needs it at module
+                       # scope now that the branch itself lives out here
+WEDGE_HOLD_S = 300.0   # nothing claimed, yet live streams are holding
+
+KEEPALIVE_MAX_PLAYER_AGE_S = 305.0   # SILENCE_S + OVERLAP_S
+
 
 def should_speak(args) -> bool:
     """Speak when a human is at a terminal; stay silent when piped or scripted.
@@ -37,9 +44,16 @@ def should_speak(args) -> bool:
 def _keepalive_row(st):
     """Render STATUS's 'keepalive' field as a doctor row. idle/hold/disabled
     are healthy-by-policy (not errors — the manager is doing its job); only
-    'degraded' (spawns kept dying) or a missing field (old daemon / STATUS
-    unreachable) fails the row."""
+    'degraded' (spawns kept dying), a stalled overlap chain, or a missing
+    field (old daemon / STATUS unreachable) fails the row."""
     state = st.get("keepalive")
+    age = st.get("keepalive_oldest_player_age_s")
+    if age is not None and age > KEEPALIVE_MAX_PLAYER_AGE_S:
+        return ("keepalive", False,
+                "the same silent player has been holding the audio device for "
+                "{0} minutes - the overlap chain stalled and Bluetooth "
+                "clipping will come back. Run: sonari keepalive off, then "
+                "sonari keepalive on.".format(int(age // 60)))
     if state in ("running", "idle", "hold", "disabled"):
         return ("keepalive", True, state)
     if state == "degraded":
@@ -47,6 +61,94 @@ def _keepalive_row(st):
                 "degraded: silent-stream spawns kept dying; Bluetooth clipping "
                 "is back — run 'sonari keepalive off' then 'on' to retry")
     return ("keepalive", False, "daemon reported no keepalive state")
+
+
+def _speech_path_row(st, memo_row):
+    """Render the claimed/drained STATUS facts as the speech-path row.
+
+    Two independent wedge shapes share this row: nothing CLAIMED while live
+    streams hold queued items and nothing drains (the assembler wedge — an
+    unterminated streamed block leaves the keep-going gate shut and every
+    other session silenced indefinitely), and something CLAIMED that never
+    drains (the existing claimed-and-stalled shape). memo_row — a recorded
+    SpeakFailure, see doctor()'s own comment where it is built — wins over
+    both, since it names a confirmed failure rather than an inferred one.
+    """
+    if memo_row is not None:
+        return memo_row
+    age = st.get("last_drain_age_s")
+    claimed = bool(st.get("current_item"))
+    if not claimed:
+        # Stop-all and quiet-hold are excluded by voice_state; per-session
+        # mutes by `not stopped`; dead-session backlog by `live`. A genuinely
+        # idle daemon has no queued items and stays green below.
+        held = [s for s in st.get("sessions", [])
+                if s.get("queue_len") and not s.get("stopped")
+                and s.get("live")]
+        n = sum(s["queue_len"] for s in held)
+        if (held and st.get("voice_state") == "flowing"
+                and (age is None or age > WEDGE_HOLD_S)):
+            # Today this renders GREEN. It is the state the assembler wedge
+            # produces: has_pending() stays true forever, the keep-going gate
+            # never opens, and every other session is silenced indefinitely.
+            # `age is None` is the never-drained-since-boot wedge: the loop
+            # jammed on its FIRST item, so there is no measured age to name.
+            # Rendering it as "0 minutes" would say "nothing has been spoken
+            # for 0 minutes - the speak loop is stuck" in one breath.
+            since = ("since the daemon started" if age is None
+                     else "for {0} minutes".format(int(age // 60)))
+            return ("speech path", False,
+                    "{0} items are waiting in {1} live sessions and nothing "
+                    "has been spoken {2} - the speak loop is "
+                    "stuck, not idle. Restart it: sonari install.".format(
+                        n, len(held), since))
+        return ("speech path", True, "idle (nothing claimed by the speak loop)")
+    if age is not None and age > WEDGE_S:
+        # I2: `age` is last_drain_age_s — time since anything last DRAINED,
+        # NOT how long the current item has been claimed. STATUS carries no
+        # claim timestamp, so name what was measured: after a quiet spell the
+        # drain age is already large the instant the next item is claimed.
+        return ("speech path", False,
+                f"wedged: nothing has drained for {age:.0f}s "
+                f"while an utterance is claimed")
+    return ("speech path", True, "draining normally")
+
+
+def _voice_row(st, list_voices=None):
+    """The configured voice must actually be installed.
+
+    The row this replaces reported ("enhanced voice", bool(best_voice()), ...)
+    and best_voice() hard-codes "Samantha" as its last resort on every path --
+    so it was green under every condition, and reported a voice the owner does
+    not use. Meanwhile a config voice that is gone makes `say` exit non-zero on
+    EVERY utterance: total silence, green doctor.
+    """
+    voice = st.get("voice")
+    if voice is None:
+        from sonari.config import load_config
+        try:
+            voice = load_config().get("voice")
+        except Exception:
+            voice = None
+    if not voice:
+        return ("voice", True, "system default")
+    if list_voices is None:
+        from sonari.platform import get_platform
+        list_voices = get_platform().tts.list_voices
+    try:
+        installed = list(list_voices() or [])
+    except Exception:
+        installed = []
+    if not installed:
+        # Fail open. A doctor that cries wolf about a working voice is worse
+        # than one that stays quiet.
+        return ("voice", True, "voice listing unavailable")
+    if voice in installed:
+        return ("voice", True, voice)
+    return ("voice", False,
+            "the configured voice, {0}, is not installed - every utterance "
+            "will fail. Run: sonari voice, to hear what is installed, then: "
+            "sonari voice {1}.".format(voice, "<a name>"))
 
 
 def doctor() -> list:
@@ -100,7 +202,6 @@ def doctor() -> list:
     # Speech-path liveness. PING is answered by the socket thread, so a wedged
     # speak loop still reports "reachable" — this row is the one that can tell
     # a wedge from silence. STATUS already carries both facts we need.
-    WEDGE_S = 120.0
     # I3: a broken audio device (say/afplay exits nonzero, e.g. AudioQueueStart
     # failures) plays NOTHING and drains promptly doing it — STATUS alone can't
     # see it (last_drain_age_s advances on every drain, completed or not; a
@@ -143,23 +244,7 @@ def doctor() -> list:
         from sonari import client
         st = client.send({"v": PROTOCOL_VERSION, "type": MsgType.STATUS},
                          expect_reply=True) or {}
-        age = st.get("last_drain_age_s")
-        claimed = bool(st.get("current_item"))
-        if memo_row is not None:
-            results.append(memo_row)
-        elif not claimed:
-            results.append(("speech path", True,
-                            "idle (nothing claimed by the speak loop)"))
-        elif age is not None and age > WEDGE_S:
-            # I2: `age` is last_drain_age_s — time since anything last DRAINED,
-            # NOT how long the current item has been claimed. STATUS carries no
-            # claim timestamp, so name what was measured: after a quiet spell the
-            # drain age is already large the instant the next item is claimed.
-            results.append(("speech path", False,
-                            f"wedged: nothing has drained for {age:.0f}s "
-                            f"while an utterance is claimed"))
-        else:
-            results.append(("speech path", True, "draining normally"))
+        results.append(_speech_path_row(st, memo_row))
     except Exception as exc:  # noqa: BLE001 - doctor must never raise
         if memo_row is not None:
             results.append(memo_row)
@@ -168,12 +253,19 @@ def doctor() -> list:
                             f"cannot read daemon status: {exc}"))
 
     # Bluetooth keep-alive state. idle/hold/disabled are healthy-by-policy;
-    # only 'degraded' (the silent-stream spawn giving up) or a missing field
-    # (old daemon / STATUS unreachable) fails the row.
+    # only 'degraded' (the silent-stream spawn giving up), a stalled overlap
+    # chain, or a missing field (old daemon / STATUS unreachable) fails the row.
     try:
         results.append(_keepalive_row(st))
     except Exception as exc:  # noqa: BLE001 - doctor must never raise
         results.append(("keepalive", False, f"error: {exc}"))
+
+    # The configured voice must actually be installed, or every utterance
+    # fails silently (say exits non-zero; STATUS still looks "draining").
+    try:
+        results.append(_voice_row(st))
+    except Exception as exc:  # noqa: BLE001 - doctor must never raise
+        results.append(("voice", False, f"error: {exc}"))
 
     # Restore health (P17): you can lose the whole backlog to the crash/upgrade
     # path and still get an all-green doctor today.

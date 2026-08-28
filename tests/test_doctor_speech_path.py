@@ -144,3 +144,57 @@ def test_no_memo_is_byte_identical_to_todays_row(tmp_path):
                             "last_drain_age_s": 86400.0})["speech path"]
     assert ok is True
     assert detail == "idle (nothing claimed by the speak loop)"
+
+
+def test_speech_path_fails_when_live_streams_hold_and_nothing_drains():
+    """Today this exact state renders GREEN: 'idle (nothing claimed by the
+    speak loop)'. It is the state the confirmed assembler wedge produces -- an
+    unterminated streamed block leaves the keep-going gate shut and every other
+    session silenced indefinitely. Doctor calls that healthy."""
+    from sonari.cli.doctor import _speech_path_row
+
+    st = {
+        "current_item": False,
+        "voice_state": "flowing",
+        "last_drain_age_s": 900.0,
+        "sessions": [
+            {"session": "A", "queue_len": 3, "stopped": False, "live": True},
+        ],
+    }
+    name, ok, detail = _speech_path_row(st, memo_row=None)
+    assert (name, ok) == ("speech path", False)
+    assert "stuck, not idle" in detail
+    assert "sonari install" in detail
+
+
+def test_speech_path_stays_green_for_a_deliberate_mute():
+    from sonari.cli.doctor import _speech_path_row
+
+    st = {"current_item": False, "voice_state": "flowing",
+          "last_drain_age_s": 900.0,
+          "sessions": [{"session": "A", "queue_len": 3, "stopped": True,
+                        "live": True}]}
+    assert _speech_path_row(st, memo_row=None)[1] is True
+
+
+def test_speech_path_stays_green_for_a_dead_session_backlog():
+    from sonari.cli.doctor import _speech_path_row
+
+    st = {"current_item": False, "voice_state": "flowing",
+          "last_drain_age_s": 900.0,
+          "sessions": [{"session": "A", "queue_len": 3, "stopped": False,
+                        "live": False}]}
+    assert _speech_path_row(st, memo_row=None)[1] is True
+
+
+def test_the_voice_row_is_wired_into_doctor():
+    """Pins the WIRE-IN, not the logic: every other _voice_row test calls the
+    function directly, so a forgotten `results.append(_voice_row(st))` leaves a
+    correct, fully tested, completely dead function -- and a doctor with FEWER
+    rows than before, because the enhanced-voice row is deleted in the same
+    step. An empty voice short-circuits to the system-default arm before any
+    platform touch, so this stays hermetic with no new mocks."""
+    rows = _rows({"ok": True, "current_item": False,
+                  "last_drain_age_s": 1.0, "voice": ""})
+    assert "voice" in rows
+    assert rows["voice"] == (True, "system default")
