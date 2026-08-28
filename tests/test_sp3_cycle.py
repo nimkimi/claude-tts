@@ -19,6 +19,12 @@ def test_ctrl_s_starts_navigated_muted_workspace():
     daemon.handle_message(_msg(MsgType.CHOOSER_STEP, "", direction="next"))
     daemon.handle_message(_msg(MsgType.CHOOSER_COMMIT, ""))   # workspace=A(muted), keep-go
     daemon._speak_loop_once()                       # tick 1 (M2): landing cue from muted A
+    # Pin the landing cue itself. Without this the test discriminates only via an
+    # unrelated side effect -- a revert of M2 fails it at tick 2, by overshooting onto
+    # B's teaching hint -- so it would silently stop detecting the revert if maybe_hint
+    # ever became rate-limited or one-shot. Task 10 changed maybe_hint, which is exactly
+    # that route. Measured at HEAD: tick 1 speaks the muted workspace's folder cue alone.
+    assert speaker.spoken == ["A."], "the landing cue from the muted workspace"
     daemon._speak_loop_once()                       # tick 2: voice keep-goes to C
     assert sessions.workspace() == "A" and sessions.speaker() == "C"
     daemon.handle_message(_msg(MsgType.STOP_SESSION, ""))   # ⌃⌘S: workspace A is muted -> START A
