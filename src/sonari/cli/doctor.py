@@ -79,15 +79,30 @@ def _speech_path_row(st, memo_row):
     age = st.get("last_drain_age_s")
     claimed = bool(st.get("current_item"))
     if not claimed:
-        # Stop-all and quiet-hold are excluded by voice_state; per-session
-        # mutes by `not stopped`; dead-session backlog by `live`. A genuinely
-        # idle daemon has no queued items and stays green below.
+        # Stop-all and quiet-hold are excluded by voice_state; a STARVED
+        # session's own backlog by `not stopped`; dead-session backlog by
+        # `live`. A genuinely idle daemon has no queued items and stays green
+        # below.
+        #
+        # `voice_state` does NOT exclude every deliberate mute, and believing
+        # it did was this row's one shipped defect. ⌃⌘D and crossed nav are
+        # ratified "deliberate re-engage" lifts: they set voice_state =
+        # "flowing" and then focus() the voice ONTO a stopped stream, so the
+        # loop holds every tick and the starved sessions — which are not
+        # themselves stopped — all count. That is a mute, not a wedge, and
+        # `speaker_held` is the only field that tells the two apart.
         held = [s for s in st.get("sessions", [])
                 if s.get("queue_len") and not s.get("stopped")
                 and s.get("live")]
         n = sum(s["queue_len"] for s in held)
         if (held and st.get("voice_state") == "flowing"
                 and (age is None or age > WEDGE_HOLD_S)):
+            if st.get("speaker_held"):
+                # Absent on a pre-0.11.1 daemon, which reads falsy and keeps
+                # the old behaviour rather than inventing a green.
+                return ("speech path", True,
+                        "held (the voice is on a muted session - un-mute it "
+                        "to resume)")
             # Today this renders GREEN. It is the state the assembler wedge
             # produces: has_pending() stays true forever, the keep-going gate
             # never opens, and every other session is silenced indefinitely.

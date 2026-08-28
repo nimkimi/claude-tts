@@ -4,7 +4,14 @@ import time
 from unittest import mock
 
 from sonari import cli, paths
+from sonari.protocol import MsgType
 from tests._fakeplatform import fake_platform, FakeSupervisor, FakeHotkey
+from tests.daemon_helpers import make_daemon
+
+
+def _msg(t, session, **kw):
+    from sonari.protocol import PROTOCOL_VERSION
+    return {"v": PROTOCOL_VERSION, "type": t, "session": session, **kw}
 
 
 def _rows(status):
@@ -289,3 +296,108 @@ def test_the_voice_row_is_wired_into_doctor():
                   "last_drain_age_s": 1.0, "voice": ""})
     assert "voice" in rows
     assert rows["voice"] == (True, "system default")
+
+
+# ---------------------------------------------------------------------------
+# The row's own false-positive analysis was WRONG about voice_state. Three
+# ratified "deliberate re-engage" lifts (navigation.py's crossed nav,
+# playback.py's ctrl-cmd-D, both crossed and within-session) set
+# voice_state="flowing" and then park the voice ON a stopped stream via
+# sessions.focus(). The enum says flowing; the loop holds every tick; every
+# other live session starves. Past WEDGE_HOLD_S the row fired a confident RED
+# and named a DESTRUCTIVE remedy ("Restart it: sonari install") after two of
+# the branch's own acceptance rows. The producers are ratified
+# (tests/test_sp3_lifts.py::test_jump_decision_lifts_hold pins the R5 lift),
+# so the fix is here: STATUS carries `speaker_held` and the row honours it.
+# ---------------------------------------------------------------------------
+
+
+def test_speech_path_stays_green_when_the_speakers_own_stream_is_held():
+    """The consumer half: `flowing` plus a held SPEAKER is a mute, not a wedge.
+
+    Byte-identical to test_speech_path_fails_when_live_streams_hold_and_nothing
+    _drains except for `speaker_held` -- that one field is the whole difference
+    between "he muted the session the voice is on" and "the speak loop died"."""
+    from sonari.cli.doctor import _speech_path_row
+
+    st = {
+        "current_item": False,
+        "voice_state": "flowing",
+        "last_drain_age_s": 900.0,
+        "speaker_held": True,
+        "sessions": [
+            {"session": "A", "queue_len": 3, "stopped": False, "live": True},
+        ],
+    }
+    name, ok, detail = _speech_path_row(st, memo_row=None)
+    assert (name, ok) == ("speech path", True), detail
+    # Pin the HELD arm, not merely a green verdict: the idle arm two lines
+    # below is also green, so `ok is True` alone would pass on a row that
+    # never consulted speaker_held at all.
+    assert "held" in detail, detail
+    assert "sonari install" not in detail, detail
+
+
+def test_speech_path_still_reds_when_the_speaker_is_not_held():
+    """The genuine assembler wedge keeps its RED. There the speak loop is stuck
+    on a stream that is NOT stopped, so speaker_held is False and every clause
+    of the wedge condition still holds. Without this the fix could be `return
+    green` and the row would be worth nothing."""
+    from sonari.cli.doctor import _speech_path_row
+
+    st = {
+        "current_item": False,
+        "voice_state": "flowing",
+        "last_drain_age_s": 900.0,
+        "speaker_held": False,
+        "sessions": [
+            {"session": "A", "queue_len": 3, "stopped": False, "live": True},
+        ],
+    }
+    name, ok, detail = _speech_path_row(st, memo_row=None)
+    assert (name, ok) == ("speech path", False), detail
+    assert "stuck, not idle" in detail, detail
+
+
+def test_the_doctor_is_green_after_ctrl_cmd_D_re_engages_onto_a_muted_speaker():
+    """End to end, through the real daemon and the real STATUS reply.
+
+    ctrl-cmd-S on A, then ctrl-cmd-D on A: the physical state is identical
+    across those two presses -- same speaker, same stopped flag, same starved
+    backlog on B -- and only the enum moves (quiet-hold -> flowing). Before
+    `speaker_held` the first press rendered GREEN and the second RED, which is
+    the proof the row was reporting the enum rather than the daemon's health.
+
+    last_drain_age_s is forced past WEDGE_HOLD_S because the wedge shape is
+    defined by elapsed time and the test must not sleep for five minutes.
+    """
+    from sonari.cli.doctor import _speech_path_row
+
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.register("A", cwd="/x/alpha")
+    sessions.register("B", cwd="/x/bravo")
+    sessions.set_speaker("A")
+    daemon._enqueue("A", "permission", "A question needs your answer.", True)
+    daemon._enqueue("B", "prose", "bravo keeps talking", False)
+
+    daemon.handle_message(_msg(MsgType.STOP_SESSION, "A"))
+    for _ in range(20):
+        daemon._speak_loop_once()
+    st = daemon.handle_message(_msg(MsgType.STATUS, "A"))
+    assert st["voice_state"] == "quiet-hold", st
+    assert _speech_path_row({**st, "last_drain_age_s": 400.0},
+                            memo_row=None)[1] is True
+
+    daemon.handle_message(_msg(MsgType.JUMP_DECISION, "A"))
+    for _ in range(20):
+        daemon._speak_loop_once()
+    st = daemon.handle_message(_msg(MsgType.STATUS, "A"))
+    # The state that used to false-RED: the lift landed, the speaker is muted.
+    assert st["voice_state"] == "flowing", st
+    assert sessions.speaker() == "A", sessions.speaker()
+    assert daemon._streams["A"].stopped is True, st["sessions"]
+    assert st["speaker_held"] is True, st
+    name, ok, detail = _speech_path_row({**st, "last_drain_age_s": 400.0},
+                                        memo_row=None)
+    assert (name, ok) == ("speech path", True), detail
+    assert "sonari install" not in detail, detail

@@ -739,10 +739,11 @@ day one.
 
 ### 6.1 `speech path` — the unclaimed wedge (extends the existing row)
 
-- **Facts read:** `current_item` (False), `voice_state` (`"flowing"`),
+- **Facts read:** `current_item` (False), `voice_state` (`"flowing"`), `speaker_held`,
   `sum(s.queue_len for s in sessions if not s.stopped and s.live)`, `last_drain_age_s`.
-- **Threshold:** `WEDGE_HOLD_S = 300.0`. Red when nothing is claimed, the voice is `flowing`, at
-  least one live non-stopped stream holds items, and `last_drain_age_s` is `None` or `> 300`.
+- **Threshold:** `WEDGE_HOLD_S = 300.0`. Red when nothing is claimed, the voice is `flowing`, the
+  voice is **not** parked on a muted stream (`not speaker_held`), at least one live non-stopped
+  stream holds items, and `last_drain_age_s` is `None` or `> 300`.
 - **Why it exists:** today this exact state renders **green** — `("speech path", True, "idle
   (nothing claimed by the speak loop)")`. It is the state the confirmed assembler wedge produces
   (`.claude/HANDOFF.md`: an unterminated streamed block leaves `has_pending()` true forever,
@@ -752,9 +753,29 @@ day one.
   spoken for {m} minutes — the speak loop is stuck, not idle. Restart it: sonari install.`
 - **He does:** runs `sonari install` (the established restart action, already the action in four
   other doctor sentences; there is no `sonari restart` verb).
-- **False-positive analysis:** stop-all and quiet-hold are excluded by `voice_state`; per-session
-  mutes by `not s.stopped`; dead-session backlog by `s.live`. A genuinely idle daemon has no queued
-  items and stays green.
+- **False-positive analysis:** stop-all and quiet-hold are excluded by `voice_state`; a starved
+  session's own backlog by `not s.stopped`; dead-session backlog by `s.live`. A genuinely idle
+  daemon has no queued items and stays green.
+- **CORRECTED after this row shipped.** The first clause above used to read "stop-all and
+  quiet-hold are excluded by `voice_state`; **per-session mutes** by `not s.stopped`", and the
+  second half of that was **false**. `not s.stopped` excludes only the *muted* session's own
+  backlog — never the mute itself. Three ratified "deliberate re-engage" lifts
+  (`navigation.py`'s crossed nav, `playback.py`'s ⌃⌘D crossed and within-session) set
+  `voice_state = "flowing"` and then `sessions.focus()` the voice **onto a stopped stream**: the
+  loop holds every tick, every *other* live session starves with `stopped: False`, and the enum
+  still reads `flowing`. Past 300 s the row fired a spoken RED — *"Sonari is unhealthy. 1 check
+  failed: speech path."* — and named a **destructive** remedy (`sonari install` restarts a healthy
+  daemon) immediately after §5 acceptance rows 1 and 2. Proof it was a verdict about the enum and
+  not about health: after ⌃⌘S alone the identical physical state rendered green, and one ⌃⌘D
+  flipped it red with nothing else changed. **The producers are ratified**
+  (`tests/test_sp3_lifts.py::test_jump_decision_lifts_hold` pins the R5 jump-class lift), so the
+  repair is consumer-side: STATUS gained `speaker_held` (the voice owner's own stream is
+  `stopped` — not derivable from `sessions`, which names no speaker, nor from `foreground`, which
+  is the workspace), and the row returns green `held (the voice is on a muted session - un-mute it
+  to resume)` instead of the wedge sentence. The assembler wedge stays red: there the speaker is
+  not stopped. Receipts: `tests/test_doctor_speech_path.py`'s three `speaker_held` tests (one
+  drives the ⌃⌘S-then-⌃⌘D sequence through a real daemon) and
+  `tests/test_status_diagnostics.py`'s three producer tests.
 
 ### 6.2 `keepalive` — the stalled overlap chain (extends the existing row)
 

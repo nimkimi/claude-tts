@@ -320,6 +320,10 @@ def on_cycle_verbosity(ctx, msg):
 def on_status(ctx, msg):
     host = ctx.host
     last_drain = host._last_drain
+    # The VOICE owner's own stream, which is not `foreground` and is not
+    # derivable from the "sessions" list below — that list carries every
+    # stream's `stopped` but names no speaker. See "speaker_held".
+    speaker_stream = host._streams.get(host.sessions.speaker())
     return {
         # Original 6 keys — kept verbatim for backward-compat.
         "verbosity": host.config.get("verbosity"),
@@ -353,6 +357,17 @@ def on_status(ctx, msg):
         # first-class state surfaced here (per-stream st.stopped stays in "sessions").
         "current_item": host._state._current_item is not None,
         "voice_state": host.voice_state,
+        # True when the voice is PARKED ON a muted stream. `voice_state` alone
+        # cannot say this: three ratified "deliberate re-engage" lifts
+        # (navigation.py's crossed nav, playback.py's ⌃⌘D crossed and
+        # within-session) set voice_state = "flowing" and then focus() the
+        # voice onto a stopped stream, so the loop holds every tick while the
+        # enum reads flowing. Without this field the doctor's speech-path row
+        # reads that ratified state as a dead speak loop and tells him to
+        # restart a healthy daemon. Not inferable from "sessions" above — that
+        # list carries every stream's `stopped` but never says which one the
+        # voice is on, and "foreground" is the WORKSPACE, not the speaker.
+        "speaker_held": speaker_stream is not None and speaker_stream.stopped,
         # §7 witness: age of the last hotkeyd WITNESS_PING; None before the
         # first (the daemon-side alarm arms only after a first ping).
         "witness_ping_age_s": (

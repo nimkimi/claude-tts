@@ -120,3 +120,48 @@ def test_live_tracks_liveness_itself_not_a_correlate():
     st = daemon.handle_message(_msg(MsgType.STATUS, "A"))
     live = {s["session"]: s["live"] for s in st["sessions"]}
     assert live == {"A": True, "B": True, "P": False}, st["sessions"]
+
+
+# ---------------------------------------------------------------------------
+# `speaker_held`: the field the doctor's speech-path row needs to tell a
+# ratified re-engage-onto-a-mute from a dead speak loop. See
+# tests/test_doctor_speech_path.py for the consumer half.
+# ---------------------------------------------------------------------------
+
+
+def test_speaker_held_is_true_when_the_voice_is_parked_on_a_muted_stream():
+    daemon, _, _, sessions, _ = make_daemon(foreground="A")
+    sessions.register("A", cwd="/x/alpha")
+    sessions.set_speaker("A")
+    daemon._stream("A").stopped = True
+    st = daemon.handle_message(_msg(MsgType.STATUS, "A"))
+    assert st["speaker_held"] is True, st
+
+
+def test_speaker_held_reads_the_speaker_not_any_stopped_session():
+    """The discriminator. B is muted and A — the voice owner — is not, so a
+    producer written as "does any session read stopped" agrees with a correct
+    one on the fixture above and only diverges here. It matters because that
+    weaker producer would blind the wedge row on a genuinely stuck loop
+    whenever one unrelated session happened to be muted, which is a common
+    state for him."""
+    daemon, _, _, sessions, _ = make_daemon(foreground="A")
+    sessions.register("A", cwd="/x/alpha")
+    sessions.register("B", cwd="/x/bravo")
+    sessions.set_speaker("A")
+    daemon._stream("A")
+    daemon._stream("B").stopped = True
+    st = daemon.handle_message(_msg(MsgType.STATUS, "A"))
+    assert st["speaker_held"] is False, st
+
+
+def test_speaker_held_is_false_with_no_speaker_at_all():
+    """Fork-2 releases the voice (set_speaker(None)) rather than parking it, and
+    the assembler wedge itself can be speakerless. Both must stay detectable, so
+    "no speaker" is never "held"."""
+    daemon, _, _, sessions, _ = make_daemon(foreground=None)
+    sessions.register("A", cwd="/x/alpha")
+    daemon._stream("A").stopped = True
+    assert sessions.speaker() is None, sessions.speaker()
+    st = daemon.handle_message(_msg(MsgType.STATUS, "A"))
+    assert st["speaker_held"] is False, st
