@@ -8,7 +8,7 @@ Spec: docs/superpowers/specs/2026-08-28-receipts-design.md §3.2.
 """
 import pytest
 
-from daemon_helpers import FakeSpeaker, make_daemon
+from tests.daemon_helpers import FakeSpeaker, make_daemon
 
 
 LEGACY_SIX = {
@@ -114,3 +114,40 @@ def test_the_drain_is_wired_as_an_autouse_fixture():
     # _pytestfixturefunction to _fixture_function_marker; the brief predates
     # that rename (repo pins pytest>=7, installed venv is 9.0.3).
     assert fixture._fixture_function_marker.autouse is True
+
+
+import pathlib
+import re
+
+
+def test_no_test_file_reaches_daemon_helpers_by_the_bare_module_name():
+    """One module object, or the receipt is armed for nobody.
+
+    `tests/` and the repo root are BOTH on sys.path and `tests/` has no
+    __init__.py, so `daemon_helpers` and `tests.daemon_helpers` are two distinct
+    module objects under PEP 420 -- each with its own _LIVE_FAKE_SPEAKERS list.
+    conftest's teardown drains whichever one it imported, and every FakeSpeaker
+    built through the other is invisible to it. This is not a style rule: it is
+    the difference between a dead-asset detector and a decoration.
+    """
+    here = pathlib.Path(__file__).resolve()
+    root = here.parent
+    bare = re.compile(r"^\s*(from daemon_helpers import|import daemon_helpers)", re.M)
+    hits = [
+        str(f.relative_to(root))
+        for f in sorted(root.rglob("*.py"))
+        if f.resolve() != here and bare.search(f.read_text(encoding="utf-8"))
+    ]
+    assert hits == [], (
+        "these reach daemon_helpers by the bare name, splitting the registry "
+        "the silent-cue drain reads: {0}".format(hits)
+    )
+
+
+def test_the_drain_reads_the_same_list_make_daemon_writes():
+    """The positive half: conftest drains `tests.daemon_helpers`, so that is the
+    module whose list a freshly built daemon must appear in."""
+    from tests import daemon_helpers as canonical
+    before = len(canonical._LIVE_FAKE_SPEAKERS)
+    make_daemon(foreground="A")
+    assert len(canonical._LIVE_FAKE_SPEAKERS) == before + 1

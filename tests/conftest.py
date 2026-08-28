@@ -245,7 +245,7 @@ def _no_silent_cues(request):
     it declares @pytest.mark.expects_silent_cue with the reason in its
     docstring. The labelled exception, not the unlabelled default.
     """
-    import daemon_helpers
+    from tests import daemon_helpers
 
     daemon_helpers._LIVE_FAKE_SPEAKERS.clear()
     yield
