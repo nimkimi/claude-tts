@@ -388,7 +388,7 @@ class _ReentrantSpeaker:
         self.log.append(text)
         if not self._fired:
             self._fired = True
-            # STOP_SESSION sets stream.stopped and enqueues "Stopped." (pause_exempt);
+            # STOP_SESSION sets stream.stopped and enqueues "Stopped." (control_cue);
             # FLUSH then clears the queue (including "Stopped.") but leaves stopped=True.
             self.daemon.handle_message(_msg(MsgType.STOP_SESSION, "fg"))
             self.daemon.handle_message(_msg(MsgType.FLUSH, "fg"))

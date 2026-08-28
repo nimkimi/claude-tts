@@ -61,7 +61,7 @@ def _arm(daemon, held: bool) -> None:
     """Queue one item the loop will claim, on the branch under test."""
     if held:
         daemon._stream("fg").stopped = True
-        daemon._enqueue("fg", "prose", "Stopped.", False, pause_exempt=True)
+        daemon._enqueue("fg", "prose", "Stopped.", False, control_cue=True)
     else:
         daemon._enqueue("fg", "prose", "hello", False)
 

@@ -104,7 +104,7 @@ def test_preview_flags_are_the_w_cue_flags():
     sessions.register("B", cwd="/x/bravo")
     _step(daemon)
     item = daemon._stream("A").queue._items[0]
-    assert item.mute_exempt and item.pause_exempt  # speakable under mute/hold
+    assert item.control_cue  # speakable under mute/hold
     assert item.audio_path is None                 # v1 previews are plain speech (D3)
 
 
@@ -181,14 +181,14 @@ def test_commit_lands_focus_flowing_cue_and_raise(monkeypatch):
     assert daemon._chooser is None
 
 
-def test_commit_cue_is_at_front_names_session_mute_exempt():
+def test_commit_cue_is_at_front_names_session_control_cue():
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
     sessions.register("B", cwd="/x/bravo")
     daemon._enqueue("B", "prose", "b backlog", False)
     _step(daemon)
     daemon.handle_message(_msg(MsgType.CHOOSER_COMMIT, ""))
     head = daemon._stream("B").queue._items[0]
-    assert head.text == "bravo." and head.names_session and head.mute_exempt
+    assert head.text == "bravo." and head.names_session and head.control_cue
 
 
 def test_commit_onto_muted_keeps_going_to_active():

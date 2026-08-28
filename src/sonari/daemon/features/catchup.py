@@ -57,7 +57,7 @@ def on_catch_up(ctx, msg):
     dest = _cue_dest(host, target)
     if not entries:
         host._enqueue(dest, "prose", "Nothing to catch up.", False,
-                      mute_exempt=True, pause_exempt=True, at_front=True)
+                      control_cue=True, at_front=True)
         return None
     n = len(entries)
     # No-folder fallback = "this session" (the target IS the workspace the user sits
@@ -77,7 +77,7 @@ def on_catch_up(ctx, msg):
     if sessions.liveness(target) == "dead":
         ack += " " + CLOSED_WORD
     ack_id = host._enqueue(dest, "prose", ack, False,
-                           mute_exempt=True, pause_exempt=True, at_front=True)
+                           control_cue=True, at_front=True)
     last = entries[-1]
     slice_text = render_slice(entries, folder)      # pinned + rendered AT PRESS
     host._catchup_seq += 1
@@ -122,7 +122,7 @@ def _cancel_catchup(host):
     dest = _cue_dest(host, cu["target"])
     if dest is not None:
         host._enqueue(dest, "prose", "Cancelled.", False,
-                      mute_exempt=True, pause_exempt=True, at_front=True)
+                      control_cue=True, at_front=True)
 
 
 @handler(MsgType.CATCHUP_RESULT)
@@ -168,7 +168,7 @@ def on_catchup_result(ctx, msg):
     cu["dest"] = dest                                # the stream the render items live on (for cancel/cut)
     if dest != target and not ended and cu["folder"]:
         # The speaker diverged from the caught-up target mid-prep: the render
-        # plays on dest's stream, where mute_exempt suppresses the standard
+        # plays on dest's stream, where control_cue suppresses the standard
         # folder prefix — carry the attribution inline on the first segment
         # (the ended case already names the folder in its own first segment).
         first_text, first_voice = segments[0]
@@ -180,7 +180,7 @@ def on_catchup_result(ctx, msg):
         # The last item is the render-DONE marker (always) — it clears self._catchup
         # on completion; whether it also BURNS is gated on `not ended` in Task 8, so
         # an ended render still clears the bundle (no spurious "Cancelled." next press).
-        host._enqueue(dest, "prose", text, False, mute_exempt=True, pause_exempt=True,
+        host._enqueue(dest, "prose", text, False, control_cue=True,
                       at_front=True, voice=voice, render_id=render_id,
                       catchup_burn=(i == last), after_id=ack_id)
     if body:                                          # a real summary, not the digest fallback

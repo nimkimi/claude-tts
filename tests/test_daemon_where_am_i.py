@@ -23,7 +23,7 @@ def test_where_am_i_reports_stopped_state():
     sessions.set_foreground("fg", cwd="/x/work")
     daemon._stream("fg").stopped = True
     daemon.handle_message({"type": "where_am_i", "session": "fg"})
-    daemon._speak_loop_once()                     # pause_exempt cue voices even when stopped
+    daemon._speak_loop_once()                     # control cue voices even when stopped
     assert speaker.spoken == ["Voice and keyboard: work 1, stopped."]
 
 

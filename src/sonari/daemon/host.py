@@ -414,7 +414,7 @@ class SpeechDaemon:
                 else "Bring it forward to type.")
         with self._lock:
             self._enqueue(session, "prose", text, False,
-                          mute_exempt=True, at_front=True)
+                          control_cue=True, at_front=True)
 
     def _alloc_id(self) -> int:
         self._state._next_id += 1
@@ -522,8 +522,8 @@ class SpeechDaemon:
         return True
 
     def _enqueue(self, session: str, kind: str, text: str, is_decision: bool,
-                 entry=None, mute_exempt: bool = False,
-                 pause_exempt: bool = False, at_front: bool = False,
+                 entry=None, control_cue: bool = False,
+                 at_front: bool = False,
                  names_session: bool = False, audio_path=None,
                  forward: bool = False, voice=None, render_id=None,
                  catchup_burn: bool = False, after_id=None,
@@ -536,8 +536,7 @@ class SpeechDaemon:
             kind=kind,
             text=text,
             is_decision=is_decision,
-            mute_exempt=mute_exempt,
-            pause_exempt=pause_exempt,
+            control_cue=control_cue,
             names_session=names_session,
             audio_path=audio_path,
             forward=forward,
@@ -653,13 +652,13 @@ class SpeechDaemon:
         self.speaker.transient(kind)
         if word is not None and session is not None:
             self._enqueue(session, "prose", word, False,
-                          mute_exempt=True, pause_exempt=True)
+                          control_cue=True)
 
     def _attributed_text(self, item) -> str:
         """item.text, prefixed with the session's folder name when the voice switches
         to a session different from the one last spoken — so the user knows who's
         talking. Never prefixes the very first utterance (last == None), a self-naming
-        cue (names_session), or a control cue (mute_exempt). Updates _last_spoken_session.
+        cue (names_session), or a control cue (control_cue). Updates _last_spoken_session.
         Called under self._lock from the speak loop."""
         text = item.text
         if item.names_session:
@@ -667,7 +666,7 @@ class SpeechDaemon:
             # claim this session as last-spoken so the NEXT item from it is
             # NOT prefixed again — suppresses the double-announce.
             self._state._last_spoken_session = item.session
-        elif not item.mute_exempt:
+        elif not item.control_cue:
             if (self._state._last_spoken_session is not None
                     and item.session != self._state._last_spoken_session):
                 folder = self.sessions.folder(item.session)
@@ -857,7 +856,7 @@ class SpeechDaemon:
                 # a dead workspace with the idle voice strands it without the
                 # single-item sanction.
                 self._enqueue(ws, "prose", LEARN_OFF, False,
-                              mute_exempt=True, pause_exempt=True,
+                              control_cue=True,
                               at_front=self._sanction_dead_read(ws, whole=False))
 
     def handle_message(self, msg):
@@ -895,7 +894,7 @@ class SpeechDaemon:
                     if ws is not None:
                         self._enqueue(ws, "prose",
                                       keymap.ACTIONS[action]["teach"], False,
-                                      mute_exempt=True, pause_exempt=True)
+                                      control_cue=True)
                     return None
             return dispatch(self._ctx, msg)
         finally:
@@ -1358,12 +1357,12 @@ class SpeechDaemon:
         fg0 = self.sessions.speaker()
         st0 = self._state._streams.get(fg0)
         if st0 is not None and st0.stopped:
-            # Held: scan the speaker stream for a pause-exempt cue; otherwise
+            # Held: scan the speaker stream for a control cue; otherwise
             # wait. Pop+claim under the lock, mirroring the normal branch.
             with self._lock:
                 fg = self.sessions.speaker()
                 st = self._state._streams.get(fg)
-                item = st.queue.pop_pause_exempt() if st is not None else None
+                item = st.queue.pop_control_cue() if st is not None else None
                 self._state._current_item = item
                 cancel_epoch = self.speaker.cancel_epoch()
             if item is None:
@@ -1435,10 +1434,11 @@ class SpeechDaemon:
                     if mark_resume:
                         # The word rides the queue (D8 law 1) at the front of the
                         # adopted stream, so it voices before the resumed backlog —
-                        # mute-exempt like the other lift sites (playback resume,
-                        # the Policy-A submit lift).
+                        # a control cue like the other lift sites (playback resume,
+                        # the Policy-A submit lift). Provably not stopped: next_sess
+                        # came from _select_keep_going, which skips st.stopped streams.
                         self._enqueue(next_sess, "prose", "Resumed.", False,
-                                      mute_exempt=True, at_front=True)
+                                      control_cue=True, at_front=True)
                     # pop_next() is guaranteed non-None: _select_keep_going verified
                     # len(queue) > 0 for next_sess inside this same held lock.
                     item = st.queue.pop_next() if st is not None else None
@@ -1524,9 +1524,9 @@ class SpeechDaemon:
                 self._stream(item.session).queue.enqueue_front(item)
                 self._state._last_spoken_session = prev
                 requeued = True
-            elif completed and not item.mute_exempt:
+            elif completed and not item.control_cue:
                 # W12 capture: the last COMPLETED content utterance, AS SPOKEN
-                # (attributed text, prefix included). mute_exempt chrome (⌃⌘W
+                # (attributed text, prefix included). control_cue chrome (⌃⌘W
                 # readouts, jump cues, the repeat playback itself) is excluded —
                 # which also makes repeat idempotent. One assignment under the
                 # EXISTING tail lock: no new locked region, no gap (M1).
@@ -1738,7 +1738,7 @@ class SpeechDaemon:
                            if sid not in stopped), None)
         if target is not None:
             self._enqueue(target, "prose", line, False,
-                          mute_exempt=True, pause_exempt=True)
+                          control_cue=True)
         else:
             self._restore_pending = True
 

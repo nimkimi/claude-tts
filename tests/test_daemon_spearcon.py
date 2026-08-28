@@ -24,7 +24,7 @@ def test_chooser_commit_uses_spearcon_audio_path_on_hit():
     daemon.handle_message({"type": "chooser_commit"})
     item = daemon._stream("B").queue._items[0]
     assert item.audio_path == p                       # the LANDING cue is spearcon-capable
-    assert item.names_session and item.mute_exempt
+    assert item.names_session and item.control_cue
     daemon._speak_loop_once()
     assert speaker.audio_paths == [p]                 # afplayed, not spoken
 

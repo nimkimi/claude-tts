@@ -1,5 +1,5 @@
 """W12 (spec §13): "say that again" — the single most frequent by-ear need.
-Captures the last COMPLETED non-mute_exempt utterance AS SPOKEN (prefix
+Captures the last COMPLETED non-control_cue utterance AS SPOKEN (prefix
 included); replays it with the ⌃⌘W capture-park-resume discipline; idempotent."""
 from sonari.protocol import PROTOCOL_VERSION
 from sonari.queue import SpeechItem
@@ -39,7 +39,7 @@ def test_control_cues_are_never_the_repeat_target():
     daemon._enqueue("fg", "prose", "content.", False)
     daemon._speak_loop_once()
     daemon.handle_message(_msg("where_am_i", "fg"))
-    daemon._speak_loop_once()                          # the ⌃⌘W readout (mute_exempt)
+    daemon._speak_loop_once()                          # the ⌃⌘W readout (control_cue)
     daemon.handle_message(_msg("repeat_last", "fg"))
     daemon._speak_loop_once()
     assert speaker.spoken[-1] == "content."            # chrome excluded

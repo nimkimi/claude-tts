@@ -39,7 +39,7 @@ def test_stop_session_cue_lands_in_speaker_stream_and_is_voiced():
     daemon._enqueue("B", "prose", "b content", False)
     sessions.set_speaker("B")                          # voice=B, workspace=A
     daemon.handle_message(_msg(MsgType.STOP_SESSION, ""))
-    # Cue must be in B's stream (pause_exempt so the held branch voices it)
+    # Cue must be in B's stream (control_cue so the held branch voices it)
     bq = daemon._stream("B").queue
     assert any(it.text == "Stopped." for it in bq._items)
     aq = daemon._stream("A").queue

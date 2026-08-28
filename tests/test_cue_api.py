@@ -32,7 +32,7 @@ def test_cue_word_rides_the_queue_after_the_tone():
     item = queue.pop_next()
     assert item.text == "Speech failed; kept unheard."
     assert item.kind == "prose" and item.is_decision is False   # chrome, no call-sign
-    assert item.mute_exempt and item.pause_exempt   # speaks on a held speaker too
+    assert item.control_cue   # speaks on a held speaker too
     assert item.forward is False                    # can never advance a frontier
 
 

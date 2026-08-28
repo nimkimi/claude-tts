@@ -255,13 +255,13 @@ def on_set_verbosity(ctx, msg):
     ctx.host.config["verbosity"] = v
     save_config(ctx.host.config)
     # W3: confirm on the LIVE path (the built confirmation was stranded on the
-    # dead CYCLE_VERBOSITY handler, 0 senders). mute_exempt+pause_exempt so a
+    # dead CYCLE_VERBOSITY handler, 0 senders). control_cue so a
     # settings readback can never be silently swallowed while the voice is held
     # — "Verbosity quiet." IS the last thing you hear (direct _enqueue cues
     # bypass the on_prose quiet gate). Idempotent by design: setting the same
     # value re-confirms (readback).
     _readback(ctx.host, "Verbosity {0}.".format(v),
-              mute_exempt=True, pause_exempt=True)
+              control_cue=True)
     return None
 
 
@@ -306,10 +306,10 @@ def on_cycle_verbosity(ctx, msg):
     ctx.host.config["verbosity"] = nxt
     save_config(ctx.host.config)
     # Aligned with the live SET_VERBOSITY confirmation (on_set_verbosity, W3):
-    # mute_exempt+pause_exempt so the readback can never be silently swallowed
+    # control_cue so the readback can never be silently swallowed
     # while the voice is held.
     _readback(ctx.host, "Verbosity {0}.".format(nxt),
-              mute_exempt=True, pause_exempt=True)
+              control_cue=True)
     return None
 
 
@@ -403,7 +403,7 @@ def on_where_am_i(ctx, msg):
             cue += " Keyboard: {0}{1}{2}.".format(
                 _numbered(host, ws), _pointer_mark(host, ws), _entry_clauses(host, ws))
             cue += _also_clause(host, exclude=(ws,))
-            host._enqueue(ws, "prose", cue, False, mute_exempt=True, pause_exempt=True)
+            host._enqueue(ws, "prose", cue, False, control_cue=True)
             # D3 §4d seam (WB-C1): the delivery note above predates T9. Keep-going
             # now SKIPS dead streams, so on a dead workspace the cue it just
             # composed — correctly marked ", closed" — would sit here forever:
@@ -462,12 +462,12 @@ def on_where_am_i(ctx, msg):
     # unburned and the next press re-summarizes (§2.8).
     if cur is not None and getattr(cur, "render_id", None) is None:
         host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
-                      entry=entry, mute_exempt=cur.mute_exempt,
-                      pause_exempt=cur.pause_exempt, names_session=cur.names_session,
+                      entry=entry, control_cue=cur.control_cue,
+                      names_session=cur.names_session,
                       audio_path=cur.audio_path, forward=cur.forward, at_front=True,
                       prelude=cur.prelude)
     host._enqueue(fg, "prose", text, False,
-                  mute_exempt=True, pause_exempt=True, at_front=True)
+                  control_cue=True, at_front=True)
     # Same deliberate-press rule as the idle branch above, for the case where the
     # VOICE session is the dead one: this readout (and the item barge-in just
     # re-queued) live in its stream, which the speak loop would otherwise hand
@@ -522,6 +522,6 @@ def on_announce(ctx, msg):
     # backlog item and the verdict itself would be stranded unspoken — after
     # {"ok": True} was already returned. On a live target both are no-ops.
     host._enqueue(target, "prose", text, False,
-                  mute_exempt=True, pause_exempt=True,
+                  control_cue=True,
                   at_front=host._sanction_dead_read(target, whole=False))
     return {"ok": True}

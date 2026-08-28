@@ -128,8 +128,8 @@ def _restore_and_clear(host):
     if st.captured is not None:
         c = st.captured
         host._enqueue(c.session, c.kind, c.text, c.is_decision,
-                      entry=st.captured_entry, mute_exempt=c.mute_exempt,
-                      pause_exempt=c.pause_exempt, names_session=c.names_session,
+                      entry=st.captured_entry, control_cue=c.control_cue,
+                      names_session=c.names_session,
                       audio_path=c.audio_path, forward=c.forward, at_front=True,
                       prelude=c.prelude)
     host._chooser = None
@@ -160,7 +160,7 @@ def _deliver_preview(host, st):
     """Speak one preview exactly like a ⌃⌘W cue: barge-in the previous utterance,
     enqueue to the SPEAKER's stream (or the playable-workspace fallback when the
     speaker is None — mirroring on_where_am_i's None branch, control.py:158-183)
-    with mute_exempt + pause_exempt + at_front. Moves NOTHING."""
+    with control_cue + at_front. Moves NOTHING."""
     _remove_preview(host, st)
     host.speaker.cancel()
     tgt = host.sessions.speaker()
@@ -178,7 +178,7 @@ def _deliver_preview(host, st):
     # re-sanctions for its own preview; the grain keeps the dead pile out of it.
     host._sanction_dead_read(tgt, whole=False)
     host._enqueue(tgt, "prose", _preview_text(host, st), False,
-                  mute_exempt=True, pause_exempt=True, at_front=True)
+                  control_cue=True, at_front=True)
     st.preview_id = host._next_id          # the id _enqueue just allocated
     st.preview_session = tgt
 
@@ -226,7 +226,7 @@ def _commit(host, st, target):
     cue = folder + "." if folder else "Another session."
     host._enqueue(target, "prose", cue, False,
                   audio_path=host._spearcon_path(folder),
-                  mute_exempt=True, at_front=True, names_session=True)
+                  control_cue=True, at_front=True, names_session=True)
     if will_raise:
         host._raise().raise_async(
             identity, gen,

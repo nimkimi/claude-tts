@@ -61,7 +61,7 @@ def _nav_response(ctx, session: str, direction: str) -> None:
     if len(turns) < 2:
         # 0 or 1 navigable responses -> nothing to move between.
         cue = "Nothing to navigate yet." if not turns else "No other response."
-        ctx.host._enqueue(session, "prose", cue, False, mute_exempt=True)
+        ctx.host._enqueue(session, "prose", cue, False, control_cue=True)
         return
     # Current anchored index (None anchor == live == the latest turn).
     cur_turn = st.nav_turn
@@ -92,7 +92,7 @@ def _nav_response(ctx, session: str, direction: str) -> None:
     st.nav_cursor = None if follow_live else (mids[0] if mids else None)
     ctx.host.speaker.cancel()
     ctx.host._drop_pending(st.queue.clear())
-    ctx.host._enqueue(session, "prose", cue, False, mute_exempt=True)
+    ctx.host._enqueue(session, "prose", cue, False, control_cue=True)
     for mid in mids:
         for e in ctx.host.history.entries_for_message(session, mid):
             ctx.host._enqueue(session, e.kind, e.text, False, entry=e)
@@ -139,5 +139,5 @@ def on_nav(ctx, msg):
         if folder:
             ctx.host._enqueue(target, "prose", folder + ".", False,
                               audio_path=ctx.host._spearcon_path(folder),
-                              mute_exempt=True, at_front=True, names_session=True)
+                              control_cue=True, at_front=True, names_session=True)
     return None

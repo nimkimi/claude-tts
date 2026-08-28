@@ -55,7 +55,7 @@ def test_speaker_none_after_stop_all_reads_state_cue_keyboard_and_map():
     assert [it.text for it in items] == [
         "All stopped. Keyboard: web 1. Also: 2 api, muted, 1 waiting."
     ]
-    assert items[0].mute_exempt and items[0].pause_exempt   # delivery flags unchanged
+    assert items[0].control_cue   # delivery flag unchanged
 
 
 # --- (d) the exclusion rule: the Keyboard-clause session does NOT reappear in Also ---
@@ -93,7 +93,7 @@ def test_session_start_announces_folder_and_number(monkeypatch):
     assert len(q) == 1
     item = q.pop_next()
     assert item.text == "1, proj."
-    assert item.mute_exempt and item.names_session
+    assert item.control_cue and item.names_session
 
 
 def test_announce_suppressed_at_verbosity_quiet(monkeypatch):

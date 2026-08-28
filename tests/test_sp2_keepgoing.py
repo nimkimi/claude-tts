@@ -126,7 +126,7 @@ def test_keep_going_still_adopts_a_pending_stream():
     assert sessions.is_provisional("s1") is True
     with daemon._lock:
         daemon._enqueue("s1", "prose", "Resumed.", False,
-                        mute_exempt=True, pause_exempt=True)
+                        control_cue=True)
     daemon._speak_loop_once()
     assert sessions.speaker() == "s1"              # pending stays adoptable
     assert any(s and "Resumed." in s for s in speaker.spoken)

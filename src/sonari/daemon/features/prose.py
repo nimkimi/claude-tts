@@ -135,20 +135,22 @@ def on_flush(ctx, msg):
     if st.announce_resume:
         # D2 §6.3: the Policy-A submit lift (lifecycle) deferred its audible
         # mark past this clear — deliver it now, mirroring ⌃⌘S resume's cue.
+        # Provably not stopped: announce_resume is armed only when
+        # `st is None or not st.stopped`.
         st.announce_resume = False
         ctx.host._enqueue(session, "prose", "Resumed.", False,
-                          mute_exempt=True, at_front=True)
+                          control_cue=True, at_front=True)
     if ctx.host._restore_pending:
         # D2 §6.4/§6.5: the all-muted restart line deferred past boot — the
         # first submit is the first moment a reachable queue exists (a muted
-        # speaker's pause-exempt cue is voiced by the held branch). F2:
+        # speaker's control cue is voiced by the held branch). F2:
         # RECOMPOSE now rather than replay the boot-time string — a restored
         # session may have been ⌃⌘S-resumed (or a pile consumed) since boot,
         # and the line must report what is still true, not what was.
         line = ctx.host._compose_restore_line()
         if line is not None:
             ctx.host._enqueue(session, "prose", line, False,
-                              mute_exempt=True, pause_exempt=True)
+                              control_cue=True)
         ctx.host._restore_pending = False
     ctx.host._wake.set()
     return None

@@ -51,7 +51,7 @@ def test_learn_mode_toggle_announces(timers):
     assert daemon._learn_mode is True
     item = queue._items[-1]
     assert item.text.startswith("Learn mode.")
-    assert item.mute_exempt and item.pause_exempt
+    assert item.control_cue
     daemon.handle_message({"type": "learn_mode"})
     assert daemon._learn_mode is False
     assert queue._items[-1].text == "Learn mode off."
@@ -87,7 +87,7 @@ def test_learn_mode_intercepts_at_the_handle_message_chokepoint(timers, monkeypa
     assert daemon._learn_mode is True                      # interception does not toggle
     item = queue._items[-1]
     assert item.text == keymap.ACTIONS["where_am_i"]["teach"]
-    assert item.mute_exempt and item.pause_exempt
+    assert item.control_cue
 
 
 def test_hotkey_press_teaches_via_delegation(timers, monkeypatch):
@@ -102,7 +102,7 @@ def test_hotkey_press_teaches_via_delegation(timers, monkeypatch):
     assert daemon._learn_mode is True                      # interception does not toggle
     item = queue._items[-1]
     assert item.text == keymap.ACTIONS["where_am_i"]["teach"]
-    assert item.mute_exempt and item.pause_exempt
+    assert item.control_cue
 
 
 def test_learn_mode_toggle_is_exempt_via_handle_message(timers):
@@ -315,7 +315,7 @@ def test_query_pending_decision():
     daemon.handle_message({"type": "query_actions"})
     item = queue._items[-1]
     assert item.text == teaching.QUERY_DECISION
-    assert item.mute_exempt and item.pause_exempt
+    assert item.control_cue
 
 
 def test_query_while_stopped():
@@ -324,7 +324,7 @@ def test_query_while_stopped():
     daemon.handle_message({"type": "query_actions"})
     item = queue._items[-1]
     assert item.text == teaching.QUERY_STOPPED
-    assert item.mute_exempt and item.pause_exempt
+    assert item.control_cue
     # stop_all is one-way (playback.py) — the query must teach only the real
     # resume, never a false "M resumes everything".
     assert "Control Command S resumes this session" in teaching.QUERY_STOPPED
@@ -336,4 +336,4 @@ def test_query_default():
     daemon.handle_message({"type": "query_actions"})
     item = queue._items[-1]
     assert item.text == teaching.QUERY_DEFAULT
-    assert item.mute_exempt and item.pause_exempt
+    assert item.control_cue

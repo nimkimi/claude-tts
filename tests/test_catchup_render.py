@@ -123,7 +123,7 @@ def test_wrong_request_id_is_dropped():
 
 def test_diverged_speaker_render_carries_folder_attribution():
     # The summary can land after the user switched to another session mid-prep;
-    # the render then plays on the NEW speaker's stream, where mute_exempt
+    # the render then plays on the NEW speaker's stream, where control_cue
     # suppresses the standard folder prefix. The frame must carry the
     # attribution itself — an unattributed cross-session summary reads as the
     # wrong session to an eyes-free user.

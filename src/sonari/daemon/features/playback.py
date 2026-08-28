@@ -77,7 +77,7 @@ def on_skip_pile(ctx, msg):
         host._sanction_dead_read(cue_target, whole=False)
         # Nothing ahead of the frontier — do NOT nag "skipped 0" (B3 rejected).
         host._enqueue(cue_target, "prose", "Nothing to skip.", False,
-                      mute_exempt=True, pause_exempt=True, at_front=True)
+                      control_cue=True, at_front=True)
         return None
     count = len(entries)
     st = host._stream(target)
@@ -90,7 +90,7 @@ def on_skip_pile(ctx, msg):
         host.speaker.cancel()
     # Confirmatory count — OWNER EAR-GATE string (grammar v2: role word "item(s)"
     # adjacent to the number, folder-named like on_jump_waiting's crossed cue).
-    # Barge-in-class cue: mute_exempt + pause_exempt + at_front.
+    # Barge-in-class cue: control_cue + at_front.
     noun = "item" if count == 1 else "items"
     folder = sessions.folder(target)
     where = "in {0}".format(folder) if folder else "in another session"
@@ -107,7 +107,7 @@ def on_skip_pile(ctx, msg):
     cue_dest = spk if (spk is not None and spk != target) else target
     host._sanction_dead_read(cue_dest, whole=False)      # RR-2: same seam, same grain
     host._enqueue(cue_dest, "prose", "Skipping {0} {1} {2}.".format(count, noun, where), False,
-                  mute_exempt=True, pause_exempt=True, at_front=True)
+                  control_cue=True, at_front=True)
     return None
 
 
@@ -154,7 +154,8 @@ def on_stop_session(ctx, msg):
         # Single-item, not the whole-stream restore-base the controller
         # rejected: the resumed stream is un-muted, not a request to be read.
         ctx.host._sanction_dead_read(fg, whole=False)
-        ctx.host._enqueue(fg, "prose", "Resumed.", False, mute_exempt=True, at_front=True)
+        # Provably not stopped: st.stopped = False, set 11 lines above.
+        ctx.host._enqueue(fg, "prose", "Resumed.", False, control_cue=True, at_front=True)
     else:
         # Stopping -> quiet-hold (SPEC §6). Cancel only if THIS session is in flight.
         st.stopped = True
@@ -162,8 +163,8 @@ def on_stop_session(ctx, msg):
         cur = ctx.host._current_item
         if cur is not None and cur.session == fg:
             ctx.host.speaker.cancel()
-        # "Stopped." is pause_exempt (held branch voices it) + mute_exempt (control cue).
-        ctx.host._enqueue(fg, "prose", "Stopped.", False, mute_exempt=True, pause_exempt=True)
+        # "Stopped." is a control cue: voiced by the held branch even while stopped.
+        ctx.host._enqueue(fg, "prose", "Stopped.", False, control_cue=True)
     return None
 
 
@@ -180,11 +181,11 @@ def on_stop_all(ctx, msg):
     spk = ctx.host.sessions.speaker()
     if spk is not None:
         # Ensure the SPEAKER's stream is stopped even if it had no stream yet, then
-        # voice the confirmation there (pause_exempt -> the held branch, which reads
+        # voice the confirmation there (control_cue -> the held branch, which reads
         # speaker(), speaks it under divergence).
         ctx.host._stream(spk).stopped = True
         ctx.host._enqueue(spk, "prose", "All stopped.", False,
-                          mute_exempt=True, pause_exempt=True)
+                          control_cue=True)
     return None
 
 
@@ -217,10 +218,10 @@ def on_jump_decision(ctx, msg):
             # Answerable-but-already-narrated (inside the ~120s window):
             # re-speak the STORED prompt; the queue holds nothing to drain to.
             ctx.host._enqueue(tgt, "prose", pending["text"], False,
-                              mute_exempt=True, at_front=True)
+                              control_cue=True, at_front=True)
         elif tgt is not None:
             ctx.host._enqueue(tgt, "prose", "No decision here.", False,
-                              mute_exempt=True, pause_exempt=True, at_front=True)
+                              control_cue=True, at_front=True)
         else:
             ctx.host.cue("error")
         return None
@@ -255,7 +256,7 @@ def on_jump_decision(ctx, msg):
     if crossed and folder:
         ctx.host._enqueue(target, "prose", folder + ".", False,
                           audio_path=ctx.host._spearcon_path(folder),
-                          mute_exempt=True, at_front=True, names_session=True)
+                          control_cue=True, at_front=True, names_session=True)
     # Raise the target window (R5/R9 — C2 fix): ⌃⌘D is a deliberate workspace
     # action, so the terminal follows the jump, mirroring on_jump_waiting and the
     # chooser commit. bump_generation() runs on EVERY invocation (outside the
@@ -299,7 +300,7 @@ def on_repeat_last(ctx, msg):
     if last is None:
         # Spoken cue, not an error tone — an empty repeat is not a mis-press.
         host._enqueue(tgt, "prose", "Nothing to repeat.", False,
-                      mute_exempt=True, pause_exempt=True, at_front=True)
+                      control_cue=True, at_front=True)
         return None
     text, audio_path = last
     cur = host._current_item
@@ -307,15 +308,15 @@ def on_repeat_last(ctx, msg):
     host.speaker.cancel()                          # barge-in: cut the current utterance
     if cur is not None:
         host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
-                      entry=entry, mute_exempt=cur.mute_exempt,
-                      pause_exempt=cur.pause_exempt, names_session=cur.names_session,
+                      entry=entry, control_cue=cur.control_cue,
+                      names_session=cur.names_session,
                       audio_path=cur.audio_path, forward=cur.forward, at_front=True,
                       prelude=cur.prelude)
-    # The repeat is mute_exempt: never re-captured (idempotence), never prefixed
+    # The repeat is a control_cue: never re-captured (idempotence), never prefixed
     # (the captured text already carries any prefix). A spearcon-only last
     # utterance replays its audio file (audio_path passthrough). Preludes never
     # replay: _last_utterance captures content only — the chirp/call-sign
     # decorated the ORIGINAL moment, not the repeat.
-    host._enqueue(tgt, "prose", text, False, mute_exempt=True,
-                  pause_exempt=True, at_front=True, audio_path=audio_path)
+    host._enqueue(tgt, "prose", text, False, control_cue=True,
+                  at_front=True, audio_path=audio_path)
     return None

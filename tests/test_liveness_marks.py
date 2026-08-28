@@ -226,7 +226,7 @@ def test_pending_voice_pointer_from_adoption_gains_pending_clause(monkeypatch):
     assert sessions.is_provisional("s1") is True
     with daemon._lock:
         daemon._enqueue("s1", "prose", "Resumed.", False,
-                        mute_exempt=True, pause_exempt=True)
+                        control_cue=True)
     daemon._speak_loop_once()                       # adopts s1
     assert sessions.speaker() == "s1"
     assert sessions.liveness("s1") == "pending"

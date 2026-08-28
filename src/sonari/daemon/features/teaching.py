@@ -36,7 +36,7 @@ def on_learn_mode(ctx, msg):
         # settings readbacks — a dead workspace with the voice idle strands
         # this without the single-item sanction (host.py _sanction_dead_read).
         host._enqueue(ws, "prose", LEARN_ON if entering else LEARN_OFF, False,
-                      mute_exempt=True, pause_exempt=True,
+                      control_cue=True,
                       at_front=host._sanction_dead_read(ws, whole=False))
     return None
 
@@ -76,7 +76,7 @@ def on_query_actions(ctx, msg):
     # T2: same shape as the toggle above — a dead workspace with the voice
     # idle stranded this readout without the single-item sanction.
     host._enqueue(ws, "prose", text, False,
-                  mute_exempt=True, pause_exempt=True,
+                  control_cue=True,
                   at_front=host._sanction_dead_read(ws, whole=False))
     return None
 

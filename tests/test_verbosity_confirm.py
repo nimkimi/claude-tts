@@ -67,6 +67,5 @@ def test_cycle_verbosity_speaks_on_workspace_with_exempt_flags(monkeypatch):
     assert config["verbosity"] == "medium"
     assert [it.text for it in queue._items] == ["Verbosity medium."]
     item = queue._items[0]
-    assert item.mute_exempt is True
-    assert item.pause_exempt is True
+    assert item.control_cue is True
     assert len(stream_queue(daemon, "b")._items) == 0

@@ -38,7 +38,7 @@ def test_hit_preserves_an_existing_prelude_never_clobbers_it():
     sessions.register("bg", cwd="/x/bg")
     daemon._spearcons.available["bg"] = "/sp/bg.aiff"   # cache HIT — the clobber trigger
     daemon._enqueue("bg", "prose", "Approved.", False,
-                    mute_exempt=True, pause_exempt=True,
+                    control_cue=True,
                     prelude=("/pitch/up.wav",))
     daemon._speak_loop_once()                      # keep-going delivers the confirm
     assert sessions.speaker() == "bg"
@@ -69,7 +69,7 @@ def test_miss_never_clobbers_an_existing_prelude():
     _prime(daemon)
     sessions.register("bg", cwd="/x/bg")           # cache MISS
     daemon._enqueue("bg", "prose", "Approved.", False,
-                    mute_exempt=True, pause_exempt=True,
+                    control_cue=True,
                     prelude=("/pitch/up.wav",))
     daemon._speak_loop_once()
     assert sessions.speaker() == "bg"

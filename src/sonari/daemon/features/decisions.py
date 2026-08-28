@@ -241,7 +241,7 @@ def on_answer_permission(ctx, msg):
     host._sanction_dead_read(target, whole=False)
     host._enqueue(target, "prose",
                   "Approved." if behavior == "allow" else "Denied.",
-                  False, mute_exempt=True, pause_exempt=True, at_front=True,
+                  False, control_cue=True, at_front=True,
                   prelude=(host.speaker.pitch_asset(
                       "up" if behavior == "allow" else "down"),))
     return None

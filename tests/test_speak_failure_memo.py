@@ -38,14 +38,14 @@ def test_a_speak_failure_fires_the_signal_and_writes_the_memo(monkeypatch):
     assert paths.SPEAK_FAIL_MEMO_PATH.exists(), "a SpeakFailure must leave a memo"
 
 
-def test_a_speak_failure_on_the_pause_exempt_held_branch_also_writes_the_memo(monkeypatch):
+def test_a_speak_failure_on_the_control_cue_held_branch_also_writes_the_memo(monkeypatch):
     """The speak loop has two call sites (the normal branch and the stopped/
-    pause-exempt held branch) — both feed the same _signal_speak_failure, so
+    control-cue held branch) — both feed the same _signal_speak_failure, so
     both must leave the memo."""
     daemon, queue, speaker, *_ = make_daemon(foreground="fg")
     monkeypatch.setattr(speaker, "speak", _raise_speak_failure)
     daemon._stream("fg").stopped = True
-    daemon._enqueue("fg", "prose", "Stopped.", False, pause_exempt=True)
+    daemon._enqueue("fg", "prose", "Stopped.", False, control_cue=True)
 
     daemon._speak_loop_once()
 

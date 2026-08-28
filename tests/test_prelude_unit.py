@@ -50,11 +50,11 @@ def test_interrupted_prelude_abandons_the_rest_and_stays_unheard():
     assert daemon._current_item is None             # claim released
 
 
-def test_held_branch_plays_the_unit_for_a_pause_exempt_item():
+def test_held_branch_plays_the_unit_for_a_control_cue_item():
     daemon, queue, speaker, sessions, config = make_daemon()
     daemon._stream("fg").stopped = True
-    daemon._enqueue("fg", "prose", "Approved.", False, mute_exempt=True,
-                    pause_exempt=True, at_front=True, prelude=("/pitch/up.wav",))
+    daemon._enqueue("fg", "prose", "Approved.", False, control_cue=True,
+                    at_front=True, prelude=("/pitch/up.wav",))
     daemon._speak_loop_once()
     assert speaker.audio_paths == ["/pitch/up.wav", None]
     assert speaker.spoken[-1] == "Approved."

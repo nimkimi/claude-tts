@@ -23,7 +23,7 @@ class SessionState:
         self._pending_heard: "dict" = {}
         self._current_item = None
         self._last_spoken_session = None
-        # W12 repeat-last: the last COMPLETED non-mute_exempt utterance as
+        # W12 repeat-last: the last COMPLETED non-control_cue utterance as
         # (spoken_text, audio_path) — text AS SPOKEN (_attributed_text output,
         # folder prefix included: verbatim = what the ear got). Written by the
         # speak loop under the tail lock; read by the REPEAT_LAST handler under

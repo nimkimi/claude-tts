@@ -125,7 +125,7 @@ def test_where_am_i_reports_on_hold_under_quiet_hold():
     sessions.set_foreground("fg", cwd="/x/work")
     daemon.handle_message(_msg(MsgType.STOP_SESSION, "fg"))
     daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
-    daemon._speak_loop_once()                                    # pause_exempt cue voices under hold
+    daemon._speak_loop_once()                                    # control cue voices under hold
     assert speaker.spoken[-1] == "Voice and keyboard: work 1, on hold."
 
 

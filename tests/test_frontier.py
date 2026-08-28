@@ -351,7 +351,7 @@ def test_skip_pile_diverged_confirmation_lands_on_speaker_stream():
     # elsewhere), enqueueing the confirmation on the TARGET's stream leaves it
     # functionally silent — it isn't heard until keep-going eventually rotates
     # there. Route it to the SPEAKER's stream instead: at the front (heard at
-    # the next sentence boundary), a control cue (mute_exempt + pause_exempt),
+    # the next sentence boundary), a control cue (control_cue),
     # and NEVER forward (a control cue must not advance any frontier — B1).
     # The speaker is innocent here (no cancel/cut — contrast on_stop_session's
     # barge-in class); it just rides the sentence boundary.
@@ -371,7 +371,7 @@ def test_skip_pile_diverged_confirmation_lands_on_speaker_stream():
     assert [x.text for x in a_st.queue._items] == ["Skipping 5 items in b."]
     cue = a_st.queue._items[0]
     assert cue.forward is False                                # never advances a frontier
-    assert cue.mute_exempt is True and cue.pause_exempt is True
+    assert cue.control_cue is True
     d._speak_loop_once()
     assert d.speaker.spoken == ["Skipping 5 items in b."]      # heard NOW, not after keep-going rotates
 

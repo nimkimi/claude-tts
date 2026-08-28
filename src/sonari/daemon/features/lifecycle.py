@@ -128,11 +128,15 @@ def on_set_foreground(ctx, msg):
             # the app now obeys ONE rule — a number right before a name is a
             # teleport key. The announce was the lone folder-first holdout,
             # ending in a bare trailing digit with nothing to frame its role.
+            # Mechanical rename only (M1 sweep): this is an ambient announcement,
+            # not a gesture answer, so it does NOT belong under control_cue in
+            # spirit — Task 10 reverts it to unflagged once its marker lifecycle
+            # is fixed. Flagged here so that reversal is expected, not a regression.
             ctx.host._enqueue(
                 session, "prose",
                 "{0}, {1}.".format(ctx.host.sessions.number(session),
                                    folder or "Another session"),
-                False, mute_exempt=True, names_session=True)
+                False, control_cue=True, names_session=True)
         _maybe_guide_setup(ctx, session, msg.get("plugin_version", ""))
         if ctx.host._spearcons is not None:
             # Pre-render spearcons for the known roster in the background (Popen,
@@ -142,17 +146,18 @@ def on_set_foreground(ctx, msg):
         st = ctx.host._streams.get(session)
         if st is not None and st.announce_resume:
             # SessionStart sends SET_FOREGROUND then SESSION_START (no FLUSH):
-            # deliver the deferred lift mark now.
+            # deliver the deferred lift mark now. Provably not stopped:
+            # announce_resume is armed only when `st is None or not st.stopped`.
             st.announce_resume = False
             ctx.host._enqueue(session, "prose", "Resumed.", False,
-                              mute_exempt=True, at_front=True)
+                              control_cue=True, at_front=True)
         if ctx.host._restore_pending:
             # F2: RECOMPOSE fresh at delivery — see prose.py's on_flush leg
             # for why the boot-time string can't be replayed verbatim.
             line = ctx.host._compose_restore_line()
             if line is not None:
                 ctx.host._enqueue(session, "prose", line, False,
-                                  mute_exempt=True, pause_exempt=True)
+                                  control_cue=True)
             ctx.host._restore_pending = False
         # A new live session is the keep-alive's start signal — push the policy
         # verdict now instead of waiting up to one speak-loop tick for the device

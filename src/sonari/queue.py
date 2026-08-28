@@ -11,8 +11,9 @@ class SpeechItem:
     kind: str          # one of prose|choice|plan|permission|tool_announce
     text: str
     is_decision: bool  # True for choice|plan|permission
-    mute_exempt: bool = False  # control cue: never folder-prefixed (jump/stop/nav/status cues)
-    pause_exempt: bool = False  # voiced by the held branch even while the session is stopped (e.g. "Stopped.")
+    control_cue: bool = False  # the answer to a deliberate press: never
+                               # folder-prefixed, and voiced by the held branch
+                               # even while its stream is stopped
     names_session: bool = False  # text already speaks the session's folder (jump cue)
     audio_path: "str | None" = None  # when set, the speak loop afplays this file (spearcon) instead of say
     forward: bool = False  # SP4 provenance: True only at forward-readout enqueue sites (prose/decision/
@@ -64,15 +65,15 @@ class SpeechQueue:
         except IndexError:
             return None
 
-    def pop_pause_exempt(self) -> "SpeechItem | None":
-        """Pop the first pause-exempt item from ANYWHERE in the queue, else None.
+    def pop_control_cue(self) -> "SpeechItem | None":
+        """Pop the first control-cue item from ANYWHERE in the queue, else None.
 
         While paused the loop holds, but a pause confirmation ("Paused.") must still
         be voiced. It is found by scanning rather than peeking the head: a pause
         landing mid-utterance re-queues the interrupted (non-exempt) item at the
-        front, so the exempt cue is not necessarily first."""
+        front, so the control cue is not necessarily first."""
         for i, item in enumerate(self._items):
-            if item.pause_exempt:
+            if item.control_cue:
                 del self._items[i]
                 return item
         return None

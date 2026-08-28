@@ -39,7 +39,7 @@ def test_miss_speaks_the_cue_and_touches_nothing():
     assert daemon.voice_state == "quiet-hold"      # no enum write
     assert rs.attempts == []                       # no window raise
     head = queue._items[0]
-    assert head.mute_exempt and head.pause_exempt  # spec-mandated flags
+    assert head.control_cue  # spec-mandated flag
 
 
 def test_queued_decision_hit_behaves_exactly_as_today():

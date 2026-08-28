@@ -95,7 +95,7 @@ def on_jump_waiting(ctx, msg):
             # silence. Single-item grain: this cue, not the closed pile behind it.
             ctx.host._sanction_dead_read(tgt, whole=False)
             ctx.host._enqueue(tgt, "prose", text, False,
-                              mute_exempt=True, pause_exempt=True, at_front=True)
+                              control_cue=True, at_front=True)
         else:
             ctx.host.cue("error")
         return None
@@ -143,18 +143,22 @@ def on_jump_waiting(ctx, msg):
         # the actionable "Bring it forward to type." stays speech when not raising.
         # Enqueue the suffix FIRST (at_front), then the spearcon (at_front) so the
         # head order is: spearcon, [suffix].
+        # Provably not stopped: target came from _waiting_target, which skips
+        # st.stopped streams.
         if not will_raise:
             ctx.host._enqueue(target, "prose", "Bring it forward to type.", False,
-                              mute_exempt=True, at_front=True)
+                              control_cue=True, at_front=True)
         ctx.host._enqueue(target, "prose", folder, False, audio_path=spearcon,
-                          mute_exempt=True, at_front=True, names_session=True)
+                          control_cue=True, at_front=True, names_session=True)
     else:
         base = ("Jumping to {0}.".format(folder) if folder
                 else "Jumping to another session.")
         if not will_raise:
             base += " Bring it forward to type."
+        # Provably not stopped: target came from _waiting_target, which skips
+        # st.stopped streams.
         ctx.host._enqueue(target, "prose", base, False,
-                          mute_exempt=True, at_front=True, names_session=True)
+                          control_cue=True, at_front=True, names_session=True)
     if will_raise:
         ctx.host._raise().raise_async(
             identity, gen,
