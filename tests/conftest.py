@@ -50,12 +50,28 @@ _REAL_HOME = _real_home()
 
 # Every path the suite has damaged, or could damage, derived from the REAL home
 # rather than from sonari.paths (which is repointed by the time tests run).
-_CANARY_PATHS = (
-    _REAL_HOME / ".sonari",
+#
+# Split by how the owner's LIVE daemon behaves, because a canary that always
+# fires is one that gets switched off -- and then it is not there the time it
+# matters. The daemon writes ~/.sonari/state.json by atomic rename, and a
+# rename bumps the CONTAINING DIRECTORY's mtime, so ~/.sonari's mtime moves
+# every few seconds while he is working. Its inode and its existence do not.
+#
+# Watching only ~/.sonari would also miss the first of the two recorded
+# destructions outright: kokoro_provision.uninstall_kokoro() rmtree's
+# ~/.sonari/venv, which changes neither the parent's inode nor its existence.
+# So the cold children are watched directly.
+_CANARY_IDENTITY_ONLY = (
+    _REAL_HOME / ".sonari",              # the daemon writes inside it constantly
+    _REAL_HOME / ".sonari" / "venv",     # uninstall_kokoro() rmtree's this
+    _REAL_HOME / ".sonari" / "app",      # the installed app copy
+)
+_CANARY_FULL_STAT = (
     _REAL_HOME / ".local" / "bin" / "sonari",
     _REAL_HOME / "Library" / "LaunchAgents" / "com.sonari.speechd.plist",
     _REAL_HOME / "Library" / "LaunchAgents" / "com.sonari.hotkeyd.plist",
 )
+_CANARY_PATHS = _CANARY_IDENTITY_ONLY + _CANARY_FULL_STAT
 
 _REFUSAL = (
     "REFUSING to run: {0}. This suite calls uninstall paths that rmtree "
@@ -170,11 +186,18 @@ def _inert_keepalive_seams(monkeypatch):
 
 
 def _canary_stat(path: pathlib.Path):
-    """(exists, mtime_ns, inode, size) -- or None when absent. Never raises."""
+    """Identity of *path*, or None when absent. Never raises.
+
+    Paths the live daemon writes into get identity only (existence + inode):
+    enough to catch a delete or a replace, immune to the mtime the daemon
+    bumps every few seconds. Cold paths get the full stat.
+    """
     try:
         st = path.stat()
     except (OSError, ValueError):
         return None
+    if path in _CANARY_IDENTITY_ONLY:
+        return (st.st_ino,)
     return (st.st_mtime_ns, st.st_ino, st.st_size)
 
 

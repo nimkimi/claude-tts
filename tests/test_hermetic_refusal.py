@@ -28,17 +28,35 @@ def test_real_home_is_computed_from_the_password_database_not_the_environment(
 
 
 def test_the_canary_watches_every_path_the_suite_has_destroyed():
-    """~/.sonari, ~/.local/bin/sonari and both LaunchAgent plists."""
+    """Both recorded destructions, plus the paths they went through.
+
+    uninstall_kokoro() rmtree's ~/.sonari/venv and MacSupervisorBackend
+    .uninstall() removes ~/.local/bin/sonari and the two LaunchAgents.
+    """
     real = conftest._real_home()
     watched = set(conftest._CANARY_PATHS)
-    assert real / ".sonari" in watched
-    assert real / ".local" / "bin" / "sonari" in watched
-    assert (
-        real / "Library" / "LaunchAgents" / "com.sonari.speechd.plist"
-    ) in watched
-    assert (
-        real / "Library" / "LaunchAgents" / "com.sonari.hotkeyd.plist"
-    ) in watched
+    for p in (
+        real / ".sonari",
+        real / ".sonari" / "venv",
+        real / ".sonari" / "app",
+        real / ".local" / "bin" / "sonari",
+        real / "Library" / "LaunchAgents" / "com.sonari.speechd.plist",
+        real / "Library" / "LaunchAgents" / "com.sonari.hotkeyd.plist",
+    ):
+        assert p in watched, p
+
+
+def test_the_hot_sonari_dir_is_watched_by_identity_not_mtime():
+    """The owner's live daemon writes ~/.sonari/state.json by atomic rename,
+    and a rename bumps the containing directory's mtime. A canary that read
+    mtime here would fire on every full-suite run for as long as his daemon is
+    alive -- and a detector that always fires is one that gets switched off.
+    """
+    real = conftest._real_home()
+    assert real / ".sonari" in conftest._CANARY_IDENTITY_ONLY
+    assert conftest._canary_stat(real / ".sonari") == (
+        (real / ".sonari").stat().st_ino,
+    )
 
 
 def test_pytest_refuses_to_start_when_HOME_is_the_real_home(tmp_path):
