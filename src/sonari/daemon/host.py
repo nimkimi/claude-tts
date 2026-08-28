@@ -1325,8 +1325,8 @@ class SpeechDaemon:
     def _fire_alarm(self, kind: str, words: str) -> None:
         """Queue-bypassing alarm playback (§7): raw afplay + say spawns,
         deliberately NOT Speaker/queue/arbiter — the alarm exists for when
-        those may be dead. Asset via _asset_path (config-first, Python
-        fallback). Never raises. The two spawns fail independently — the
+        those may be dead. Asset via _asset_path (one lookup in the merged
+        config table). Never raises. The two spawns fail independently — the
         spoken word is the truth-critical half, so a dead tone path must not
         silence it (mirrors the Swift side's independent shell-outs)."""
         try:

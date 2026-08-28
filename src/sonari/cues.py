@@ -32,8 +32,9 @@ class Cue:
     family: str        # "attention" | "feedback" | "failure" | "status" | "attribution" | "content"
     tier: str          # "transient" | "prelude" | "queued" | "alarm"
     doc: str           # user-facing one-liner for the generated README island
-    # transient cues resolve their asset via Speaker (config-first + fallbacks);
-    # prelude cues resolve per call site (spearcon path / pitch asset).
+    # transient cues resolve their asset via Speaker (config-first via the
+    # merged config.DEFAULTS table); prelude cues resolve per call site
+    # (spearcon path / pitch asset).
 
 
 CUES = {c.name: c for c in (
