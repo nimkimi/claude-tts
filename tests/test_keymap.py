@@ -213,7 +213,7 @@ def test_write_resolved_emits_array_of_bindings(monkeypatch, tmp_path):
     witness = data[-1]
     assert witness["action"] == "witness_config"
     assert "keyCode" not in witness
-    assert witness["alarmAsset"] == "/System/Library/Sounds/Hero.aiff"  # isolated config -> fallback
+    assert witness["alarmAsset"] == "/System/Library/Sounds/Hero.aiff"  # isolated config -> DEFAULTS
     assert witness["alarmWords"] == "Sonari is down."
     assert witness["alarmEnabled"] is True
 

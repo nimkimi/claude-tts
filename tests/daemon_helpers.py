@@ -37,8 +37,8 @@ class FakeSpearconCache:
 # this table into config.DEFAULTS; this ONE function is the seam, so that move
 # is a one-line change here and no test has to know where the table lives.
 def _default_earcons() -> dict:
-    from sonari.platform.macos.earcon import _DEFAULTS
-    return dict(_DEFAULTS)
+    from sonari.config import DEFAULTS
+    return dict(DEFAULTS["earcons"])
 
 
 # Every FakeSpeaker built during the CURRENT test. conftest's autouse

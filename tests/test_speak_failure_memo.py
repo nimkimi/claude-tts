@@ -190,7 +190,8 @@ def test_a_real_speaker_nonzero_exit_signals_failure_and_writes_the_memo():
 
     played_earcons = []
     speaker = Speaker(say_runner=lambda t, v, r: _BrokenProc(),
-                      earcon_player=lambda p: played_earcons.append(p) or None)
+                      earcon_player=lambda p: played_earcons.append(p) or None,
+                      earcons=dict(DEFAULTS["earcons"]))
     sessions = SessionManager()
     sessions.set_foreground("fg")
     config = {k: (v.copy() if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}

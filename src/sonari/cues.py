@@ -74,8 +74,8 @@ CUES = {c.name: c for c in (
     Cue("summary_voice", "content", "queued",
         "The catch-up summary's island voice"),
     # --- §7 witness alarm tier (out-of-band). Assets ratified (ear-batch-2);
-    # Python-level fallbacks in speaker._FALLBACK_EARCONS keep them from ever
-    # being silently unconfigured; playback is a raw spawn, never the arbiter. ---
+    # load_config()'s merge of config.DEFAULTS keeps them from ever being
+    # silently unconfigured; playback is a raw spawn, never the arbiter. ---
     Cue("alarm_daemon_down", "failure", "alarm",
         "hotkeyd lost the daemon and sounds the alarm itself"),
     Cue("alarm_hotkeys_down", "failure", "alarm",

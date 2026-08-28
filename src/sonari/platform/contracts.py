@@ -19,7 +19,6 @@ class TtsBackend(Protocol):
 @runtime_checkable
 class EarconBackend(Protocol):
     def play(self, path: "str"): ...
-    def default_earcons(self) -> "dict": ...
 
 
 @runtime_checkable

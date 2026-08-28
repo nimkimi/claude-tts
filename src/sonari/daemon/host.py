@@ -611,18 +611,13 @@ class SpeechDaemon:
         return self._spearcons.get(folder)
 
     def _asset_path(self, kind: str) -> "str | None":
-        """Config-first + Python-fallback asset resolution for post-GA cue kinds
-        that must be resolvable OUTSIDE Speaker.transient() (the crossing
-        prelude; the witness alarms): the speaker.py _FALLBACK_EARCONS
-        discipline — a config entry always wins, the fallback means the kind can
-        never be silently unconfigured on an existing install. Pure lookup: no
-        lock, no I/O, no playback."""
-        earcons = self.config.get("earcons") or {}
-        path = earcons.get(kind)
-        if path is None:
-            from sonari.speaker import _FALLBACK_EARCONS
-            path = _FALLBACK_EARCONS.get(kind)
-        return path
+        """Config-first asset resolution for post-GA cue kinds that must be
+        resolvable OUTSIDE Speaker.transient() (the crossing prelude; the
+        witness alarms): load_config()'s merge of config.DEFAULTS means a
+        config entry always wins and the kind can never be silently
+        unconfigured on an existing install. Pure lookup: no lock, no I/O,
+        no playback."""
+        return (self.config.get("earcons") or {}).get(kind)
 
     def cue(self, kind: str, *, word=None, session=None) -> None:
         """Fire a registered TRANSIENT cue (D8 law 4) — with enqueue-with-prelude,

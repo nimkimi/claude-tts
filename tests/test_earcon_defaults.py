@@ -62,3 +62,46 @@ def test_an_explicit_null_still_mutes_a_cue(tmp_path):
         json.dumps({"earcons": {"repoint": None}}), encoding="utf-8")
     loaded = config.load_config()
     assert loaded["earcons"]["repoint"] is None
+
+
+import pathlib
+import re
+
+
+SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "sonari"
+
+
+def test_only_one_resolver_reads_the_earcon_table():
+    """Three sources of truth for one table is the drift this receipt closes."""
+    hits = [
+        "{0}:{1}".format(p.relative_to(SRC), i)
+        for p in SRC.rglob("*.py")
+        for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+        if "_FALLBACK_EARCONS" in line
+    ]
+    assert hits == [], "second earcon table still alive at {0}".format(hits)
+
+
+def test_the_platform_backend_no_longer_owns_a_default_table():
+    from sonari.platform.macos import earcon
+    assert not hasattr(earcon, "_DEFAULTS")
+    assert not hasattr(earcon.MacEarconBackend, "default_earcons")
+
+
+def test_every_registered_cue_has_a_default_asset():
+    """Forward guard, green from here on: a future cue cannot ship DOA.
+
+    The five exempt kinds are not tone assets: speech and summary_voice are
+    spoken, pitch_up/pitch_down resolve through Speaker.pitch_asset, and
+    callsign is a rendered spearcon.
+    """
+    from sonari.config import DEFAULTS
+    from sonari.cues import CUES
+
+    ASSET_EXEMPT = {"speech", "summary_voice", "pitch_up", "pitch_down",
+                    "callsign"}
+    missing = set(CUES) - ASSET_EXEMPT - set(DEFAULTS["earcons"])
+    assert missing == set(), (
+        "registered cue(s) {0} have no default asset and would ship "
+        "silent".format(sorted(missing))
+    )

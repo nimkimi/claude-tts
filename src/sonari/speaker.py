@@ -18,26 +18,6 @@ class SpeakFailure(Exception):
     from an ordinary interrupt (I3: a broken audio path used to produce total,
     untraceable silence)."""
 
-# Failure/expiry earcon kinds added AFTER GA: bootstrap merges platform defaults
-# only when the whole `earcons` config key is absent (bootstrap.py:73-74), so on
-# an EXISTING install a new config-dict kind would be SILENTLY disabled — the
-# worst eyes-free failure. These kinds therefore resolve config-first, then fall
-# back to the built-in asset (the pitch-asset precedent). A config entry
-# always wins, so the owner swaps assets without a code change. Old kinds keep
-# today's silent-no-op semantics when unconfigured.
-_FALLBACK_EARCONS = {
-    # One failure tone by owner ear ruling (ear-batch-2 slot 1): kinds stay
-    # distinct, the paired word carries the class.
-    "error_misdirected": "/System/Library/Sounds/Sosumi.aiff",
-    "error_system": "/System/Library/Sounds/Sosumi.aiff",
-    "permission_expired": "/System/Library/Sounds/Sosumi.aiff",
-    # D2 §6.6 crossing prelude — resolved via host._asset_path (config-first),
-    # never through transient().
-    "crossing": "/System/Library/Sounds/Frog.aiff",
-    "alarm_daemon_down": "/System/Library/Sounds/Hero.aiff",
-    "alarm_hotkeys_down": "/System/Library/Sounds/Basso.aiff",
-}
-
 
 class Speaker:
     def __init__(
@@ -171,13 +151,11 @@ class Speaker:
         no stacking). Transients may coexist with speech, never with each other.
         Called from handler threads (under the daemon lock) AND the speak thread
         (_signal_speak_failure) — hence its own lock, never the daemon's. Asset
-        resolution: the config dict first, then _FALLBACK_EARCONS; an unconfigured
-        legacy kind stays a silent no-op."""
+        resolution: one lookup in the config dict; an unconfigured kind stays a
+        silent no-op."""
         if self._earcon_player is None:
             return
         path = self._earcons.get(kind)
-        if path is None:
-            path = _FALLBACK_EARCONS.get(kind)   # never-silent NEW kinds only
         if path is None:
             return
         with self._transient_lock:

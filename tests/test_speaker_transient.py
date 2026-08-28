@@ -1,7 +1,8 @@
 """D8 law 3: short non-verbal tones play through a ONE-SLOT arbiter — a new
 transient terminates a still-playing one (latest-wins supersede, owner ruling
-2); transients never stack. Asset resolution mirrors earcon(): config-first,
-then _FALLBACK_EARCONS, silent no-op for unconfigured legacy kinds."""
+2); transients never stack. Asset resolution is one lookup in the config
+dict (config.DEFAULTS merged in by load_config()); silent no-op for a kind
+absent from the table."""
 from pathlib import Path
 
 from sonari.speaker import Speaker
@@ -75,19 +76,38 @@ def test_unconfigured_legacy_kind_is_silent_noop():
     assert player.paths == []
 
 
-def test_new_failure_kinds_fall_back_to_builtin_assets():
+def test_new_failure_kinds_resolve_from_the_merged_defaults():
+    from sonari.config import DEFAULTS
     player = RecordingPlayer()
-    sp = Speaker(earcon_player=player, earcons={})
+    sp = Speaker(earcon_player=player, earcons=dict(DEFAULTS["earcons"]))
     sp.transient("error_system")
     assert player.paths == ["/System/Library/Sounds/Sosumi.aiff"]
 
 
-def test_config_entry_wins_over_the_fallback():
+def test_config_entry_wins_over_the_default():
+    from sonari.config import _deep_merge, DEFAULTS
     player = RecordingPlayer()
-    sp = Speaker(earcon_player=player,
-                 earcons={"error_misdirected": "/custom/door.aiff"})
+    merged = _deep_merge(DEFAULTS, {"earcons": {"error_misdirected": "/custom/door.aiff"}})
+    sp = Speaker(earcon_player=player, earcons=merged["earcons"])
     sp.transient("error_misdirected")
     assert player.paths == ["/custom/door.aiff"]
+
+
+def test_a_kind_absent_from_the_table_is_silent_now_that_nothing_rescues_it():
+    """The behavioural receipt for the collapse itself.
+
+    Before this task, the speaker-level fallback table rescued alarm_daemon_down
+    whatever the caller passed, so this played Hero.aiff. With one resolver, the
+    table IS the answer and an absent kind is silent. Reintroducing any
+    Python-level fallback in Speaker.transient makes this test fail -- which is
+    the point: the two tests above it pass identically with or without the
+    fallback, so without this one the only thing standing between the collapse
+    and a quiet re-introduction is a source-text grep.
+    """
+    player = RecordingPlayer()
+    sp = Speaker(earcon_player=player, earcons={"error": "/System/Library/Sounds/Sosumi.aiff"})
+    sp.transient("alarm_daemon_down")
+    assert player.paths == []
 
 
 def test_transient_without_player_is_noop():

@@ -66,14 +66,9 @@ def test_every_registered_transient_is_reachable():
     assert not dead, "registered but unreachable transients: {0}".format(dead)
 
 
-def test_every_platform_default_and_fallback_kind_is_registered():
-    from sonari.platform.macos.earcon import _DEFAULTS
-    from sonari.speaker import _FALLBACK_EARCONS
-    # Registered, not necessarily transient: the maps now also carry the
-    # crossing prelude (and later the alarm tier) — the registry is still the
-    # one namespace every asset key must live in.
-    assert set(_DEFAULTS) <= set(CUES)
-    assert set(_FALLBACK_EARCONS) <= set(CUES)
+def test_every_default_asset_kind_is_registered():
+    from sonari.config import DEFAULTS
+    assert set(DEFAULTS["earcons"]) <= set(CUES)
 
 
 def test_prelude_entries_cover_chirps_callsign_and_crossing():

@@ -126,8 +126,6 @@ def main() -> None:
 
     _backend = get_platform()
     cfg = load_config()
-    if "earcons" not in cfg:
-        cfg["earcons"] = _backend.earcon.default_earcons()
     speaker = Speaker(
         voice=cfg.get("voice"),
         rate=cfg.get("rate", 200),

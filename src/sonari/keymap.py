@@ -408,14 +408,16 @@ def write_default_keymap_if_absent() -> bool:
 def _witness_entry() -> dict:
     """The §7 witness-config entry appended to the resolved array. keyCode-less:
     an old hotkeyd binary's loadEntries guard requires keyCode and skips it; a
-    new binary reads it by action name. The asset resolves config-first with the
-    Python fallback (never silently unconfigured); hotkeyd's compiled-in
-    defaults are the last resort, so a STALE resolved file cannot disable the
-    alarm either. Words ratified (ear-batch-2, 2026-08-01)."""
+    new binary reads it by action name. The asset resolves config-first;
+    load_config()'s merge of config.DEFAULTS keeps it from ever being silently
+    unconfigured; hotkeyd's compiled-in defaults are the last resort, so a
+    STALE resolved file cannot disable the alarm either. Words ratified
+    (ear-batch-2, 2026-08-01)."""
     from sonari.config import load_config
-    from sonari.speaker import _FALLBACK_EARCONS
-    earcons = load_config().get("earcons") or {}
-    asset = earcons.get("alarm_daemon_down") or _FALLBACK_EARCONS["alarm_daemon_down"]
+    # One resolver. This site is why the table must live in load_config and
+    # not in bootstrap: keymap runs in the hotkeyd/CLI process, which never
+    # executes bootstrap.main().
+    asset = (load_config().get("earcons") or {}).get("alarm_daemon_down")
     return {"action": "witness_config", "alarmAsset": asset,
             "alarmWords": "Sonari is down.", "alarmEnabled": True}
 

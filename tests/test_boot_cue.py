@@ -51,7 +51,6 @@ def test_main_wires_the_cue_before_run(monkeypatch):
 
         class earcon:  # noqa: D106
             play = staticmethod(lambda *a, **k: None)
-            default_earcons = staticmethod(lambda: {})
 
     monkeypatch.setattr("sonari.platform.get_platform", lambda: _FakePlat)
 
