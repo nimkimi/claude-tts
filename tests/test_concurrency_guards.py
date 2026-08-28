@@ -197,6 +197,31 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
         return result
     host_mod._select_keep_going = _counting_select_keep_going
 
+    # Input B (Task 11 completeness guard): M2 widened _pop_held_control_cue's
+    # scan to every STOPPED stream, not just speaker()/workspace() -- see
+    # tests/test_held_control_cue.py's rollback-lever pin. A stress test
+    # cannot honestly assert exact spoken TEXT under real thread interleaving
+    # (order and content are nondeterministic by construction here), but it
+    # CAN honestly count whether the widened scan actually delivered a cue
+    # from a stream OUTSIDE {speaker(), workspace()} under real contention --
+    # exactly the class the named rollback (narrowing the scan back to
+    # {speaker(), workspace()}) would eliminate. Instance shadow (self-
+    # contained per fresh daemon, like _counting_set_speaker above), so no
+    # finally-restore is needed.
+    held_cue_fires = [0]
+    held_cue_fires_cross_stream = [0]
+    _orig_pop_held_control_cue = daemon._pop_held_control_cue
+    def _counting_pop_held_control_cue():
+        spk = sessions.speaker()
+        ws = sessions.workspace()
+        result = _orig_pop_held_control_cue()
+        if result is not None:
+            held_cue_fires[0] += 1
+            if result.session not in (spk, ws):
+                held_cue_fires_cross_stream[0] += 1
+        return result
+    daemon._pop_held_control_cue = _counting_pop_held_control_cue
+
     try:
         errors: list = []
         # Capture crashes at the boundary BEFORE the production swallow layers eat
@@ -340,6 +365,19 @@ def test_stress_no_lost_duplicated_or_resurrected_item():
         # proves the NEW path was exercised by this storm, not merely compiled.
         assert len(daemon._spearcons.requested) > 0, \
             "keep-going fired but the pre-roll spearcon path never resolved a label"
+        # Input B (additive, count-based -- see the wrapper's own comment above):
+        # the widened cross-stream held-cue scan must actually have delivered
+        # at least one control cue from a stream OUTSIDE {speaker(), workspace()}
+        # under real contention, or this storm never exercised the class of
+        # behaviour the named rollback (narrowing the scan back to
+        # {speaker(), workspace()}) would silently eliminate. A full-list
+        # spoken-text assertion would be flaky here by construction (real
+        # thread interleaving), so this is the honest thing to pin instead.
+        assert held_cue_fires_cross_stream[0] > 0, (
+            "the widened cross-stream held-cue scan never delivered a cue "
+            "from outside {speaker(), workspace()} under this storm -- the "
+            "M2 behaviour the rollback lever would remove was never exercised"
+        )
         # This guard does NOT bound queue LENGTH. Cap-exempt cues (PAUSE "Paused./
         # Resumed.", JUMP_WAITING "Jumping to...") use enqueue_front, which is
         # deliberately NOT subject to _backlog_cap (queue.py:42-45), so under this

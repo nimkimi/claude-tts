@@ -70,6 +70,37 @@ def test_ordinary_content_on_a_stopped_stream_is_still_held():
     assert len(daemon._stream("B").queue) == 1
 
 
+def test_a_held_control_cue_on_a_background_stream_preempts_a_live_speaker():
+    """The rollback lever, pinned. Spec risk-register row 3 (design doc
+    ~line 899) sanctions M2's widened scan with a NAMED rollback: narrow
+    _pop_held_control_cue back to {speaker(), workspace()}. All five of this
+    file's other cases run with speaker() is None, so none of them reaches
+    the actual claim -- that a control cue on a STOPPED stream that is
+    NEITHER the speaker NOR the workspace preempts a LIVE speaker's own
+    queued content on this very tick. Here A is speaker() (and workspace())
+    with real queued content, D is a third, unrelated stopped stream holding
+    only a control cue. If the scan were narrowed to {speaker(), workspace()}
+    it would never look at D, and A's queued content would be spoken instead
+    -- this assertion is exactly the one that flips under that rollback.
+    """
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="A")
+    sessions.set_speaker("A")
+    sessions.register("D", cwd="/x/delta")
+    daemon._stream("D").stopped = True
+    daemon._enqueue("A", "prose", "speaker content", False)
+    daemon._enqueue("D", "prose", "delta cue", False, control_cue=True)
+    daemon._speak_loop_once()
+    assert speaker.spoken == ["delta cue"], (
+        "a held control cue on a stopped stream that is neither speaker() "
+        "nor workspace() did not preempt the live speaker's own content"
+    )
+    assert len(daemon._stream("A").queue) == 1, (
+        "the live speaker's queued content was popped even though the "
+        "control cue preempted this tick -- it must stay queued for the "
+        "next one, untouched by the preemption"
+    )
+
+
 def test_a_non_stopped_background_stream_is_untouched():
     """KEEP-GREEN sanity check, NOT part of the RED set.
 

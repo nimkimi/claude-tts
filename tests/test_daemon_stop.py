@@ -96,9 +96,18 @@ def test_stop_all_is_one_way_each_session_returns_via_its_own_stop_key():
     daemon.handle_message({"type": "stop_all", "session": "A"})
     sessions.set_foreground("B")
     daemon._speak_loop_once()
-    assert "b" not in speaker.spoken          # landing on B does NOT auto-read it
+    # Complete-list, not membership: landing on B does NOT auto-read its own
+    # backlog ("b" must never appear), but stop-all's "All stopped." was
+    # enqueued to the SPEAKER (A, still speaker() at that moment) and never
+    # delivered before this landing moved speaker() to B too -- M2's
+    # cross-stream held-cue scan (host.py _pop_held_control_cue) legitimately
+    # reaches it from B's own tick, where BASE left this tick silent. A bare
+    # "b" not in speaker.spoken membership check cannot see that new PRESENCE,
+    # only an absence -- assert the whole list.
+    assert speaker.spoken == ["All stopped."]
     daemon.handle_message({"type": "stop_session", "session": "B"})   # ⌃⌘S brings B back (D2 quiet resume)
     daemon._speak_loop_once()                 # "Resumed."
     daemon._speak_loop_once()                 # pre-start pile dropped, not replayed (D2)
-    assert "b" not in speaker.spoken          # D2: quiet resume does not flood the backlog
-    assert "Resumed." in speaker.spoken
+    # D2: quiet resume does not flood the backlog ("b" stays absent) and
+    # speaks nothing besides its own "Resumed." confirmation.
+    assert speaker.spoken == ["All stopped.", "Resumed."]
