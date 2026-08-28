@@ -6,7 +6,16 @@ ctrl-cmd-S. Probe P5: claim_announce spent=True, NEWq 2 -> 0, spoken []. Never
 heard, ever, for that session's whole life.
 Spec: docs/superpowers/specs/2026-08-28-receipts-design.md 4.5.
 
-Also carries the named ⌃⌘R risk from the dispatch: Step 5 removes control_cue from the
+Also carries CARRIED-INPUTS.md Task 10 Input 1 (R21): `announce_resume` is the
+same class of one-shot -- armed at SET_FOREGROUND (Policy-A quiet-hold lift)
+on an ARM-TIME proof only ("this stream is not stopped right now"), delivered
+later at FLUSH/SESSION_START. Nothing previously invalidated the claim if the
+SAME stream was stopped again in the arm-to-deliver window, so a stale
+"Resumed." could land on a stream he just re-muted -- and because it is a
+control_cue, the held branch speaks it THROUGH that very mute. Fixed in
+playback.py's two stop paths (on_stop_session's stopping branch, on_stop_all).
+
+And the named ⌃⌘R risk from the dispatch: Step 5 removes control_cue from the
 SESSION_START announce, so it newly qualifies for the W12 _last_utterance
 capture (host.py:1564) it was excluded from before. Pinned below.
 """
@@ -138,6 +147,52 @@ def test_maybe_hint_leaves_the_key_open_on_a_stopped_stream():
     daemon._stream("B").stopped = False
     maybe_hint(daemon, key, "B")
     assert key in daemon._hinted
+
+
+# --- CARRIED-INPUTS Task 10 Input 1 (R21): announce_resume is the same class
+# of one-shot, on the STOP side rather than the birth side. ---
+
+def test_announce_resume_is_invalidated_by_a_stop_before_delivery():
+    """The arm-time guard at lifecycle.py's on_set_foreground (`st is None or
+    not st.stopped`) proves only ARM-TIME deliverability. Before this fix
+    nothing invalidated announce_resume if the SAME stream was stopped again
+    in the arm-to-deliver window: SET_FOREGROUND -> ctrl-cmd-S -> FLUSH would
+    land a stale "Resumed." on a stream he just re-muted, and because it is a
+    control_cue the held branch speaks it THROUGH that very mute."""
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon.voice_state = "quiet-hold"
+    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "fg", cwd="/x/fg"))
+    assert daemon._stream("fg").announce_resume is True         # armed
+    daemon.handle_message(_msg(MsgType.STOP_SESSION, "fg"))     # ctrl-cmd-S: re-stop fg
+    assert daemon._stream("fg").stopped is True
+    assert daemon._stream("fg").announce_resume is False, (
+        "a stale claim survived the very stop that falsified it"
+    )
+    daemon.handle_message(_msg(MsgType.FLUSH, "fg"))
+    assert all(it.text != "Resumed." for it in queue._items), (
+        "FLUSH voiced a stale Resumed. through the mute he just pressed"
+    )
+
+
+def test_announce_resume_is_invalidated_by_stop_all_before_delivery():
+    """The master-quiet variant of R21. on_stop_all's loop stops EVERY stream
+    but (before this fix) touched none of their armed announce_resume flags,
+    so an armed flag survived ctrl-cmd-M and FLUSH still landed "Resumed." on
+    a stream now held by the master quiet -- voiced by the same control_cue
+    held branch."""
+    daemon, queue, speaker, sessions, config = make_daemon()
+    daemon.voice_state = "quiet-hold"
+    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "fg", cwd="/x/fg"))
+    assert daemon._stream("fg").announce_resume is True         # armed
+    daemon.handle_message(_msg(MsgType.STOP_ALL, "fg"))
+    assert daemon._stream("fg").stopped is True
+    assert daemon._stream("fg").announce_resume is False, (
+        "a stale claim survived stop-all"
+    )
+    daemon.handle_message(_msg(MsgType.FLUSH, "fg"))
+    assert all(it.text != "Resumed." for it in queue._items), (
+        "FLUSH voiced a stale Resumed. through the master quiet"
+    )
 
 
 # --- Named risk from the dispatch: Step 5 moves the announce off control_cue,

@@ -115,10 +115,11 @@ def test_announce_resume_is_not_armed_on_a_stopped_stream():
     st.stopped:`) only arms the flag when the target stream is not stopped.
 
     This proves ARM-TIME behaviour ONLY -- it says nothing about delivery.
-    Nothing clears announce_resume if the stream is stopped again between
-    arming and delivery (a known, accepted edge for this task's zero-
-    behaviour-change scope; see the delivery-time comments at
-    lifecycle.py/prose.py, and Task 10 which owns the marker lifecycle).
+    Task 10 / R21 (tests/test_one_shot_deliverability.py) covers the
+    delivery-time gap this proof left open: nothing invalidated
+    announce_resume if the stream was stopped again between arming and
+    delivery, so on_stop_session's stopping branch and on_stop_all now clear
+    the flag at the moment the claim it made is falsified.
 
     Must fail if the st.stopped check is removed from that arm condition.
     """

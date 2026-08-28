@@ -136,15 +136,14 @@ def on_flush(ctx, msg):
         # D2 §6.3: the Policy-A submit lift (lifecycle) deferred its audible
         # mark past this clear — deliver it now, mirroring ⌃⌘S resume's cue.
         # announce_resume is armed only when `st is None or not st.stopped`
-        # (lifecycle.py's on_set_foreground) -- but that is an ARM-TIME proof
-        # only. Nothing clears the flag if the stream is stopped again in the
-        # arm-to-deliver window (on_stop_session/on_stop_all never touch it,
-        # and reset_for_new_prompt deliberately keeps the sticky `stopped`
-        # flag), so this delivery CAN land on a since-stopped stream. That is
-        # a known, accepted edge for this task's zero-behaviour-change scope
-        # (the marker lifecycle belongs to Task 10) -- and it is the right
-        # direction for a control cue anyway: it exists because he pressed a
-        # key, so it is delivered regardless of hold state.
+        # (lifecycle.py's on_set_foreground) -- an ARM-TIME proof only. Task
+        # 10 / R21 closed the arm-to-deliver gap this proof left open:
+        # on_stop_session's stopping branch and on_stop_all now invalidate
+        # the flag the instant the stream is stopped again, so by the time
+        # this leg runs the flag is already False on any since-stopped
+        # stream -- this delivery can no longer land on one. And it is the
+        # right direction for a control cue anyway: it exists because he
+        # pressed a key, so it is delivered regardless of hold state.
         st.announce_resume = False
         ctx.host._enqueue(session, "prose", "Resumed.", False,
                           control_cue=True, at_front=True)

@@ -186,6 +186,14 @@ def on_stop_session(ctx, msg):
     else:
         # Stopping -> quiet-hold (SPEC §6). Cancel only if THIS session is in flight.
         st.stopped = True
+        # Task 10 / R21: invalidate a Policy-A "Resumed." claim armed on this
+        # stream (lifecycle.py's on_set_foreground) but not yet delivered.
+        # Arm-time only proved deliverability at ARM time; this ⌃⌘S press
+        # falsifies it right here -- without this, the still-armed flag rides
+        # to the next FLUSH/SESSION_START and speaks a stale "Resumed." on the
+        # very stream this press just muted, through the mute, because it is
+        # a control cue.
+        st.announce_resume = False
         ctx.host.voice_state = "quiet-hold"
         cur = ctx.host._current_item
         if cur is not None and cur.session == fg:
@@ -202,6 +210,11 @@ def on_stop_all(ctx, msg):
     # speak loop re-queues it at the front of its own (now stopped) stream.
     for st in ctx.host._streams.values():
         st.stopped = True
+        # Task 10 / R21: the master quiet invalidates every armed "Resumed."
+        # claim at once, same reasoning as on_stop_session's stopping branch
+        # above -- an armed-but-undelivered flag must not survive the very
+        # stop that falsifies it.
+        st.announce_resume = False
     ctx.host.voice_state = "stopped-all"             # SPEC §6/§270: every session muted
     if ctx.host._current_item is not None:
         ctx.host.speaker.cancel()
