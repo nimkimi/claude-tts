@@ -331,7 +331,11 @@ def on_status(ctx, msg):
         # Diagnostic additions (DIAG-3).
         # Per-session snapshot: one entry per known stream.
         "sessions": [
-            {"session": sid, "queue_len": len(st.queue), "stopped": st.stopped}
+            {"session": sid, "queue_len": len(st.queue), "stopped": st.stopped,
+             # Without `live` the wedge row cannot tell a genuinely stuck loop
+             # from a DEAD session's backlog, which is never auto-voiced by
+             # design -- so the row would fire on correct behaviour.
+             "live": host.sessions.is_live(sid)}
             for sid, st in host._streams.items()
         ],
         "session_count": len(host._streams),
@@ -357,6 +361,10 @@ def on_status(ctx, msg):
         ),
         # Bluetooth keep-alive state (disabled|degraded|running|hold|idle).
         "keepalive": host.keepalive.status(),
+        # Seconds since the oldest live silent player was spawned, or None
+        # with no players -- an orphaned player still reads "running" above,
+        # so this is what actually tells the two states apart.
+        "keepalive_oldest_player_age_s": host.keepalive.oldest_player_age(),
     }
 
 

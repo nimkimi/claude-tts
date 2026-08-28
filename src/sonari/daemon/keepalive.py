@@ -188,6 +188,19 @@ class KeepAliveManager:
                 return "hold"
             return "idle"
 
+    def oldest_player_age(self) -> "float | None":
+        """Seconds since the oldest live player was spawned, or None.
+
+        Each player plays SILENCE_S of silence and its successor is armed at
+        SILENCE_S - OVERLAP_S, so no live player may ever be older than
+        SILENCE_S + OVERLAP_S. Older means the chain stalled or a player was
+        orphaned -- a state status() reports as "running".
+        """
+        with self._lock:
+            if not self._players:
+                return None
+            return self._clock() - min(spawned for _, spawned in self._players)
+
     # ---- players --------------------------------------------------------
 
     def _live_locked(self) -> bool:

@@ -112,7 +112,10 @@ def test_status_returns_documented_dict():
     }
     # DIAG-3 additions: verify shape and basic invariants.
     assert resp["session_count"] == 1
-    assert resp["sessions"] == [{"session": "fg", "queue_len": 2, "stopped": False}]
+    # "fg" has no captured identity, so is_live() fails open -> True (R5).
+    assert resp["sessions"] == [
+        {"session": "fg", "queue_len": 2, "stopped": False, "live": True}
+    ]
     assert resp["uptime_s"] >= 0
     assert resp["last_drain_age_s"] is None   # no item drained yet in this test
     assert resp["current_item"] is False
