@@ -158,6 +158,124 @@ def test_nav_empty_history_cue_answers_on_a_muted_session():
     )
 
 
+def test_nav_content_on_a_live_session_still_captures_last_utterance():
+    """LIVE-path pin (fix round 1). `control_cue` is overloaded in host.py:
+    besides "audible through a mute" it ALSO means "chrome, exclude from
+    _last_utterance / cross-session prefix" (W12, host.py:1564/669). The
+    first cut of this task's nav enrollment set `control_cue=True`
+    unconditionally, so on a LIVE (un-muted) session it silently tripped
+    that second meaning too -- reviewer's repro: navigate to an older
+    response, press ctrl-cmd-R, hear the NEWER one instead. Gating on
+    `stopped` (this fix round) restores BASE's behaviour: nav content on a
+    live session still captures _last_utterance."""
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
+    sessions.register("B", cwd="/x/bravo")
+    assert not daemon._stream("B").stopped
+    daemon.history.record("B", "prose", "the older response")
+    daemon.history.end_message("B")
+    daemon.history.start_turn("B")
+    daemon.history.record("B", "prose", "the newer response")
+    daemon.history.end_message("B")
+    daemon.handle_message(_msg(MsgType.NAV, "B", to="prev_response"))
+    for _ in range(5):
+        daemon._speak_loop_once()
+    assert daemon._last_utterance is not None, (
+        "nav on a LIVE session did not capture _last_utterance at all"
+    )
+    assert "the older response" in daemon._last_utterance[0], (
+        "nav on a LIVE session captured the wrong _last_utterance: {0}".format(
+            daemon._last_utterance
+        )
+    )
+
+
+def test_nav_message_step_on_a_live_session_still_captures_last_utterance():
+    """LIVE-path pin (fix round 1) for `_nav`'s OWN seek-and-play loop --
+    distinct from `_nav_response`'s (pinned above). Same reasoning as
+    `test_nav_content_on_a_live_session_still_captures_last_utterance`; this
+    is `_nav`'s sibling site, gated separately in the source and so needs
+    its own mutation-sensitive pin (mirrors the muted-side split between
+    `test_nav_answers_and_reads_on_a_muted_session` and
+    `test_nav_message_step_reads_on_a_muted_session`)."""
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
+    sessions.register("B", cwd="/x/bravo")
+    assert not daemon._stream("B").stopped
+    daemon.history.record("B", "prose", "the first message")
+    daemon.history.end_message("B")
+    daemon.history.record("B", "prose", "the second message")
+    daemon.history.end_message("B")
+    daemon.handle_message(_msg(MsgType.NAV, "B", to="prev"))
+    for _ in range(5):
+        daemon._speak_loop_once()
+    # Seek-and-play replays the target item AND every later one, so the LAST
+    # utterance spoken -- and thus captured -- is "the second message" (the
+    # newest), not the target itself. The point being pinned is that
+    # _last_utterance is captured AT ALL on a live session, not which item.
+    assert daemon._last_utterance is not None, (
+        "nav (message-step) on a LIVE session did not capture _last_utterance"
+    )
+    assert "the second message" in daemon._last_utterance[0], (
+        "nav (message-step) on a LIVE session captured the wrong "
+        "_last_utterance: {0}".format(daemon._last_utterance)
+    )
+
+
+def test_reread_options_on_a_live_session_keeps_last_utterance_and_prefix():
+    """LIVE-path pin (fix round 1), the on_reread_options twin of the test
+    above. Also checks the OTHER axis `control_cue` gates in `_attributed_
+    text` (host.py:669): the cross-session folder prefix, and the
+    `_last_spoken_session` update that drives it -- both live inside the
+    same `elif not item.control_cue:` branch that _last_utterance's capture
+    does. `_last_spoken_session` starts pointing at a DIFFERENT session
+    ("A"), so a correctly-un-gated (live) item must both prefix its folder
+    and reclaim `_last_spoken_session`."""
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
+    sessions.register("B", cwd="/x/bravo")
+    daemon._stream("B").options = "1) yes  2) no"
+    daemon._last_spoken_session = "A"
+    assert not daemon._stream("B").stopped
+    daemon.handle_message(_msg(MsgType.REREAD_OPTIONS, "B"))
+    for _ in range(3):
+        daemon._speak_loop_once()
+    assert daemon._last_utterance is not None, (
+        "ctrl-cmd-O on a LIVE session did not capture _last_utterance at all"
+    )
+    assert daemon._last_utterance[0].startswith("bravo. 1) yes"), (
+        "ctrl-cmd-O on a LIVE session dropped the cross-session folder "
+        "prefix, or the wrong text was captured: {0}".format(
+            daemon._last_utterance
+        )
+    )
+    assert daemon._last_spoken_session == "B"
+
+
+def test_reread_options_fallback_on_a_live_session_still_captures_last_utterance():
+    """LIVE-path pin (fix round 1) for `on_reread_options`'s OTHER enqueue --
+    the `else` branch ("No options right now."), gated separately in the
+    source (decisions.py:279) from the `text`-present branch (:275) pinned
+    above. Reached only when there is NEITHER `st.options` NOR a pending
+    decision for the session -- a stored pending prompt would route through
+    the SAME :275 branch as the text-present case (the fallback lookup just
+    supplies a different `text` value), so it does not exercise :279.
+    Mirrors the muted-side split between
+    `test_reread_options_answers_on_a_muted_session_with_stored_options` and
+    `test_reread_options_answers_on_a_muted_session`."""
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
+    sessions.register("B", cwd="/x/bravo")
+    assert not daemon._stream("B").stopped
+    daemon.handle_message(_msg(MsgType.REREAD_OPTIONS, "B"))
+    for _ in range(3):
+        daemon._speak_loop_once()
+    assert daemon._last_utterance is not None, (
+        "ctrl-cmd-O's fallback branch on a LIVE session did not capture "
+        "_last_utterance at all"
+    )
+    assert "No options right now." in daemon._last_utterance[0], (
+        "ctrl-cmd-O's fallback branch on a LIVE session captured the wrong "
+        "_last_utterance: {0}".format(daemon._last_utterance)
+    )
+
+
 def test_a_decision_announcement_stays_silent_on_a_muted_session():
     """REGRESSION PIN, must pass before and after. A decision ARRIVING on a
     muted session is narration, not a gesture answer -- staying silent is what

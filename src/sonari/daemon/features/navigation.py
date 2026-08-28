@@ -46,11 +46,16 @@ def _nav(ctx, session: str, to: str) -> None:
         ctx.host._stream(session).nav_cursor = ids[new]
     ctx.host.speaker.cancel()
     ctx.host._drop_pending(ctx.host._stream(session).queue.clear())
-    # Seek-and-play: enqueue the target item AND every later one.
+    # Seek-and-play: enqueue the target item AND every later one. control_cue
+    # is gated on `stopped` -- unguarded, this content would fall under the
+    # host.py control_cue overload that ALSO means "chrome, exclude from
+    # _last_utterance / cross-session prefix" (W12, host.py:1564/669), and a
+    # navigated-to message is neither. Gating keeps the live/un-muted path
+    # byte-identical to today (Task 8 fix-round-1 ruling).
     for mid in ids[new:]:
         for e in ctx.host.history.entries_for_message(session, mid):
             ctx.host._enqueue(session, e.kind, e.text, False, entry=e,
-                              control_cue=True)
+                              control_cue=st.stopped)
 
 
 def _nav_response(ctx, session: str, direction: str) -> None:
@@ -95,10 +100,11 @@ def _nav_response(ctx, session: str, direction: str) -> None:
     ctx.host.speaker.cancel()
     ctx.host._drop_pending(st.queue.clear())
     ctx.host._enqueue(session, "prose", cue, False, control_cue=True)
+    # Gated on `stopped`, same reasoning as `_nav`'s seek-and-play loop above.
     for mid in mids:
         for e in ctx.host.history.entries_for_message(session, mid):
             ctx.host._enqueue(session, e.kind, e.text, False, entry=e,
-                              control_cue=True)
+                              control_cue=st.stopped)
 
 
 @handler(MsgType.NAV)

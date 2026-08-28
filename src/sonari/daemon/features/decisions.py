@@ -266,11 +266,16 @@ def on_reread_options(ctx, msg):
     # compose into foreground() unconditionally (the different accessor from
     # the workspace()-targeted sites above) — a dead foreground with the voice
     # idle strands either one without the single-item sanction (RR-2 shape).
+    # control_cue is gated on `stopped` -- unguarded, this content would also
+    # trip the host.py control_cue overload that means "chrome, exclude from
+    # _last_utterance / cross-session prefix" (W12, host.py:1564/669), and a
+    # re-read of the actual options is neither (Task 8 fix-round-1 ruling).
+    stopped = st is not None and st.stopped
     if text:
-        ctx.host._enqueue(fg, "choice", text, False, control_cue=True,
+        ctx.host._enqueue(fg, "choice", text, False, control_cue=stopped,
                           at_front=ctx.host._sanction_dead_read(fg, whole=False))
     else:
         ctx.host._enqueue(fg, "prose", "No options right now.", False,
-                          control_cue=True,
+                          control_cue=stopped,
                           at_front=ctx.host._sanction_dead_read(fg, whole=False))
     return None
