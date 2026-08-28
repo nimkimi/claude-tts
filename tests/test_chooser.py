@@ -204,7 +204,11 @@ def test_commit_onto_muted_keeps_going_to_active():
     assert sessions.speaker() is None              # voice released (Fork 2 keep-go)
     assert daemon.voice_state == "flowing"
     assert daemon._stream("A").stopped is True     # stays muted (R7)
-    daemon._speak_loop_once()                      # keep-going voices an ACTIVE session
+    daemon._speak_loop_once()                      # tick 1 (M2): landing cue from muted A
+    assert speaker.spoken == ["A."], (
+        "the commit-landing cue must be heard before keep-going moves on"
+    )
+    daemon._speak_loop_once()                      # tick 2: keep-going voices an ACTIVE session
     assert sessions.speaker() == "C"
     assert any(s and "c active" in s for s in speaker.spoken)
 

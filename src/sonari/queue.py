@@ -106,6 +106,13 @@ class SpeechQueue:
         counter is daemon-global and monotonic)."""
         return self._items[0].id if self._items else None
 
+    def oldest_control_cue_id(self) -> "int | None":
+        """Id of the oldest queued control cue, without removing it."""
+        for item in self._items:
+            if item.control_cue:
+                return item.id
+        return None
+
     def remove_by_id(self, item_id: int) -> "SpeechItem | None":
         """Remove and return the queued item with id *item_id*, else None. The
         chooser swaps out its still-queued previous preview before enqueuing the

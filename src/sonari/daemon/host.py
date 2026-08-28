@@ -1339,6 +1339,34 @@ class SpeechDaemon:
         except Exception:  # noqa: BLE001 - the alarm must never wedge the loop
             pass
 
+    def _pop_held_control_cue(self) -> "SpeechItem | None":
+        """Oldest control cue across every STOPPED stream. Caller holds _lock.
+
+        A press can land anywhere -- including a stopped stream that is not,
+        or is no longer, the speaker. Fork-2's commit-onto-muted RELEASES the
+        voice (set_speaker(None)), so a speaker-scoped scan could never reach
+        its own landing cue (probe C1).
+
+        Streams are selected oldest-first by the daemon-global monotonic
+        SpeechItem.id -- the same ordering key _select_keep_going uses, so
+        there is no dependence on dict iteration order. WITHIN one stream the
+        scan is front-to-back by queue position, matching the existing
+        pop_control_cue idiom (an at_front= cue can sit ahead of an older
+        one); that is precedent, not a new guarantee.
+        """
+        best_sess, best_id = None, None
+        for sess, st in self._state._streams.items():
+            if not st.stopped:
+                continue
+            oid = st.queue.oldest_control_cue_id()
+            if oid is None:
+                continue
+            if best_id is None or oid < best_id:
+                best_sess, best_id = sess, oid
+        if best_sess is None:
+            return None
+        return self._state._streams[best_sess].queue.pop_control_cue()
+
     def _speak_loop_once(self) -> None:
         """One iteration of the speak loop. May raise; _speak_loop contains it.
 
@@ -1348,27 +1376,28 @@ class SpeechDaemon:
         STOPPED (⌃⌘S / ⌃⌘M), the loop is held — only a pause-exempt cue
         ("Stopped." / "All stopped.") is voiced — until it is started again.
         SP1: speaker() == foreground(); SP2 keep-going advances speaker()
-        independently."""
+        independently.
+
+        M2: a control cue is scanned for BEFORE the speaker is even resolved,
+        across every stopped stream — not just the speaker's own. Fork-2's
+        commit-onto-muted RELEASES the voice and THEN enqueues the landing
+        cue to the muted target, so a speaker-scoped scan could never reach
+        its own landing cue (probe C1)."""
         self._drain_catchup_inbox()
         self._check_witness()
         # The ONE reaping caller: this site holds no lock, so the manager's bounded
         # ~2s-per-player reap of a wedged afplay can stall nothing but this tick.
         self._keepalive_recheck(reap=True)
-        fg0 = self.sessions.speaker()
-        st0 = self._state._streams.get(fg0)
-        if st0 is not None and st0.stopped:
-            # Held: scan the speaker stream for a control cue; otherwise
-            # wait. Pop+claim under the lock, mirroring the normal branch.
-            with self._lock:
-                fg = self.sessions.speaker()
-                st = self._state._streams.get(fg)
-                item = st.queue.pop_control_cue() if st is not None else None
-                self._state._current_item = item
-                cancel_epoch = self.speaker.cancel_epoch()
-            if item is None:
-                self._state._wake.wait(self._poll_interval)
-                self._state._wake.clear()
-                return
+        # BEFORE resolving the speaker: a control cue is the answer to a press,
+        # and a press can land anywhere -- including a stopped stream that is
+        # not (or is no longer) the speaker. Fork-2's commit-onto-muted
+        # RELEASES the voice, so the speaker-scoped scan could never reach its
+        # own landing cue (probe C1).
+        with self._lock:
+            item = self._pop_held_control_cue()
+            self._state._current_item = item
+            cancel_epoch = self.speaker.cancel_epoch()
+        if item is not None:
             vkw = {"voice": item.voice} if item.voice is not None else {}
             failed = False
             try:
@@ -1394,6 +1423,14 @@ class SpeechDaemon:
             self.note_spoken(item, completed)
             if failed:
                 self._back_off_after_failure()
+            return
+        fg0 = self.sessions.speaker()
+        st0 = self._state._streams.get(fg0)
+        if st0 is not None and st0.stopped:
+            # Held: no control cue anywhere -- wait until woken (a new cue,
+            # a start, or a stream change).
+            self._state._wake.wait(self._poll_interval)
+            self._state._wake.clear()
             return
         # Pop and CLAIM the speaker stream's next item atomically under the lock.
         # speaker() is read here too, so a switch arriving on another connection

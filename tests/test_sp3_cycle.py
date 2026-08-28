@@ -18,7 +18,8 @@ def test_ctrl_s_starts_navigated_muted_workspace():
     # Navigate onto the mute via the chooser: first step lands index 1 = A; commit.
     daemon.handle_message(_msg(MsgType.CHOOSER_STEP, "", direction="next"))
     daemon.handle_message(_msg(MsgType.CHOOSER_COMMIT, ""))   # workspace=A(muted), keep-go
-    daemon._speak_loop_once()                       # voice keep-goes to C
+    daemon._speak_loop_once()                       # tick 1 (M2): landing cue from muted A
+    daemon._speak_loop_once()                       # tick 2: voice keep-goes to C
     assert sessions.workspace() == "A" and sessions.speaker() == "C"
     daemon.handle_message(_msg(MsgType.STOP_SESSION, ""))   # ⌃⌘S: workspace A is muted -> START A
     assert daemon._stream("A").stopped is False     # A started (un-muted)
