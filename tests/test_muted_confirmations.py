@@ -23,21 +23,57 @@ def test_a_rate_nudge_reads_back_while_muted():
     daemon.handle_message(_msg(MsgType.SET_RATE, "B", delta=25))
     for _ in range(3):
         daemon._speak_loop_once()
-    assert any("Rate" in (s or "") for s in speaker.spoken), (
+    assert any("Rate 225." in (s or "") for s in speaker.spoken), (
         "the rate changed silently: {0}".format(speaker.spoken)
     )
+    assert config["rate"] == 225, "the docstring's own claim of persistence, unchecked"
 
 
 def test_a_verbosity_nudge_still_reads_back_while_muted():
     """The in-run control. It spoke before and must still speak."""
-    daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
+    daemon, _, speaker, sessions, config = make_daemon(foreground="B")
     sessions.register("B", cwd="/x/bravo")
     daemon._stream("B").stopped = True
     speaker.spoken.clear()
     daemon.handle_message(_msg(MsgType.CYCLE_VERBOSITY, "B"))
     for _ in range(3):
         daemon._speak_loop_once()
-    assert any("Verbosity" in (s or "") for s in speaker.spoken)
+    assert any("Verbosity medium." in (s or "") for s in speaker.spoken)
+    assert config["verbosity"] == "medium"
+
+
+def test_a_rate_readback_on_a_live_workspace_stays_unprefixed_and_out_of_repeat():
+    """LIVE-path pin (fix round 1). `control_cue` is overloaded in host.py:
+    besides "audible through a mute" it ALSO means "chrome, exclude from
+    _last_utterance / cross-session prefix" (host.py:1564 and :669). Row 5's
+    hoist makes control_cue=True unconditional for every _readback, so on a
+    LIVE (un-muted) workspace this now also means: no cross-session folder
+    prefix, and the readback must NOT clobber _last_utterance -- exactly how
+    the sibling verbosity readback already behaved at BASE (both are
+    settings chrome, not content he asked to hear repeated on ctrl-cmd-R).
+    _last_spoken_session is primed to a DIFFERENT session ("A") so the
+    prefix branch is live; if it fired, "bravo." would prepend."""
+    daemon, _, speaker, sessions, config = make_daemon(foreground="B")
+    sessions.register("B", cwd="/x/bravo")
+    daemon._last_spoken_session = "A"
+    daemon._last_utterance = ("alpha content", None)
+    assert not daemon._stream("B").stopped
+    speaker.spoken.clear()
+    daemon.handle_message(_msg(MsgType.SET_RATE, "B", delta=25))
+    for _ in range(3):
+        daemon._speak_loop_once()
+    assert any(s == "Rate 225." for s in speaker.spoken), (
+        "the rate readback should be unprefixed chrome: {0}".format(speaker.spoken)
+    )
+    assert not any("bravo." in (s or "") for s in speaker.spoken), (
+        "the rate readback picked up a cross-session folder prefix it should "
+        "not have: {0}".format(speaker.spoken)
+    )
+    assert daemon._last_utterance == ("alpha content", None), (
+        "the rate readback clobbered _last_utterance / ctrl-cmd-R capture: {0}".format(
+            daemon._last_utterance
+        )
+    )
 
 
 def test_chooser_commit_onto_a_muted_target_announces_the_landing():
