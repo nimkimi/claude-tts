@@ -107,7 +107,14 @@ def test_a_dead_sessions_announce_stays_armed_at_a_start():
     so it is in no history transcript and catch-up cannot recover it, while
     `claim_announce` is one-shot until `unregister`. Claiming here would burn
     the marker for the rest of that session's life -- the exact failure this
-    task exists to fix, reintroduced at the site added to fix it."""
+    task exists to fix, reintroduced at the site added to fix it.
+
+    playback.py's own comment at that site promises BOTH survive: the
+    `claim_announce` marker AND the `announce_deferred` flag. Asserting only
+    the marker leaves half the promise unpinned -- moving
+    `st.announce_deferred = False` above the is_live short-circuit (which
+    leaves the live path untouched) loses the announce for that dead session's
+    whole life with the entire suite still green. Both halves, therefore."""
     from sonari.sessions import Identity
 
     daemon, _, speaker, sessions, _ = make_daemon(foreground="A")
@@ -126,8 +133,14 @@ def test_a_dead_sessions_announce_stays_armed_at_a_start():
     daemon.handle_message(_msg(MsgType.STOP_SESSION, "NEW"))   # start
     for _ in range(4):
         daemon._speak_loop_once()
+    assert daemon._stream("NEW").stopped is False, (
+        "setup: the press did not take the resume branch"
+    )
     assert sessions.claim_announce("NEW") is True, (
         "the announce was burned into a stream the speak loop then releases"
+    )
+    assert daemon._stream("NEW").announce_deferred is True, (
+        "the deferred flag was burned, so no later start can ever deliver it"
     )
 
 
@@ -200,14 +213,33 @@ def test_announce_resume_is_invalidated_by_stop_all_before_delivery():
 
 def test_the_deferred_announce_is_captured_by_repeat_last():
     """Step 5 removes control_cue from the SESSION_START announce, so the item
-    newly takes host.py:1564's W12-capture branch (`elif completed and not
-    item.control_cue`) that it was excluded from before Step 5. Checked
-    separately (not asserted here): the folder-prefix/_last_spoken_session
-    axis at host.py:665 is UNAFFECTED, because names_session already takes
-    that branch ahead of the control_cue test -- only the repeat axis moves.
-    Pinning the resulting behaviour per the dispatch's instruction: ctrl-cmd-R
-    after a deferred announce now replays it, where before Step 5 it could
-    not (the announce was excluded from capture)."""
+    newly takes host.py's W12-capture branch (`elif completed and not
+    item.control_cue`) that it was excluded from before Step 5. Pinning the
+    resulting behaviour: ctrl-cmd-R after a deferred announce now replays it,
+    where before Step 5 it could not (the announce was excluded from capture).
+
+    The _attributed_text / _last_spoken_session axis ALSO moved, and an earlier
+    version of this docstring claimed it did not. Both halves of that, because
+    the half-truth is what misled three separate readers:
+
+    - The stated REASONING is correct. `names_session=True` takes its branch
+      ahead of the `control_cue` elif, so at a FIXED sha, flipping the flag
+      alone changes nothing on this axis.
+    - The CONCLUSION was still false, because Step 5 changed the PATH, not just
+      the flag. Before Step 5 the announce was a control cue, so it was popped
+      by _pop_held_control_cue and spoken by the held branch, which calls
+      speaker.speak(item.text, ...) DIRECTLY -- _attributed_text was never
+      entered at all, and its `_last_spoken_session = item.session` write never
+      happened.
+
+    The observable is therefore the NEXT utterance from that session, not this
+    one: probing the announce's own text returns '2, new.' in both worlds and
+    reads falsely as "unaffected". Measured across the task, that axis moved
+    from ['new. new follow up'] / lss=A to ['new follow up'] / lss=NEW. The
+    CODE IS CORRECT -- HEAD suppresses exactly the double-announce that
+    _attributed_text's own comment exists to prevent, and which the old
+    behaviour actually produced. It is pinned by
+    test_the_announce_claims_the_prefix_axis_for_its_own_session below."""
     daemon, _, speaker, sessions, _ = make_daemon(foreground="A")
     daemon.handle_message(_msg(MsgType.STOP_ALL, "A"))
     for _ in range(3):
@@ -226,3 +258,126 @@ def test_the_deferred_announce_is_captured_by_repeat_last():
     assert speaker.spoken == [expected], (
         "ctrl-cmd-R did not replay the deferred announce: {0}".format(speaker.spoken)
     )
+
+
+def test_the_announce_claims_the_prefix_axis_for_its_own_session():
+    """The _attributed_text axis the test above used to claim was unaffected.
+
+    The observable is the NEXT utterance from that session, never the announce
+    itself -- the announce reads '2, new.' whether or not it entered
+    _attributed_text, which is exactly how "unaffected" got believed. Because
+    the announce now travels the ordinary path with names_session=True, it
+    claims _last_spoken_session for NEW, so the follow-up is spoken bare.
+    Before Step 5 it was a control cue popped by the held branch and spoken
+    directly, _last_spoken_session stayed at A, and the follow-up came out as
+    'new. new follow up' -- the double-announce _attributed_text's own comment
+    exists to suppress."""
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="A")
+    daemon.handle_message(_msg(MsgType.STOP_ALL, "A"))
+    for _ in range(3):
+        daemon._speak_loop_once()
+    daemon.handle_message(_msg(MsgType.SESSION_START, "NEW", cwd="/x/new"))
+    for _ in range(3):
+        daemon._speak_loop_once()
+    daemon.handle_message(_msg(MsgType.STOP_SESSION, "NEW"))   # start; delivers it
+    for _ in range(4):
+        daemon._speak_loop_once()
+    assert daemon._state._last_spoken_session == "NEW", (
+        "the announce did not claim the prefix axis for its own session")
+    speaker.spoken.clear()
+    daemon._enqueue("NEW", "prose", "new follow up", False)
+    for _ in range(3):
+        daemon._speak_loop_once()
+    assert speaker.spoken == ["new follow up"], (
+        "the follow-up was prefixed, so the announce is being double-spoken: "
+        "{0}".format(speaker.spoken))
+
+
+def test_repeat_last_after_an_ordinary_start_replays_the_announce(monkeypatch):
+    """The COMMON path of the ⌃⌘R capture change -- the deferred path is pinned
+    two tests up, and only that one was pinned when this landed.
+
+    After ANY ordinary (non-deferred) session start, ⌃⌘R now replays the
+    announce rather than the real content that preceded it, because the
+    announce is no longer a control cue and so newly qualifies for W12 capture.
+    This DETECTS that behaviour; it does not endorse it. It is on the owner's
+    audition list, and the levers are not what they look like: restoring
+    control_cue on the announce does NOT re-invert spec row 6 (the arm gate
+    carries that) and DOES hand back the R7 born-live-then-muted window. If it
+    is ever ruled against, the fix is a separate repeat-exemption axis, not
+    this flag.
+
+    The install nag is patched out because it would otherwise be the last
+    ordinary utterance and would itself become what ⌃⌘R replays.
+    """
+    from sonari.daemon.features import lifecycle
+
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="A")
+    monkeypatch.setattr(lifecycle, "_setup_health", lambda v: ("ok", None))
+    daemon._enqueue("A", "prose", "the real content he cares about", False)
+    for _ in range(3):
+        daemon._speak_loop_once()
+    daemon.handle_message(_msg(MsgType.SESSION_START, "NEW", cwd="/x/new"))
+    for _ in range(4):
+        daemon._speak_loop_once()
+    expected = "{0}, {1}.".format(sessions.number("NEW"), sessions.folder("NEW"))
+    assert expected in speaker.spoken, (
+        "setup: the ordinary announce was never heard: {0}".format(speaker.spoken))
+    speaker.spoken.clear()
+    daemon.handle_message(_msg(MsgType.REPEAT_LAST, "NEW"))
+    daemon._speak_loop_once()
+    assert speaker.spoken == [expected], (
+        "ctrl-cmd-R replayed something other than the announce: {0}".format(
+            speaker.spoken))
+
+
+def test_the_install_nag_leaves_the_throttle_open_on_a_stopped_stream(monkeypatch):
+    """The install nag is one of this task's three charter sites and shipped
+    with NO receipt: `if st.stopped: return` in _maybe_guide_setup could be
+    deleted outright with the whole suite green. The three existing
+    setup-health tests only prove the nag still fires on a NON-stopped stream.
+
+    The nag is throttled by a one-shot `guided` flag. Fire it into a stream
+    that cannot speak and the flag burns anyway, so the one chance to tell him
+    Sonari is not installed is spent on silence -- and he is the user least
+    able to notice that nothing was said. So on a stopped stream the throttle
+    must be left OPEN for the next audible start."""
+    from sonari.daemon.features import lifecycle
+
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="A")
+    monkeypatch.setattr(lifecycle, "_setup_health",
+                        lambda v: ("not_installed", "RUN slash sonari install"))
+    daemon.handle_message(_msg(MsgType.STOP_ALL, "A"))
+    for _ in range(3):
+        daemon._speak_loop_once()
+    daemon.handle_message(_msg(MsgType.SESSION_START, "NEW", cwd="/x/new"))
+    assert daemon._stream("NEW").stopped is True          # setup: born muted
+    assert daemon._stream("NEW").guided is False, (
+        "the nag was throttled into a stream that could not speak it")
+
+
+def test_a_quiet_verbosity_start_leaves_the_deferred_announce_armed():
+    """The verbosity clause in the deferred-delivery gate, pinned in the
+    RESTRICTIVE direction. The existing tests only prove the announce IS
+    delivered when verbosity allows it; nothing proved that a start under
+    `quiet` leaves the flag armed rather than burning it.
+
+    Both halves matter and they are separate assertions: quiet must not SPEAK
+    the announce, and it must not spend it either. Turning the voice down is
+    not a decision to forgo the session's name forever -- the next audible
+    start is still owed it."""
+    daemon, _, speaker, sessions, config = make_daemon(foreground="A")
+    daemon.handle_message(_msg(MsgType.STOP_ALL, "A"))
+    for _ in range(3):
+        daemon._speak_loop_once()
+    speaker.spoken.clear()
+    daemon.handle_message(_msg(MsgType.SESSION_START, "NEW", cwd="/x/new"))
+    assert daemon._stream("NEW").announce_deferred is True     # setup: armed
+    config["verbosity"] = "quiet"          # he turns the voice down before starting it
+    daemon.handle_message(_msg(MsgType.STOP_SESSION, "NEW"))   # start
+    for _ in range(4):
+        daemon._speak_loop_once()
+    assert not any("new" in (s or "").lower() for s in speaker.spoken), (
+        "a quiet start spoke the announce: {0}".format(speaker.spoken))
+    assert daemon._stream("NEW").announce_deferred is True, (
+        "quiet burned the flag instead of leaving it for an audible chance")
