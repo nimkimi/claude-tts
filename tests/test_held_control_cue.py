@@ -28,6 +28,31 @@ def test_oldest_control_cue_id_peeks_without_removing():
     assert SpeechQueue().oldest_control_cue_id() is None
 
 
+def test_oldest_control_cue_id_returns_the_one_pop_would_take():
+    """The ordering itself, which nothing pinned: returning the LAST control
+    cue instead of the first survived the whole suite.
+
+    Two control cues, and the newer one is at the FRONT -- the shape 26
+    at_front=True enqueue sites produce. The contract is not "lowest id"; it is
+    "the id pop_control_cue will actually pop". _pop_held_control_cue ranks
+    STREAMS by this id and then pops from the winner, so if the two disagree it
+    ranks a stream by one cue and voices a different one.
+    """
+    q = SpeechQueue()
+    q.enqueue(SpeechItem(id=7, session="A", kind="prose", text="narration",
+                         is_decision=False))
+    q.enqueue(SpeechItem(id=9, session="A", kind="prose", text="Stopped.",
+                         is_decision=False, control_cue=True))
+    q.enqueue_front(SpeechItem(id=12, session="A", kind="prose",
+                               text="Oldest response.", is_decision=False,
+                               control_cue=True))
+    assert q.oldest_control_cue_id() == 12, "front-to-back, not lowest id"
+    peeked = q.oldest_control_cue_id()
+    assert q.pop_control_cue().id == peeked, (
+        "the peek and the pop disagree -- the selector would rank a stream by "
+        "one cue and then voice another")
+
+
 def test_a_control_cue_on_a_stopped_non_speaker_stream_is_voiced():
     """C1, directly. speaker() is None; the cue must still be heard."""
     daemon, _, speaker, sessions, _ = make_daemon(foreground="A")

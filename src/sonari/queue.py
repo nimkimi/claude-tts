@@ -118,7 +118,17 @@ class SpeechQueue:
         return self._items[0].id if self._items else None
 
     def oldest_control_cue_id(self) -> "int | None":
-        """Id of the oldest queued control cue, without removing it."""
+        """Id of the FRONTMOST queued control cue, without removing it.
+
+        "Oldest" is what frontmost means on a queue built only by append, and
+        the name is kept for its call site (_pop_held_control_cue ranks streams
+        oldest-first). But 26 enqueue sites pass at_front=True, and there a
+        NEWER cue sits ahead of an older one and this returns the newer id.
+        That is the correct answer, not a wart: the id returned must be the id
+        pop_control_cue would actually pop, or the cross-stream selector ranks
+        a stream by one cue and then voices a different one. Front-to-back,
+        matching pop_control_cue exactly.
+        """
         for item in self._items:
             if item.control_cue:
                 return item.id

@@ -142,8 +142,11 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
      A new consumer must consult `liveness()`/`is_live()` and add its
      disposition here, plus a pin in the per-surface suite
      (`tests/test_liveness_marks.py`).
-   - `_enqueue` delivery flags (`mute_exempt`/`pause_exempt`/`at_front`) — any
-     new cue must state WHY each flag is set or not
+   - `_enqueue` delivery flags (`control_cue`/`at_front`) — any new cue must
+     state WHY each flag is set or not. (`mute_exempt` and `pause_exempt` were
+     two names for one idea and are gone; `control_cue` replaced both.
+     `tests/test_control_cue_contract.py` fails on either name reappearing in
+     `src/`.)
    - the cue registry (`src/sonari/cues.py`): every audible emission flows
      through `host.cue(kind)` or an enqueued prelude/content item — with TWO
      sanctioned off-queue emissions: the ALARM TIER (next bullet) and the W8

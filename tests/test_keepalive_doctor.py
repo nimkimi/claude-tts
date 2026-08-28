@@ -42,8 +42,10 @@ def test_doctor_row_ok_for_policy_states_fail_for_degraded():
 def test_unreachable_daemon_row_reads_as_no_state_not_a_python_error():
     """The exact scenario doctor exists for: the daemon is DOWN. STATUS raises,
     so the keepalive row must still find a dict to read — an unbound `st` here
-    rendered "error: cannot access local variable 'st'", and doctor's verdict
-    SPEAKS that sentence to an eyes-free user."""
+    rendered "error: cannot access local variable 'st'", which _cmd_doctor
+    PRINTS as this row's detail. The spoken verdict names only the failing
+    check, so an eyes-free user hears "1 check failed: keepalive" and the
+    Python traceback text sits on a screen he is not reading."""
     with mock.patch("sonari.client.send", side_effect=OSError("down")):
         pb = fake_platform(supervisor=FakeSupervisor(), hotkey=FakeHotkey())
         with mock.patch.object(cli, "_platform", lambda: pb):

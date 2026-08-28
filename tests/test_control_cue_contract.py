@@ -8,6 +8,8 @@ Spec: docs/superpowers/specs/2026-08-28-receipts-design.md 4.2.
 import pathlib
 import re
 
+import pytest
+
 from sonari.keymap import ACTIONS, ACTION_MESSAGES, CONTROL_GESTURES
 
 
@@ -33,9 +35,32 @@ def test_every_action_declares_control_cue():
         assert "control_cue" in meta, name
 
 
+def test_a_missing_declaration_fails_its_own_test_and_nothing_else(monkeypatch):
+    """The friendly message above has to actually reach the person who broke it.
+
+    tests/test_muted_press_receipts.py builds its parametrize list at IMPORT
+    time, so an undeclared action used to raise KeyError during COLLECTION:
+    the whole suite aborted with a traceback pointing at the omnibus, and the
+    contract test that knows what to do never ran. It now skips the
+    undeclared action and lets this file's assertion do the talking.
+    """
+    import tests.test_muted_press_receipts as omnibus
+
+    monkeypatch.setitem(ACTIONS, "brand_new_gesture", {"keys": "ctrl+cmd+z"})
+    # Collection-time helper: must not raise, and must not invent a row.
+    assert "brand_new_gesture" not in omnibus._declared_control_cues()
+    # ...and the declaration test says what to do about it.
+    with pytest.raises(AssertionError, match="does not declare control_cue"):
+        test_every_action_declares_control_cue()
+
+
 def test_a_control_cue_waiver_carries_a_reason():
     for name, meta in sorted({**ACTIONS, **CONTROL_GESTURES}.items()):
-        if meta["control_cue"] is False:
+        # .get for the same reason _declared_control_cues uses it: a missing
+        # declaration is test_every_action_declares_control_cue's failure to
+        # report, and a KeyError here would bury that message under a second,
+        # less useful one.
+        if meta.get("control_cue") is False:
             reason = meta.get("control_cue_waiver", "")
             assert isinstance(reason, str) and reason.strip(), (
                 "{0} waives control_cue with no reason".format(name)

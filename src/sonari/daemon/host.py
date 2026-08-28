@@ -628,9 +628,9 @@ class SpeechDaemon:
 
         D7a extension: `word=`/`session=` attach a short queued clarification to
         a SPONTANEOUS failure tone — the tone is the instant part, the word rides
-        the queue in normal order (law 1: verbal never bypasses it) as
-        mute-exempt + pause-exempt chrome (a failure on the held speaker still
-        speaks; never folder-prefixed, never repeat-captured, no call-sign).
+        the queue in normal order (law 1: verbal never bypasses it) as a
+        control cue (a failure on the held speaker still speaks; never
+        folder-prefixed, never repeat-captured, no call-sign).
         CALLER MUST HOLD self._lock when passing `word` (every word site is a
         handler under the transaction, or wraps the call itself); plain
         tone-only calls stay lock-free. A rejected kind enqueues nothing."""
@@ -1373,16 +1373,19 @@ class SpeechDaemon:
         The voice plays the SPEAKER session's stream: every pop reads the
         speaker stream's own queue. Background streams accumulate untouched
         until they become the speaker. When the speaker stream is per-session
-        STOPPED (⌃⌘S / ⌃⌘M), the loop is held — only a pause-exempt cue
-        ("Stopped." / "All stopped.") is voiced — until it is started again.
-        SP1: speaker() == foreground(); SP2 keep-going advances speaker()
-        independently.
+        STOPPED (⌃⌘S / ⌃⌘M), the ordinary drain is held until it is started
+        again — but a CONTROL CUE is still voiced, and since M2 that scan runs
+        BEFORE the speaker is even resolved, across every stopped stream and
+        not just the speaker's own. (This paragraph used to say the held loop
+        voiced only "Stopped." / "All stopped." as a "pause-exempt cue". Both
+        halves went stale: control_cue replaced the two exempt flags, and the
+        set it covers is now every gesture's answer. Fork-2's commit-onto-muted
+        RELEASES the voice and THEN enqueues the landing cue to the muted
+        target, so a speaker-scoped scan could never reach its own landing cue
+        — probe C1 — which is why the scan was widened.)
 
-        M2: a control cue is scanned for BEFORE the speaker is even resolved,
-        across every stopped stream — not just the speaker's own. Fork-2's
-        commit-onto-muted RELEASES the voice and THEN enqueues the landing
-        cue to the muted target, so a speaker-scoped scan could never reach
-        its own landing cue (probe C1)."""
+        SP1: speaker() == foreground(); SP2 keep-going advances speaker()
+        independently."""
         self._drain_catchup_inbox()
         self._check_witness()
         # The ONE reaping caller: this site holds no lock, so the manager's bounded
@@ -1401,7 +1404,7 @@ class SpeechDaemon:
             vkw = {"voice": item.voice} if item.voice is not None else {}
             failed = False
             try:
-                # Same atomic-unit rule as the normal branch: a pause-exempt cue
+                # Same atomic-unit rule as the normal branch: a control cue
                 # with a prelude (e.g. the answer chirp) plays whole or not at all.
                 completed = True
                 for p in item.prelude:

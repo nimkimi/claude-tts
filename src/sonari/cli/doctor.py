@@ -235,7 +235,10 @@ def doctor() -> list:
     # Bound BEFORE the try: an unreachable daemon (the exact case doctor exists
     # for) raises inside it, and the keepalive row below reads `st`. Unbound, it
     # raised UnboundLocalError there and the row rendered "error: cannot access
-    # local variable 'st'..." — a sentence doctor's verdict SPEAKS aloud.
+    # local variable 'st'..." — a sentence _cmd_doctor PRINTS as that row's
+    # detail. (Not spoken: verdict() names only the failing CHECKS, so the ear
+    # gets "1 check failed: keepalive" and the diagnosis stays on screen — which
+    # for an eyes-free user is the same as not being told at all.)
     st = {}
     # Read the memo BEFORE the STATUS probe rather than inside it. The memo is
     # a local file; STATUS is a socket round-trip that an unreachable daemon —

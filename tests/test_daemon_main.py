@@ -27,7 +27,12 @@ def test_ensure_running_spawns_detached_when_socket_absent():
 def test_main_builds_components_and_runs():
     fake_cfg = {"voice": None, "rate": 200, "verbosity": "everything",
                 "background_policy": "earcon_only", "earcons": {}}
+    # bootstrap.main() builds a real SpearconCache, whose __init__ shells out to
+    # `say -v ?` to decide whether the configured voice exists. Constraint 3
+    # forbids this suite touching `say` at all, and the answer is irrelevant
+    # here: voice is None, so _voice_is_available returns False either way.
     with mock.patch("sonari.daemon.bootstrap.load_config", return_value=fake_cfg), \
+         mock.patch("sonari.spearcon._default_voice_lister", return_value=""), \
          mock.patch("sonari.daemon.bootstrap._start_boot_cue"), \
          mock.patch("sonari.daemon.SpeechDaemon.run", autospec=True) as run:
         daemon_mod.main()

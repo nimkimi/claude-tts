@@ -19,10 +19,15 @@ def _msg(t, session, **kw):
 
 
 def _declared_control_cues():
+    # .get, not [] -- this runs at IMPORT time (the parametrize decorator below
+    # calls it), so a KeyError here aborts COLLECTION for the entire suite and
+    # test_every_action_declares_control_cue never gets to print its friendly
+    # "say so, or waive it with a reason" message. An undeclared action simply
+    # goes un-enumerated here and fails its own contract test instead.
     return sorted(
         name
         for name, meta in {**ACTIONS, **CONTROL_GESTURES}.items()
-        if meta["control_cue"]
+        if meta.get("control_cue")
     )
 
 
