@@ -307,6 +307,11 @@ def on_repeat_last(ctx, msg):
     entry = host._pending_heard.get(cur.id) if cur is not None else None
     host.speaker.cancel()                          # barge-in: cut the current utterance
     if cur is not None:
+        # cur.control_cue is carried, not re-decided: a captured item keeps
+        # whatever it was enqueued with for its whole lifetime, so re-queuing
+        # it here is held-branch eligible if its stream is (or later becomes)
+        # stopped -- this is a re-queue of an existing item, not a fresh
+        # enqueue site subject to the enqueue-time reasoning above.
         host._enqueue(cur.session, cur.kind, cur.text, cur.is_decision,
                       entry=entry, control_cue=cur.control_cue,
                       names_session=cur.names_session,

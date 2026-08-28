@@ -49,14 +49,19 @@ def test_a_control_cue_is_never_folder_prefixed():
     assert speaker.spoken[-1] == "Rate 225.", "a control cue took a folder prefix"
 
 
-def test_the_playback_resume_site_is_byte_identical():
-    """Guard: `st.stopped = False` is set 12 lines before the enqueue."""
+def test_playback_resume_clears_stopped_before_the_cue():
+    """Guard: playback.py's on_stop_session resume branch sets
+    `st.stopped = False` before enqueueing "Resumed." (control_cue=True), so
+    the cue's own target stream is provably not stopped by the time it is
+    delivered. Asserts the outcome the guard controls -- the stream's
+    stopped flag -- not audibility, since a control cue speaks either way
+    post-migration. Must fail if that assignment is replaced with a no-op.
+    """
     daemon, _, speaker, sessions, _ = make_daemon(foreground="A")
     sessions.register("A", cwd="/x/alpha")
     daemon._stream("A").stopped = True
     daemon.handle_message(_msg(MsgType.STOP_SESSION, "A"))   # resume
-    daemon._speak_loop_once()
-    assert "Resumed." in speaker.spoken
+    assert daemon._stream("A").stopped is False
 
 
 def test_keep_going_never_adopts_a_stopped_stream():
@@ -85,32 +90,41 @@ def test_keep_going_never_adopts_a_stopped_stream():
     assert "stopped content" not in speaker.spoken
 
 
-def test_the_jump_waiting_sites_are_byte_identical():
-    """Guard: _waiting_target filters out st.stopped before a session can ever
-    become the target -- covers all three focus.py sites at once."""
+def test_waiting_target_skips_a_stopped_stream():
+    """Guard: _waiting_target (focus.py:22) excludes st.stopped from
+    eligibility -- covers all three focus.py sites at once (each reads the
+    one target it returns). B is registered first (so it would win the
+    insertion-order tiebreak among equally-ranked prose candidates) and has
+    its stream stopped; C is registered second, not stopped. If the
+    st.stopped clause were removed from _waiting_target's predicate, B would
+    become the target instead of C -- that is what makes this non-vacuous.
+    """
     daemon, _, speaker, sessions, _ = make_daemon(foreground="A")
-    for sid in ("A", "B"):
+    for sid in ("B", "C"):
         sessions.register(sid, cwd="/x/" + sid)
-    daemon._enqueue("B", "prose", "waiting content", False)
-    speaker.spoken.clear()
+    daemon._enqueue("B", "prose", "stopped content", False)
+    daemon._enqueue("C", "prose", "waiting content", False)
+    daemon._stream("B").stopped = True
     daemon.handle_message(_msg(MsgType.JUMP_WAITING, "A"))
-    for _ in range(4):
-        daemon._speak_loop_once()
-    assert speaker.spoken
+    assert sessions.foreground() == "C"
 
 
-def test_the_announce_resume_sites_are_byte_identical():
-    """Guard: announce_resume is armed ONLY inside `if st is None or not
-    st.stopped:` -- covers the lifecycle.py and prose.py sites."""
-    daemon, _, speaker, sessions, _ = make_daemon(foreground="A")
+def test_announce_resume_is_not_armed_on_a_stopped_stream():
+    """Guard: the announce_resume arm site (lifecycle.py's on_set_foreground,
+    inside `if voice_state == "quiet-hold": ... if st is None or not
+    st.stopped:`) only arms the flag when the target stream is not stopped.
+
+    This proves ARM-TIME behaviour ONLY -- it says nothing about delivery.
+    Nothing clears announce_resume if the stream is stopped again between
+    arming and delivery (a known, accepted edge for this task's zero-
+    behaviour-change scope; see the delivery-time comments at
+    lifecycle.py/prose.py, and Task 10 which owns the marker lifecycle).
+
+    Must fail if the st.stopped check is removed from that arm condition.
+    """
+    daemon, _, speaker, sessions, _ = make_daemon(foreground=None)
     sessions.register("A", cwd="/x/alpha")
-    st = daemon._stream("A")
-    st.announce_resume = True
-    assert st.stopped is False, (
-        "the guard's whole premise is that announce_resume is never armed on "
-        "a stopped stream"
-    )
-    daemon.handle_message(_msg(MsgType.FLUSH, "A"))
-    for _ in range(3):
-        daemon._speak_loop_once()
-    assert "Resumed." in speaker.spoken
+    daemon.voice_state = "quiet-hold"
+    daemon._stream("A").stopped = True
+    daemon.handle_message(_msg(MsgType.SET_FOREGROUND, "A"))
+    assert daemon._stream("A").announce_resume is False

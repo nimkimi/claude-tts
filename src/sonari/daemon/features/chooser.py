@@ -127,6 +127,11 @@ def _restore_and_clear(host):
     _remove_preview(host, st)
     if st.captured is not None:
         c = st.captured
+        # c.control_cue is carried, not re-decided: a captured item keeps
+        # whatever it was enqueued with for its whole lifetime, so re-queuing
+        # it here is held-branch eligible if its stream is (or later becomes)
+        # stopped -- this is a re-queue of an existing item, not a fresh
+        # enqueue site subject to the enqueue-time reasoning above.
         host._enqueue(c.session, c.kind, c.text, c.is_decision,
                       entry=st.captured_entry, control_cue=c.control_cue,
                       names_session=c.names_session,

@@ -146,8 +146,16 @@ def on_set_foreground(ctx, msg):
         st = ctx.host._streams.get(session)
         if st is not None and st.announce_resume:
             # SessionStart sends SET_FOREGROUND then SESSION_START (no FLUSH):
-            # deliver the deferred lift mark now. Provably not stopped:
-            # announce_resume is armed only when `st is None or not st.stopped`.
+            # deliver the deferred lift mark now. announce_resume is armed
+            # only when `st is None or not st.stopped` (above, or an earlier
+            # SET_FOREGROUND call) -- but that is an ARM-TIME proof only.
+            # Nothing clears the flag if the stream is stopped again in the
+            # arm-to-deliver window (on_stop_session/on_stop_all never touch
+            # it), so this delivery CAN land on a since-stopped stream. That
+            # is a known, accepted edge for this task's zero-behaviour-change
+            # scope (the marker lifecycle belongs to Task 10) -- and it is
+            # the right direction for a control cue anyway: it exists because
+            # he pressed a key, so it is delivered regardless of hold state.
             st.announce_resume = False
             ctx.host._enqueue(session, "prose", "Resumed.", False,
                               control_cue=True, at_front=True)
