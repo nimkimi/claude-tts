@@ -71,3 +71,21 @@ def test_keepalive_stays_green_inside_the_overlap_invariant():
     assert _keepalive_row(
         {"keepalive": "running",
          "keepalive_oldest_player_age_s": 120.0})[1] is True
+
+
+def test_the_threshold_is_the_overlap_invariant_and_not_a_free_number():
+    """The two tests above pin only the (120, 900) window, so 305 -> 500 passes
+    them both. The threshold is not a tuning knob: it is exactly the ceiling
+    the chain's own geometry guarantees, SILENCE_S + OVERLAP_S. If either
+    constant moves, the doctor row's literal must move with it, and this is
+    what says so.
+
+    Asserted here rather than derived in doctor.py on purpose. cli/doctor.py
+    importing sonari.daemon.keepalive would execute sonari/daemon/__init__.py,
+    which imports the whole host -- measured at +15.6 ms and +31 modules on
+    every `sonari doctor`, to read two floats. The test can pay that; the CLI
+    should not."""
+    from sonari.cli.doctor import KEEPALIVE_MAX_PLAYER_AGE_S
+    from sonari.daemon.keepalive import SILENCE_S, KeepAliveManager
+
+    assert KEEPALIVE_MAX_PLAYER_AGE_S == SILENCE_S + KeepAliveManager.OVERLAP_S
