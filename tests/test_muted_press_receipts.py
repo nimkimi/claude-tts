@@ -98,6 +98,16 @@ def _arm(action, daemon, sessions):
         # nothing to adopt. C stays registered and live, so it is still a
         # chooser candidate; only its pile goes.
         daemon._stream("C").queue.clear()
+        # ...and B's own queue too, which is the leak the C-drain alone missed.
+        # The CHOOSER_STEP two lines up enqueues the one-shot browse hint
+        # ("Hold the chord and tap Tab to browse...") onto B, and no speak loop
+        # runs during _arm, so it is STILL QUEUED when the test clears
+        # speaker.spoken and presses. B is unmuted and IS speaker(), so it
+        # drains and `spoken or earcons` cannot tell ['alpha.', hint] from
+        # [hint] -- these two parameters stayed GREEN with the landing cue's
+        # control_cue flag reverted. Measured at pop time the landing cue is
+        # held correctly and never spoken; only this hint made the noise.
+        daemon._stream("B").queue.clear()
         return "A"
     if action in ("chooser_step_next", "chooser_step_prev"):
         daemon._stream("A")
@@ -115,6 +125,16 @@ def _arm(action, daemon, sessions):
         # jump_waiting deliberately EXCLUDES workspace(), so it can never land
         # on the muted workspace. Drain C so there IS no waiting target; the
         # handler then answers "No session waiting." into speaker() == B.
+        daemon._stream("C").queue.clear()
+        return "B"
+    if action == "stop_session":
+        # Same class as jump_waiting above. This row's receipt is the audible
+        # "Resumed." that Fork 4's un-mute enqueues -- but ⌃⌘S also sets
+        # voice_state back to "flowing" (playback.py's start branch), so
+        # keep-going adopts C's unrelated backlog and speaks THAT. Measured
+        # with the "Resumed." enqueue deleted outright: 25 passed, because the
+        # sound observed was C's 'c has content'. Drain C so the only thing
+        # left that can make a noise is the gesture's own answer.
         daemon._stream("C").queue.clear()
         return "B"
     if action == "os_focus":
@@ -163,6 +183,17 @@ _MESSAGE = {
                                     "iterm_session_id": "w0t0p0",
                                     "focused": True}),
 }
+
+
+def test_the_enumeration_matches_the_declared_control_cues_exactly():
+    """The `assert action in _MESSAGE` below sees ADDITIONS but is structurally
+    blind to REMOVALS. Dropping an action's control_cue flag deletes its
+    PARAMETER, so the row simply vanishes and this file passes with one fewer
+    test -- a receipt quietly retiring itself is the failure mode that lets a
+    gesture go silent again. Equality is the only form that sees both
+    directions from inside this file.
+    """
+    assert set(_MESSAGE) == set(_declared_control_cues())
 
 
 @pytest.mark.parametrize("action", _declared_control_cues())
