@@ -183,11 +183,16 @@ def _readback(host, text, **kw):
     the closed session's pile starts with (these are back-appends, unlike the
     barge-in-class cues elsewhere). Live workspaces keep today's path
     byte-for-byte — the sanction returns False and at_front stays off.
+
+    A readback IS a control cue -- it exists because he pressed a key. There
+    was never a reason for the caller to opt in, and the opt-in is what broke:
+    ctrl-cmd-= and ctrl-cmd-V go through this same helper and only one of
+    them passed the flag.
     """
     ws = host.sessions.workspace()
     if ws is None:
         return
-    host._enqueue(ws, "prose", text, False,
+    host._enqueue(ws, "prose", text, False, control_cue=True,
                   at_front=host._sanction_dead_read(ws, whole=False), **kw)
 
 
@@ -255,13 +260,12 @@ def on_set_verbosity(ctx, msg):
     ctx.host.config["verbosity"] = v
     save_config(ctx.host.config)
     # W3: confirm on the LIVE path (the built confirmation was stranded on the
-    # dead CYCLE_VERBOSITY handler, 0 senders). control_cue so a
-    # settings readback can never be silently swallowed while the voice is held
-    # — "Verbosity quiet." IS the last thing you hear (direct _enqueue cues
-    # bypass the on_prose quiet gate). Idempotent by design: setting the same
-    # value re-confirms (readback).
-    _readback(ctx.host, "Verbosity {0}.".format(v),
-              control_cue=True)
+    # dead CYCLE_VERBOSITY handler, 0 senders). _readback sets control_cue
+    # unconditionally, so a settings readback can never be silently swallowed
+    # while the voice is held — "Verbosity quiet." IS the last thing you hear
+    # (direct _enqueue cues bypass the on_prose quiet gate). Idempotent by
+    # design: setting the same value re-confirms (readback).
+    _readback(ctx.host, "Verbosity {0}.".format(v))
     return None
 
 
@@ -306,10 +310,9 @@ def on_cycle_verbosity(ctx, msg):
     ctx.host.config["verbosity"] = nxt
     save_config(ctx.host.config)
     # Aligned with the live SET_VERBOSITY confirmation (on_set_verbosity, W3):
-    # control_cue so the readback can never be silently swallowed
-    # while the voice is held.
-    _readback(ctx.host, "Verbosity {0}.".format(nxt),
-              control_cue=True)
+    # _readback sets control_cue unconditionally, so the readback can never
+    # be silently swallowed while the voice is held.
+    _readback(ctx.host, "Verbosity {0}.".format(nxt))
     return None
 
 
