@@ -59,6 +59,25 @@ def test_jump_decision_does_not_claim_the_head_on_a_live_session():
     )
 
 
+def test_reread_options_answers_on_a_muted_session_with_stored_options():
+    """`on_reread_options`'s TEXT branch (options present) -- distinct from
+    the fallback branch pinned below, which fires only when `st.options` is
+    unset. `daemon._stream(session).options = ...` is the exact seam
+    on_reread_options reads (decisions.py:256); the other three write sites
+    write it identically."""
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
+    _muted(daemon, sessions, "B", "/x/bravo")
+    daemon._stream("B").options = "1) yes  2) no"
+    speaker.spoken.clear()
+    daemon.handle_message(_msg(MsgType.REREAD_OPTIONS, "B"))
+    for _ in range(3):
+        daemon._speak_loop_once()
+    assert any("1) yes" in (s or "") for s in speaker.spoken), (
+        "ctrl-cmd-O on a muted session with stored options said nothing: {0}"
+        .format(speaker.spoken)
+    )
+
+
 def test_reread_options_answers_on_a_muted_session():
     daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
     _muted(daemon, sessions, "B", "/x/bravo")
@@ -116,6 +135,24 @@ def test_nav_message_step_reads_on_a_muted_session():
         daemon._speak_loop_once()
     assert any("the first message" in (s or "") for s in speaker.spoken), (
         "nav (message-step) on a muted session said nothing at all: {0}".format(
+            speaker.spoken
+        )
+    )
+
+
+def test_nav_empty_history_cue_answers_on_a_muted_session():
+    """Pins `_nav`'s empty-history cue (~27) -- distinct from the seek-and-
+    play loop above, which never runs when there is nothing to navigate.
+    No prose/history recorded at all, so `ids` is empty and the handler
+    takes the early-return branch."""
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
+    _muted(daemon, sessions, "B", "/x/bravo")
+    speaker.spoken.clear()
+    daemon.handle_message(_msg(MsgType.NAV, "B", to="prev"))
+    for _ in range(3):
+        daemon._speak_loop_once()
+    assert any("Nothing to navigate yet." in (s or "") for s in speaker.spoken), (
+        "nav's empty-history cue on a muted session said nothing: {0}".format(
             speaker.spoken
         )
     )
