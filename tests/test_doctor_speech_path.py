@@ -187,6 +187,97 @@ def test_speech_path_stays_green_for_a_dead_session_backlog():
     assert _speech_path_row(st, memo_row=None)[1] is True
 
 
+def test_speech_path_stays_green_under_quiet_hold_with_a_backlog():
+    """`voice_state == "flowing"` is the ONLY clause standing between this row
+    and a confident RED every time he asks for quiet with work queued.
+
+    ⌃⌘S sets voice_state to "quiet-hold" GLOBALLY while stopping only the
+    session it was pressed on (playback.py on_stop_session). Every OTHER live
+    session keeps its queue and stays `stopped: False` -- and the keep-going
+    gate (host.py's `_voice_state == "flowing"` check) holds them all, so
+    nothing drains and last_drain_age_s climbs without bound. That is the wedge
+    shape in every observable respect. The difference is intent, and voice_state
+    is the only place intent is legible. Drop the clause and the row fires on a
+    perfectly healthy daemon at the exact moment he asked it to be silent.
+
+    (stopped-all is the same story but doubly guarded -- on_stop_all sets every
+    stream's `stopped`, and host.py's SESSION_START arm stops later arrivals
+    too -- so quiet-hold is where this clause is load-bearing ALONE.)
+    """
+    from sonari.cli.doctor import _speech_path_row
+
+    st = {"current_item": False, "voice_state": "quiet-hold",
+          "last_drain_age_s": 900.0,
+          "sessions": [{"session": "A", "queue_len": 3, "stopped": False,
+                        "live": True}]}
+    assert _speech_path_row(st, memo_row=None)[1] is True, _speech_path_row(
+        st, memo_row=None)
+
+
+def test_speech_path_stays_green_when_the_backlog_drained_a_moment_ago():
+    """The LOWER pin on WEDGE_HOLD_S. Live sessions holding a pile is the
+    NORMAL state of a busy daemon between drains -- it is only a wedge once
+    nothing has drained for WEDGE_HOLD_S. Without this, the threshold has no
+    floor: WEDGE_HOLD_S could fall to 0.0 and every ordinary queued moment
+    would read RED, with the rest of the suite still green."""
+    from sonari.cli.doctor import _speech_path_row
+
+    st = {"current_item": False, "voice_state": "flowing",
+          "last_drain_age_s": 1.0,
+          "sessions": [{"session": "A", "queue_len": 3, "stopped": False,
+                        "live": True}]}
+    assert _speech_path_row(st, memo_row=None)[1] is True, _speech_path_row(
+        st, memo_row=None)
+
+
+def test_a_never_drained_daemon_is_a_wedge_named_since_the_daemon_started():
+    """`age is None` is the loop jamming on its FIRST item -- nothing has EVER
+    drained, so there is no measured age to name. It is a wedge and must read
+    RED (an `age is not None and ...` condition makes it green, which is the
+    worst arm to lose: a daemon that never spoke once looks healthy).
+
+    The sentence matters as much as the verdict. Rendering None as a number
+    would say "nothing has been spoken for 0 minutes - the speak loop is stuck"
+    in one breath, and he hears this row rather than reading it."""
+    from sonari.cli.doctor import _speech_path_row
+
+    st = {"current_item": False, "voice_state": "flowing",
+          "last_drain_age_s": None,
+          "sessions": [{"session": "A", "queue_len": 3, "stopped": False,
+                        "live": True}]}
+    name, ok, detail = _speech_path_row(st, memo_row=None)
+    assert (name, ok) == ("speech path", False), detail
+    assert "since the daemon started" in detail, detail
+    assert "0 minutes" not in detail, detail
+
+
+def test_speech_path_stays_green_for_a_restored_pile_not_yet_reconfirmed():
+    """WHY `live` must fail CLOSED on a pending session -- recorded here
+    because this row is where a widening would do its damage.
+
+    `live` is `sessions.is_live(sid)`, which reports False for an SP6-RESTORED
+    session: one recovered from disk and not yet reconfirmed this lifetime. A
+    restored pile is a backlog on a session that may no longer have a terminal
+    behind it, and it drains for nobody. That is precisely the false positive
+    this field excludes.
+
+    If a future editor "simplifies" the producer to `liveness(sid) != "dead"`
+    -- which fails OPEN on pending -- restored piles would start reading
+    `live: True` and this row would fire a confident RED on every daemon
+    restart with saved state. The producer side is pinned by
+    tests/test_status_diagnostics.py::test_live_tracks_liveness_itself_not_a_correlate;
+    this is the consumer side of the same contract.
+    """
+    from sonari.cli.doctor import _speech_path_row
+
+    st = {"current_item": False, "voice_state": "flowing",
+          "last_drain_age_s": 900.0,
+          "sessions": [{"session": "P", "queue_len": 7, "stopped": False,
+                        "live": False}]}
+    assert _speech_path_row(st, memo_row=None)[1] is True, _speech_path_row(
+        st, memo_row=None)
+
+
 def test_the_voice_row_is_wired_into_doctor():
     """Pins the WIRE-IN, not the logic: every other _voice_row test calls the
     function directly, so a forgotten `results.append(_voice_row(st))` leaves a
