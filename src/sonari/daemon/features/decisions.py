@@ -262,8 +262,14 @@ def on_reread_options(ctx, msg):
         pending = ctx.host._pending_decisions.get(fg)
         if pending is not None:
             text = pending.get("text")
+    # T2 (wave1 safety-net closure, owner-ruled 2026-08-15): both enqueues below
+    # compose into foreground() unconditionally (the different accessor from
+    # the workspace()-targeted sites above) — a dead foreground with the voice
+    # idle strands either one without the single-item sanction (RR-2 shape).
     if text:
-        ctx.host._enqueue(fg, "choice", text, False)
+        ctx.host._enqueue(fg, "choice", text, False,
+                          at_front=ctx.host._sanction_dead_read(fg, whole=False))
     else:
-        ctx.host._enqueue(fg, "prose", "No options right now.", False)
+        ctx.host._enqueue(fg, "prose", "No options right now.", False,
+                          at_front=ctx.host._sanction_dead_read(fg, whole=False))
     return None

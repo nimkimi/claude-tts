@@ -9,8 +9,12 @@ from sonari.platform.macos import keytables
 from sonari.platform.macos._helpers import xml_escape, build_swift_binary
 
 LAUNCH_AGENT_LABEL = "com.sonari.hotkeyd"
-LAUNCH_AGENT_PATH = os.path.expanduser(
-    "~/Library/LaunchAgents/com.sonari.hotkeyd.plist")
+# Sourced from paths.py (not a local home-directory lookup) so the
+# paths.py-vs-conftest hermeticity guard covers it; see the comment on
+# paths.HOTKEYD_LAUNCH_AGENT_PATH. Still a by-value bind at import time, so
+# conftest.py repoints this module's copy directly too, same as
+# HOTKEYD_BIN_PATH's pattern.
+LAUNCH_AGENT_PATH = str(paths.HOTKEYD_LAUNCH_AGENT_PATH)
 
 # --- Display tables derived from keytables so a new key/modifier added there
 #     is automatically covered here (no second hand-maintained copy). ---

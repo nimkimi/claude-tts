@@ -31,8 +31,13 @@ def on_learn_mode(ctx, msg):
     host._set_learn_mode(entering)
     ws = host.sessions.workspace()
     if ws is not None:
+        # T2 (wave1 safety-net closure, owner-ruled 2026-08-15): the toggle
+        # composes into workspace() unconditionally, same RR-2 shape as the
+        # settings readbacks — a dead workspace with the voice idle strands
+        # this without the single-item sanction (host.py _sanction_dead_read).
         host._enqueue(ws, "prose", LEARN_ON if entering else LEARN_OFF, False,
-                      mute_exempt=True, pause_exempt=True)
+                      mute_exempt=True, pause_exempt=True,
+                      at_front=host._sanction_dead_read(ws, whole=False))
     return None
 
 
@@ -68,8 +73,11 @@ def on_query_actions(ctx, msg):
         text = QUERY_STOPPED
     else:
         text = QUERY_DEFAULT
+    # T2: same shape as the toggle above — a dead workspace with the voice
+    # idle stranded this readout without the single-item sanction.
     host._enqueue(ws, "prose", text, False,
-                  mute_exempt=True, pause_exempt=True)
+                  mute_exempt=True, pause_exempt=True,
+                  at_front=host._sanction_dead_read(ws, whole=False))
     return None
 
 

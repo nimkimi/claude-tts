@@ -5,6 +5,19 @@ import threading
 
 _DEFAULT_WAIT_TIMEOUT = 120  # seconds; generous upper bound for even long TTS
 
+
+class SpeakFailure(Exception):
+    """Raised by Speaker.speak() when an utterance did not play for a reason
+    that is NOT a cancel/barge-in: no runner configured, a runner that failed
+    to spawn a process, or a process that exited nonzero entirely on its own
+    (the AudioQueueStart(-66681) shape — `say`/`afplay` print an error and
+    exit nonzero without anyone ever calling cancel()). Distinguished from a
+    cancel-shaped outcome (still reported via a plain `False` return, never
+    raised) so callers such as the daemon speak loop's existing
+    `except Exception -> _signal_speak_failure` can tell a broken audio path
+    from an ordinary interrupt (I3: a broken audio path used to produce total,
+    untraceable silence)."""
+
 # Failure/expiry earcon kinds added AFTER GA: bootstrap merges platform defaults
 # only when the whole `earcons` config key is absent (bootstrap.py:73-74), so on
 # an EXISTING install a new config-dict kind would be SILENTLY disabled — the
@@ -69,9 +82,14 @@ class Speaker:
 
     def speak(self, text=None, audio_path=None, cancel_epoch=None, voice=None) -> bool:
         """Play an utterance, blocking. When *audio_path* is set, afplay that file
-        (a spearcon); otherwise say *text*. Return True iff it COMPLETED (exit 0).
-        A cancelled/terminated/failed-to-spawn utterance returns False so the caller
-        leaves it marked unheard (sentence-granular replay).
+        (a spearcon); otherwise say *text*. Return True iff it COMPLETED (exit 0);
+        return False iff it was cancelled/interrupted (barge-in) so the caller
+        leaves it marked unheard (sentence-granular replay). Anything else that
+        kept the utterance from playing — no runner configured, the runner failed
+        to spawn, or the process exited nonzero entirely on its own (I3: the
+        AudioQueueStart(-66681) shape) — RAISES SpeakFailure instead of folding
+        into that same False, so a genuinely broken audio path is distinguishable
+        from an ordinary interrupt.
 
         *cancel_epoch* is the baseline to compare against (see cancel_epoch()); a
         cancel arriving between the daemon's claim and this call is detected. The
@@ -82,7 +100,8 @@ class Speaker:
         else:
             runner = self._say_runner
         if runner is None:
-            return False
+            raise SpeakFailure("no {0} runner configured".format(
+                "afplay" if audio_path is not None else "say"))
         # Establish the baseline epoch BEFORE synthesis/spawn. say_runner (TTS
         # synthesis) can take tens-hundreds of ms, during which there is no proc to
         # cancel — a cancel() arriving in that window used to be a silent no-op and
@@ -100,7 +119,7 @@ class Speaker:
             proc = (runner(audio_path) if audio_path is not None
                     else runner(text, say_voice, self._rate))
             if proc is None:
-                return False            # afplay could not spawn / the file vanished
+                raise SpeakFailure("runner failed to spawn a process")
             with self._current_lock:
                 interrupted = self._cancel_epoch != epoch
                 if not interrupted:
@@ -118,7 +137,26 @@ class Speaker:
                 with self._current_lock:
                     if self._current is proc:
                         self._current = None
-            return getattr(proc, "returncode", None) == 0
+            if getattr(proc, "returncode", None) == 0:
+                return True
+            # Nonzero exit. This must NOT simply become a raise: a cancel() that
+            # lands mid-wait (real barge-in, SIGTERM sets a nonzero returncode)
+            # reaches this exact point too — the pre-wait `interrupted` check above
+            # only catches a cancel that lands BEFORE proc.wait() is called. cancel()
+            # bumps _cancel_epoch (under _current_lock) strictly BEFORE it calls
+            # terminate(), so by the time proc.wait() returns, an epoch mismatch here
+            # means OUR OWN cancel() is why this proc isn't reporting a clean exit —
+            # that is cancel-shaped, not a failure. (The W4 race — a cancel landing
+            # at the exact instant of a clean exit — never reaches this branch at
+            # all: returncode is already 0 there, handled above.) Anything else, no
+            # cancel ever touched this call, is a genuine failure and must be
+            # surfaced, not silently folded into an ordinary "not completed".
+            with self._current_lock:
+                cancelled = self._cancel_epoch != epoch
+            if cancelled:
+                return False
+            raise SpeakFailure("say/afplay exited with code {0!r}".format(
+                getattr(proc, "returncode", None)))
 
     def cancel(self) -> None:
         with self._current_lock:

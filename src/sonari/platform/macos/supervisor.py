@@ -12,8 +12,12 @@ from sonari.platform.contracts import SupervisorBackend
 from sonari.platform.macos._helpers import xml_escape
 
 LAUNCH_AGENT_LABEL = "com.sonari.speechd"
-LAUNCH_AGENT_PATH = os.path.expanduser(
-    "~/Library/LaunchAgents/com.sonari.speechd.plist")
+# Sourced from paths.py (not a local home-directory lookup) so the
+# paths.py-vs-conftest hermeticity guard covers it; see the comment on
+# paths.SPEECHD_LAUNCH_AGENT_PATH. Still a by-value bind at import time, so
+# conftest.py repoints this module's copy directly too, same as
+# HOTKEYD_BIN_PATH's pattern.
+LAUNCH_AGENT_PATH = str(paths.SPEECHD_LAUNCH_AGENT_PATH)
 _PYTHON_CANDIDATE_NAMES = (
     "python3", "python3.13", "python3.12", "python3.11", "python3.10", "python3.9",
 )

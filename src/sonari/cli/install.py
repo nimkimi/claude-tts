@@ -195,7 +195,15 @@ def uninstall(purge=None) -> int:
     `purge` decides state.json's fate: True deletes the transcripts, False keeps
     them, None asks (spec §8.1 step 1). The ask runs FIRST, while the daemon is
     still alive to carry the question — after `sup.uninstall()` there may be no
-    voice left to ask with."""
+    voice left to ask with.
+
+    I5 (whole-branch review): bin/sonari-hook only spawns a fresh daemon when
+    install.json OR APP_DIR still says "installed" (tests/test_hook_install_gate.py).
+    Both are removed below BEFORE the first destructive step (sup.uninstall()),
+    so the gate is CLOSED for the rest of this call — a hook firing from any
+    other live Claude Code session, at any point from here to return, spawns
+    nothing. See the comment at that removal for why both signals (not just
+    install.json) have to go together."""
     from sonari.cli import _platform
     from sonari.cli import voiceout
     sessions, utterances = transcript_summary()
@@ -213,6 +221,37 @@ def uninstall(purge=None) -> int:
             purge = interactive and input("  delete? [y/N] ").strip().lower() in ("y", "yes")
         except (EOFError, OSError):
             purge = False       # silence keeps the data
+
+    # I5: close bin/sonari-hook's spawn gate before ANY destructive step below.
+    # The gate is `read_install_record() OR isdir(APP_DIR)` (an OR, not just
+    # install.json alone) — test_hook_install_gate.py's
+    # test_a_missing_record_alone_must_NOT_disable_lazy_relaunch pins that a
+    # missing record ALONE must NOT stop a live install's daemon from
+    # respawning (doctor treats that as recoverable). So a live APP_DIR alone
+    # would keep the gate open for the rest of this function; both signals go
+    # now, together, before sup.uninstall()/teardown.stop_daemon() run.
+    #
+    # This makes the record's removal unconditional, including when the stop
+    # below fails: a surviving daemon then keeps LOCK_PATH (kept whenever
+    # outcome == "still-running", the I4 rule below) so its socket stays
+    # resolvable — recovery for that case is a later `sonari install`
+    # recreating install.json, not a same-second uninstall retry racing a
+    # live process.
+    #
+    # app_dir_removed is remembered so the "Removed app copy" disclosure below
+    # can still fire at its original position in the print order (ear-batch-4)
+    # even though the deletion itself now happens here.
+    app_dir_removed = os.path.isdir(str(paths.APP_DIR))
+    if app_dir_removed:
+        try:
+            shutil.rmtree(str(paths.APP_DIR))
+        except OSError:
+            app_dir_removed = False   # still there: gate stays open on this signal
+    if os.path.exists(str(paths.INSTALL_RECORD_PATH)):
+        try:
+            os.remove(str(paths.INSTALL_RECORD_PATH))
+        except OSError:
+            pass
 
     sup = _platform().supervisor
     sup.uninstall()
@@ -247,11 +286,16 @@ def uninstall(purge=None) -> int:
     artifacts = [
         paths.LOG_PATH,
         paths.HOTKEYD_RESOLVED_PATH,
-        paths.INSTALL_RECORD_PATH,
+        # INSTALL_RECORD_PATH is NOT here: I5 removes it above, before
+        # sup.uninstall()/stop_daemon(), so the hook gate is already closed by
+        # the time this loop runs. Re-listing it would just be a no-op
+        # (os.path.exists guards every item below) but it belongs with the
+        # other gate-closing removal, not diluted into this later batch.
         sonari_dir / "hotkeyd.log",
         paths.FAULTLOG_PATH,
         paths.DAEMON_ERR_PATH,
         paths.DAEMON_FAIL_MEMO_PATH,
+        paths.SPEAK_FAIL_MEMO_PATH,   # I3: same lifecycle as DAEMON_FAIL_MEMO_PATH
     ]
     # LOCK_PATH only when the daemon is genuinely gone. Deleting it under a
     # SURVIVOR strands it: it stays alive holding SINGLETON_PATH while every
@@ -286,14 +330,12 @@ def uninstall(purge=None) -> int:
     elif os.path.exists(str(paths.STATE_PATH)):
         print(f"Kept saved transcripts: {paths.STATE_PATH}")
 
-    # Remove the stable app copy (spec §3.B). config.json + keymap.json live in
-    # SONARI_DIR (not APP_DIR) and are preserved below.
-    if os.path.isdir(str(paths.APP_DIR)):
-        try:
-            shutil.rmtree(str(paths.APP_DIR))
-            print(f"Removed app copy: {paths.APP_DIR}")
-        except OSError:
-            pass
+    # The app copy itself was already removed by the I5 gate-closing step
+    # above (spec §3.B; config.json + keymap.json live in SONARI_DIR, not
+    # APP_DIR, and are preserved below) — this is only the disclosure, kept at
+    # its original position in the print order for ear-batch-4/5 continuity.
+    if app_dir_removed:
+        print(f"Removed app copy: {paths.APP_DIR}")
 
     preserved = []
     if os.path.exists(str(paths.KEYMAP_PATH)):

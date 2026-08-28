@@ -48,6 +48,29 @@ def test_uninstall_dispatches_and_cleans_shared_artifacts_preserving_user_files(
     assert config.exists() and config.read_text() == '{"rate": 180}'
 
 
+def test_uninstall_removes_a_stale_speak_failure_memo(tmp_path, monkeypatch):
+    """I3: SPEAK_FAIL_MEMO_PATH is a new runtime artifact (like
+    DAEMON_FAIL_MEMO_PATH, already in the artifacts list) — uninstall
+    enumerates specific files rather than rmtree-ing SONARI_DIR, so a memo
+    left over from a past speak failure would otherwise survive uninstall and
+    haunt a fresh reinstall's `sonari doctor`."""
+    sonari_dir = tmp_path / ".sonari"
+    sonari_dir.mkdir()
+    memo = sonari_dir / "speak.fail_memo"; memo.write_text("")
+
+    sup = FakeSupervisor()
+    hk = FakeHotkey()
+    monkeypatch.setattr(cli, "_platform", lambda: fake_platform(supervisor=sup, hotkey=hk))
+    with mock.patch.object(cli.paths, "SONARI_DIR", sonari_dir), \
+         mock.patch.object(cli.paths, "STATE_PATH", sonari_dir / "state.json"), \
+         mock.patch("sonari.cli.voiceout.speak"), \
+         mock.patch.object(cli.paths, "SPEAK_FAIL_MEMO_PATH", memo):
+        rc = cli.install.uninstall()
+
+    assert rc == 0
+    assert not memo.exists()
+
+
 def test_uninstall_subcommand_invokes_uninstall():
     with mock.patch("sonari.cli.install.uninstall", return_value=0) as un:
         rc = cli.main(["uninstall"])

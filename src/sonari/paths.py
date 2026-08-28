@@ -23,7 +23,28 @@ DAEMON_ERR_PATH = SONARI_DIR / "daemon.err.log"   # lazy-relaunch's stderr; see 
 # process per hook event -- an in-memory memo cannot survive between calls. See
 # client.py's ensure_daemon()/reset_failure_memo().
 DAEMON_FAIL_MEMO_PATH = SONARI_DIR / "daemon.fail_memo"
+# mtime = timestamp of the last recorded Speaker.speak() failure (I3): a broken
+# audio device (say/afplay exits nonzero, a spawn failure, no runner configured)
+# plays NOTHING and, without this, leaves no trace an eyes-free user could ever
+# find -- doctor's "speech path" row reads this memo to surface it (the
+# AudioQueueStart(-66681) incident: speechd.log carried the failure while
+# doctor still said healthy). Same on-disk-not-in-process reasoning as
+# DAEMON_FAIL_MEMO_PATH (this one crosses a daemon-process/CLI-process
+# boundary, not a hook-process one). Written/cleared from
+# daemon/host.py's _signal_speak_failure()/note_spoken(); read from
+# cli/doctor.py's speech-path row.
+SPEAK_FAIL_MEMO_PATH = SONARI_DIR / "speak.fail_memo"
 KOKORO_VENV = SONARI_DIR / "venv"   # opt-in uv-managed venv for neural voices
+# macOS-only LaunchAgent plist paths (platform/macos/supervisor.py and
+# platform/macos/hotkeys.py each bind their own module-level LAUNCH_AGENT_PATH
+# from these, str()-converted, at import time -- a by-value bind, so their
+# module copies need their own conftest repoint too, same pattern as
+# HOTKEYD_BIN_PATH). Centralized here rather than left as each module's
+# private os.path.expanduser() call so the paths.py-vs-conftest hermeticity
+# guard (test_paths_conftest_isolation.py) covers them like every other
+# constant, instead of relying on per-test discipline.
+SPEECHD_LAUNCH_AGENT_PATH = Path.home() / "Library" / "LaunchAgents" / "com.sonari.speechd.plist"
+HOTKEYD_LAUNCH_AGENT_PATH = Path.home() / "Library" / "LaunchAgents" / "com.sonari.hotkeyd.plist"
 
 
 def kokoro_venv_python() -> str:

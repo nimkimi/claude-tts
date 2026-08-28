@@ -66,31 +66,46 @@ Run this before closing ANY campaign (feature arc, fix wave, release):
          (`focus.py`), the repeat/skip-pile/jump-decision fallbacks
          (`playback.py`), the chooser preview (`chooser.py
          _deliver_preview`), the answer-permission approve/deny confirm
-         (`decisions.py on_answer_permission` — RR-3, fix-wave E), and
+         (`decisions.py on_answer_permission` — RR-3, fix-wave E),
          ⌃⌘S-start's "Resumed." on a dead MUTED workspace (`playback.py
-         on_stop_session` — RR-4, fix-wave E). A settings nudge must never
-         read out a closed session's pile, and neither must un-muting one. A
-         single-item press also never claims the voice for a STOPPED stream —
-         the held branch returns above the pop boundary, so the mark could
-         not be spent and the voice would wedge there.
+         on_stop_session` — RR-4, fix-wave E), and — owner-ruled
+         2026-08-15, closing the family — the learn-mode toggle and the
+         query-actions readout (`teaching.py on_learn_mode` /
+         `on_query_actions`, both targeting `workspace()`), the learn-mode
+         IDLE AUTO-EXIT (`host.py` `_learn_mode_expired`, its OWN site: the
+         toggle's wiring never reached it, and wave1-T4 item E closed it in
+         code without this list being updated), and re-read
+         options (`decisions.py on_reread_options`, targeting `foreground()`
+         instead — the different accessor; both of its enqueues, the
+         cached-options branch and the "No options right now." fallback, are
+         sanctioned). A settings nudge must never read out a closed session's
+         pile, and neither must un-muting one. A single-item press also never
+         claims the voice for a STOPPED stream — the held branch returns
+         above the pop boundary, so the mark could not be spent and the voice
+         would wedge there.
        Pending sessions stay adoptable — post-R1 the only content a pending
        stream can hold is the daemon-authored restart line, whose delivery
        deliberately rides this exact path (`tests/test_restart_line.py` pins
        it). Idle-⌃⌘W, catch-up, nav and every single-item answer DEPEND on
        this adoption/sanction machinery: any campaign touching
        `_select_keep_going` must also sweep `_release_dead_speaker` and every
-       `_sanction_dead_read` call site above. HONEST LIMIT: three more
-       deliberate presses in the same family are NOT wired and stay silent on
-       a dead workspace — learn mode and the query-actions readout
-       (`teaching.py`), and re-read options (`decisions.py`). Measured,
-       pre-existing, and left for an owner-adjacent ruling rather than widened
-       here. (A fourth candidate, ⌃⌘S-start, was carried in this same list
-       through fix-wave D as "pre-existing" — fix-wave E's re-review measured
-       it byte-identical to the pre-release base, i.e. an R-1 release
-       regression, not pre-existing; it is wired above, not listed here.
-       Fix-wave E's re-review also found the answer-permission confirm, which
-       had appeared in NEITHER the wired nor the unwired list at any point —
-       it is wired above too.)
+       `_sanction_dead_read` call site above. (A fourth candidate,
+       ⌃⌘S-start, was carried in this same list through fix-wave D as
+       "pre-existing" — fix-wave E's re-review measured it byte-identical to
+       the pre-release base, i.e. an R-1 release regression, not
+       pre-existing; it is wired above, not listed here. Fix-wave E's
+       re-review also found the answer-permission confirm, which had
+       appeared in NEITHER the wired nor the unwired list at any point — it
+       is wired above too.) The three sites once carried here as an explicit
+       HONEST LIMIT (learn mode, query-actions, re-read options — measured
+       pre-existing, left for an owner-adjacent ruling) were ruled on
+       2026-08-15 and closed above, single-item grain, wave1-T2. That does
+       NOT make the family fully wired — this paragraph said so and was
+       wrong. `host.py` `_raise_failed` — the "Bring X forward to type."
+       line — enqueues with `at_front=True` and no `_sanction_dead_read`;
+       the wave1 whole-branch review measured it as the remaining single-item
+       site without one, and no wider re-audit has been run since. Wiring it
+       needs its own RED test and is booked, not done.
      - **prose gating** (`prose.py`) — no gate in the handler. R1 clears the
        pending tier at the dispatch chokepoint, so `on_prose` never buffers
        into a quarantined stream. A dead session's prose still buffers, by

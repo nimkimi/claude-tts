@@ -9,6 +9,12 @@ from sonari import keymap
 from sonari import install_record
 from sonari.protocol import MsgType, PROTOCOL_VERSION
 
+# I3: how long a recorded speak failure (SPEAK_FAIL_MEMO_PATH) still FAILs the
+# speech-path row. See the full justification inline in doctor(), next to
+# where this is read — module-level so tests derive the window from source
+# rather than pinning the literal (tests/test_uninstall_teardown.py's style).
+SPEAK_FAIL_FRESH_S = 24 * 3600.0
+
 
 def should_speak(args) -> bool:
     """Speak when a human is at a terminal; stay silent when piped or scripted.
@@ -95,28 +101,71 @@ def doctor() -> list:
     # speak loop still reports "reachable" — this row is the one that can tell
     # a wedge from silence. STATUS already carries both facts we need.
     WEDGE_S = 120.0
+    # I3: a broken audio device (say/afplay exits nonzero, e.g. AudioQueueStart
+    # failures) plays NOTHING and drains promptly doing it — STATUS alone can't
+    # see it (last_drain_age_s advances on every drain, completed or not; a
+    # daemon that fails every utterance instantly still looks "draining
+    # normally"). Speaker.speak() raises SpeakFailure for that shape, which
+    # SpeechDaemon._signal_speak_failure (host.py) records to
+    # SPEAK_FAIL_MEMO_PATH (mtime-based, matching DAEMON_FAIL_MEMO_PATH).
+    # Unlike that 30s memo — sized only to skip a redundant retry-timeout
+    # within the same hook burst — this one has to survive until a silent,
+    # eyes-free user gets suspicious enough to run `sonari doctor`, which can
+    # be a long time after the actual failure. 24h mirrors this codebase's
+    # existing "is a recorded fact still meaningful" boundary (persistence's
+    # restore_max_age_hours default, below) and is cleared early anyway the
+    # moment any utterance next completes (SpeechDaemon.note_spoken) — it only
+    # lingers this long when nothing has spoken successfully since.
     # Bound BEFORE the try: an unreachable daemon (the exact case doctor exists
     # for) raises inside it, and the keepalive row below reads `st`. Unbound, it
     # raised UnboundLocalError there and the row rendered "error: cannot access
     # local variable 'st'..." — a sentence doctor's verdict SPEAKS aloud.
     st = {}
+    # Read the memo BEFORE the STATUS probe rather than inside it. The memo is
+    # a local file; STATUS is a socket round-trip that an unreachable daemon —
+    # a state a dead audio path can itself produce — makes raise. Read inside,
+    # the whole chain below was skipped and the row said only "cannot read
+    # daemon status", withholding the on-disk record of WHY that was sitting
+    # right there. Built once here and appended from both arms so the wording
+    # stays identical whichever way STATUS goes.
+    fail_age = None
+    try:
+        fail_age = time.time() - paths.SPEAK_FAIL_MEMO_PATH.stat().st_mtime
+    except OSError:
+        pass              # no memo, or can't read it -> behave as if there's none
+    memo_row = None
+    if fail_age is not None and 0 <= fail_age < SPEAK_FAIL_FRESH_S:
+        mins = int(fail_age // 60)
+        memo_row = ("speech path", False,
+                    f"speech failure recorded {mins}m ago — "
+                    f"see {paths.SPEAK_FAIL_MEMO_PATH}")
     try:
         from sonari import client
         st = client.send({"v": PROTOCOL_VERSION, "type": MsgType.STATUS},
                          expect_reply=True) or {}
         age = st.get("last_drain_age_s")
         claimed = bool(st.get("current_item"))
-        if not claimed:
+        if memo_row is not None:
+            results.append(memo_row)
+        elif not claimed:
             results.append(("speech path", True,
                             "idle (nothing claimed by the speak loop)"))
         elif age is not None and age > WEDGE_S:
+            # I2: `age` is last_drain_age_s — time since anything last DRAINED,
+            # NOT how long the current item has been claimed. STATUS carries no
+            # claim timestamp, so name what was measured: after a quiet spell the
+            # drain age is already large the instant the next item is claimed.
             results.append(("speech path", False,
-                            f"wedged: an utterance has been claimed for "
-                            f"{age:.0f}s without draining"))
+                            f"wedged: nothing has drained for {age:.0f}s "
+                            f"while an utterance is claimed"))
         else:
             results.append(("speech path", True, "draining normally"))
     except Exception as exc:  # noqa: BLE001 - doctor must never raise
-        results.append(("speech path", False, f"cannot read daemon status: {exc}"))
+        if memo_row is not None:
+            results.append(memo_row)
+        else:
+            results.append(("speech path", False,
+                            f"cannot read daemon status: {exc}"))
 
     # Bluetooth keep-alive state. idle/hold/disabled are healthy-by-policy;
     # only 'degraded' (the silent-stream spawn giving up) or a missing field
