@@ -54,7 +54,13 @@ def test_chooser_commit_onto_a_muted_target_announces_the_landing():
     daemon.handle_message(_msg(MsgType.CHOOSER_COMMIT, "B"))
     for _ in range(4):
         daemon._speak_loop_once()
-    assert speaker.spoken, "the chooser landed on a muted session in silence"
+    # Assert the LANDING text itself ("alpha."), not just that something was
+    # spoken -- C's own already-queued "c active" is picked up by keep-going
+    # once the voice is released (Fork-2), and a bare `assert speaker.spoken`
+    # is satisfied by that leak even when the landing cue is silenced.
+    assert any("alpha" in (s or "") for s in speaker.spoken), (
+        "the chooser landed on a muted session in silence: {0}".format(speaker.spoken)
+    )
     assert daemon._stream("A").stopped is True, "Fork-2 was violated"
 
 
