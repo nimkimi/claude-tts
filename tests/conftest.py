@@ -220,3 +220,36 @@ def _real_home_canary():
         "git; `git status` clean is not evidence. Find the test that did it "
         "before running anything else.".format(sorted(changed))
     )
+
+
+def _assert_no_silent_cues(speakers, marker) -> None:
+    """A cue that resolves to no asset is a defect, not a detail.
+
+    Separate from the fixture so it can be tested directly -- a test cannot
+    assert on its own teardown failure.
+    """
+    fired = [kind for sp in speakers for kind in sp.silent_cues]
+    if fired and marker is None:
+        raise AssertionError(
+            "cue(s) {0} resolved to NO asset -- they would have been silent on "
+            "a real install. Either give the kind a default asset, or mark the "
+            "test @pytest.mark.expects_silent_cue with the reason in its "
+            "docstring.".format(sorted(set(fired)))
+        )
+
+
+@pytest.fixture(autouse=True)
+def _no_silent_cues(request):
+    """From here on all 83 daemon-test files are dead-asset detectors: any test
+    whose FakeSpeaker fired a cue that would have made no sound fails, unless
+    it declares @pytest.mark.expects_silent_cue with the reason in its
+    docstring. The labelled exception, not the unlabelled default.
+    """
+    import daemon_helpers
+
+    daemon_helpers._LIVE_FAKE_SPEAKERS.clear()
+    yield
+    speakers = list(daemon_helpers._LIVE_FAKE_SPEAKERS)
+    daemon_helpers._LIVE_FAKE_SPEAKERS.clear()
+    _assert_no_silent_cues(
+        speakers, request.node.get_closest_marker("expects_silent_cue"))

@@ -32,3 +32,6 @@ sonari = ["assets/*.wav"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "expects_silent_cue: this test deliberately fires a cue that resolves to no asset; the reason is in the test's docstring",
+]

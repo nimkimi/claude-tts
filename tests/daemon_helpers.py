@@ -33,13 +33,29 @@ class FakeSpearconCache:
         self.cleaned = max_files
 
 
+# The canonical default asset table, as a fresh install would see it. R3 moves
+# this table into config.DEFAULTS; this ONE function is the seam, so that move
+# is a one-line change here and no test has to know where the table lives.
+def _default_earcons() -> dict:
+    from sonari.platform.macos.earcon import _DEFAULTS
+    return dict(_DEFAULTS)
+
+
+# Every FakeSpeaker built during the CURRENT test. conftest's autouse
+# _no_silent_cues fixture drains this and fails the test if any of them
+# recorded a cue that would have made no sound.
+_LIVE_FAKE_SPEAKERS: list = []
+
+
 class FakeSpeaker:
     """Records every Speaker call instead of touching audio."""
 
-    def __init__(self):
+    def __init__(self, earcons=None):
         self.spoken: list[str] = []
         self.audio_paths: list = []
-        self.earcons: list[str] = []
+        self.earcons: list[str] = []       # kinds that WOULD have played
+        self.earcon_paths: list[str] = []  # the asset each resolved to
+        self.silent_cues: list[str] = []   # kinds that resolved to NOTHING
         self.cancels: int = 0
         self.rates: list[int] = []
         self.voices: list = []
@@ -47,6 +63,8 @@ class FakeSpeaker:
         self.complete = True          # next speak() reports completed?
         self._epoch = 0
         self.epochs: list = []        # cancel_epoch passed to each speak() call
+        self._earcons = dict(_default_earcons() if earcons is None else earcons)
+        _LIVE_FAKE_SPEAKERS.append(self)
 
     def speak(self, text=None, audio_path=None, cancel_epoch=None, voice=None) -> bool:
         self.spoken.append(text)
@@ -59,9 +77,15 @@ class FakeSpeaker:
         return self._epoch
 
     def transient(self, kind: str) -> None:
-        # One list for ALL tone assertions: transient kinds land in `earcons`
-        # so per-kind checks hold across the earcon->transient migration.
+        # The SAME single lookup the real Speaker does (one lookup post-R3).
+        # A cue that resolves to nothing is not an earcon -- it is silence, and
+        # recording it as an earcon is what let `repoint` ship dead.
+        path = self._earcons.get(kind)
+        if path is None:
+            self.silent_cues.append(kind)
+            return
         self.earcons.append(kind)
+        self.earcon_paths.append(path)
 
     def pitch_asset(self, direction: str) -> "str | None":
         if direction not in ("up", "down"):
@@ -142,17 +166,22 @@ class FakeSummarizer:
 
 
 def make_daemon(verbosity: str = "everything", foreground: "str | None" = "fg",
-                 summarizer=None):
+                 summarizer=None, earcons=None):
     """Build a SpeechDaemon. The returned `queue` is the FOREGROUND session's own
     stream queue (where its items now land and where the loop drains), so most
     single-session tests need no change. Use stream_queue() for other sessions."""
-    speaker = FakeSpeaker()
+    # earcons=None means the full default table -- the fake mirrors a FRESH
+    # INSTALL, which is exactly what bootstrap produces today. Pass a dict to
+    # ask what a specific user's config would actually sound like.
+    table = _default_earcons() if earcons is None else dict(earcons)
+    speaker = FakeSpeaker(earcons=table)
     sessions = SessionManager()
     if foreground is not None:
         sessions.set_foreground(foreground)
     config = {k: (v.copy() if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
     config["verbosity"] = verbosity
     config["summarizer"] = "off"      # SP5: no test may ever reach a real `claude`
+    config["earcons"] = table
     daemon = SpeechDaemon(speaker, sessions, config, spearcons=FakeSpearconCache(),
                           summarizer=summarizer)
     # Inert before ANY handler can run: no real afplay child, no real Timer thread.
