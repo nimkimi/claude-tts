@@ -33,6 +33,7 @@ ACTIONS = {
         "teach": "Next item. Step forward one item in the current turn.",
         "doc": "Step forward one item in the current turn",
         "proposed": None,
+        "control_cue": True,
     },
     "nav_prev": {
         "message": {"type": "nav", "to": "prev"},
@@ -41,6 +42,7 @@ ACTIONS = {
         "teach": "Previous item. Step back one item in the current turn.",
         "doc": "Step back one item in the current turn",
         "proposed": None,
+        "control_cue": True,
     },
     "nav_prev_response": {
         "message": {"type": "nav", "to": "prev_response"},
@@ -49,6 +51,7 @@ ACTIONS = {
         "teach": "Previous response. Jump back a whole reply.",
         "doc": "Jump back one whole reply",
         "proposed": None,
+        "control_cue": True,
     },
     "nav_next_response": {
         "message": {"type": "nav", "to": "next_response"},
@@ -57,6 +60,7 @@ ACTIONS = {
         "teach": "Next response. Jump forward a whole reply.",
         "doc": "Jump forward one whole reply",
         "proposed": None,
+        "control_cue": True,
     },
     "stop_session": {
         "message": {"type": "stop_session"},
@@ -65,6 +69,7 @@ ACTIONS = {
         "teach": "Stop or resume. Silences this session's voice; press again to resume.",
         "doc": "Stop/resume the current session's voice",
         "proposed": None,
+        "control_cue": True,      # "Stopped."/"Resumed." answers even while muted
     },
     "stop_all": {
         "message": {"type": "stop_all"},
@@ -73,6 +78,7 @@ ACTIONS = {
         "teach": "Stop everything. Silences every session until resumed.",
         "doc": "Stop every session's voice",
         "proposed": None,
+        "control_cue": True,      # "All stopped." answers even while muted
     },
     "jump_waiting": {
         "message": {"type": "jump_waiting"},
@@ -81,6 +87,7 @@ ACTIONS = {
         "teach": "Jump to a waiting session. Moves the voice to a session that needs you.",
         "doc": "Move the voice to a background session that is waiting",
         "proposed": None,
+        "control_cue": True,
     },
     "jump_decision": {
         "message": {"type": "jump_decision"},
@@ -89,6 +96,7 @@ ACTIONS = {
         "teach": "Jump to the decision. Re-speaks the question that is waiting for an answer.",
         "doc": "Jump to the pending decision",
         "proposed": None,
+        "control_cue": True,
     },
     "repeat_last": {
         "message": {"type": "repeat_last"},
@@ -97,6 +105,7 @@ ACTIONS = {
         "teach": "Repeat. Re-speaks the last thing Sonari said.",
         "doc": "Re-speak the last utterance",
         "proposed": None,
+        "control_cue": True,
     },
     "chooser_step_next": {
         "message": {"type": "chooser_step", "direction": "next"},
@@ -105,6 +114,7 @@ ACTIONS = {
         "teach": "Session chooser. Hold the chord and press Tab to browse sessions; release to switch.",
         "doc": "Browse sessions forward (hold chord, tap Tab)",
         "proposed": None,
+        "control_cue": True,
     },
     "chooser_step_prev": {
         "message": {"type": "chooser_step", "direction": "prev"},
@@ -113,6 +123,7 @@ ACTIONS = {
         "teach": "Session chooser, backwards.",
         "doc": "Browse sessions backward",
         "proposed": None,
+        "control_cue": True,
     },
     "where_am_i": {
         "message": {"type": "where_am_i"},
@@ -121,6 +132,7 @@ ACTIONS = {
         "teach": "Where am I. Speaks a one-breath status of every session.",
         "doc": "Speak a terse status of all sessions",
         "proposed": None,
+        "control_cue": True,
     },
     "approve": {
         "message": {"type": "answer_permission", "behavior": "allow"},
@@ -129,6 +141,7 @@ ACTIONS = {
         "teach": "Approve. Answers yes to the pending permission request.",
         "doc": "Approve the pending permission request",
         "proposed": None,
+        "control_cue": True,
     },
     "deny": {
         "message": {"type": "answer_permission", "behavior": "deny"},
@@ -137,6 +150,7 @@ ACTIONS = {
         "teach": "Deny. Answers no to the pending permission request.",
         "doc": "Deny the pending permission request",
         "proposed": None,
+        "control_cue": True,
     },
     "faster": {
         "message": {"type": "set_rate", "delta": 25},
@@ -145,6 +159,7 @@ ACTIONS = {
         "teach": "Faster. Raises the speech rate.",
         "doc": "Speak faster",
         "proposed": None,
+        "control_cue": True,      # answers audibly, muted or not
     },
     "slower": {
         "message": {"type": "set_rate", "delta": -25},
@@ -153,6 +168,7 @@ ACTIONS = {
         "teach": "Slower. Lowers the speech rate.",
         "doc": "Speak slower",
         "proposed": None,
+        "control_cue": True,      # answers audibly, muted or not
     },
     "reread_options": {
         "message": {"type": "reread_options"},
@@ -161,6 +177,7 @@ ACTIONS = {
         "teach": "Re-read the options. Speaks the pending question's choices again.",
         "doc": "Re-speak the pending question's options",
         "proposed": None,
+        "control_cue": True,
     },
     "cycle_verbosity": {
         "message": {"type": "cycle_verbosity"},
@@ -169,6 +186,7 @@ ACTIONS = {
         "teach": "Cycle verbosity. Steps between everything, medium, and quiet.",
         "doc": "Cycle verbosity: everything / medium / quiet",
         "proposed": None,
+        "control_cue": True,      # readback answers even while muted
     },
     "skip_pile": {
         "message": {"type": "skip_pile"},
@@ -177,6 +195,7 @@ ACTIONS = {
         "teach": "Skip the pile. Settles this session's unheard backlog without reading it.",
         "doc": "Settle the unheard backlog without hearing it",
         "proposed": {"key": "down", "mods": ["ctrl", "cmd", "shift"]},
+        "control_cue": True,
     },
     "catch_up": {
         "message": {"type": "catch_up"},
@@ -185,6 +204,7 @@ ACTIONS = {
         "teach": "Catch up. Summarizes what you have not heard, then marks it heard.",
         "doc": "Hear a summary of the unheard backlog",
         "proposed": {"key": "l", "mods": ["ctrl", "cmd"]},
+        "control_cue": True,
     },
     "learn_mode": {
         "message": {"type": "learn_mode"},
@@ -193,6 +213,7 @@ ACTIONS = {
         "teach": "Learn mode. Keys describe themselves instead of acting.",
         "doc": "Toggle learn mode: keys speak what they do instead of doing it",
         "proposed": None,   # chord chosen at ear-batch #1
+        "control_cue": True,
     },
     "query_actions": {
         "message": {"type": "query_actions"},
@@ -201,10 +222,35 @@ ACTIONS = {
         "teach": "What can I do. Speaks the keys that matter right now.",
         "doc": "Speak the actions available right now",
         "proposed": None,   # chord chosen at ear-batch #1
+        "control_cue": True,
     },
 }
 
 ACTION_MESSAGES = {name: meta["message"] for name, meta in ACTIONS.items()}
+
+# Operator gestures hotkeyd sends directly, outside the resolved keymap.
+# Kept out of ACTIONS so hotkey_rows()/gen_docs never advertise an unbindable
+# verb. hotkeyd also sends witness_ping, which is machinery (its own liveness
+# heartbeat), not a gesture.
+CONTROL_GESTURES = {
+    "chooser_commit": {"message": {"type": "chooser_commit"},
+                       "control_cue": True},
+    # VERIFIED SILENT BY DESIGN -- the only waiver in the registry today.
+    "chooser_cancel": {
+        "message": {"type": "chooser_cancel"},
+        "control_cue": False,
+        "control_cue_waiver":
+            "_restore_and_clear is a deliberate no-op: 'move nothing, say "
+            "nothing'. It requeues the captured item at the front of its own "
+            "stream; resuming that item IS the answer. Adding a confirmation "
+            "here is a wording change, not a defect fix.",
+    },
+    "chooser_digit": {"message": {"type": "chooser_digit", "digit": 1},
+                      "control_cue": True},
+    # os_focus's answer is the `repoint` earcon -- a tone, never a word. That
+    # is why this row depends on R3 having revived it.
+    "os_focus": {"message": {"type": "os_focus"}, "control_cue": True},
+}
 
 _MOD_DISPLAY = {"ctrl": "Ctrl", "cmd": "Cmd", "shift": "Shift", "alt": "Alt"}
 _KEY_DISPLAY = {"left": "←", "right": "→", "up": "↑", "down": "↓",
