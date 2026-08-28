@@ -20,6 +20,7 @@ def test_defaults_has_documented_top_level_keys():
         "restore_max_age_hours",
         "submit_ack_enabled",
         "keepalive_enabled",
+        "earcons",
     }
 
 
@@ -39,10 +40,15 @@ def test_defaults_scalar_values():
     assert DEFAULTS["background_policy"] == "earcon_only"
 
 
-def test_defaults_no_longer_carries_earcons():
-    # Earcon defaults now live in the platform backend (MacEarconBackend);
-    # the daemon backfills them at startup, so config DEFAULTS must not own them.
-    assert "earcons" not in DEFAULTS
+def test_defaults_carries_earcons_so_the_merge_can_heal_a_legacy_config():
+    # Reverses edd0135, deliberately. Earcon defaults lived in the platform
+    # backend and were backfilled by bootstrap with `if "earcons" not in cfg`
+    # -- all-or-nothing on the whole key, so a kind added after a user's
+    # config.json was written never reached them (`repoint`, silent five
+    # weeks). In DEFAULTS, load_config's per-key _deep_merge heals it. And
+    # keymap.py resolves earcons in the CLI/hotkeyd process, which never runs
+    # bootstrap.main() at all -- so bootstrap could never have been the seam.
+    assert "earcons" in DEFAULTS
 
 
 def test_module_exposes_load_and_save():
@@ -99,8 +105,10 @@ def test_load_config_deep_merges_partial_file(monkeypatch, tmp_path):
     # untouched scalars keep their defaults
     assert loaded["verbosity"] == "everything"
     assert loaded["background_policy"] == "earcon_only"
-    # earcons are no longer a DEFAULTS key; a persisted block passes through verbatim
-    assert loaded["earcons"] == {"choice": "/custom/choice.aiff"}
+    # earcons is a DEFAULTS key now: a persisted block merges PER KEY over the
+    # defaults rather than replacing them wholesale.
+    assert loaded["earcons"]["choice"] == "/custom/choice.aiff"
+    assert loaded["earcons"]["repoint"] == "/System/Library/Sounds/Bottle.aiff"
 
 
 def test_load_config_deep_merges_nested_dict_key(monkeypatch, tmp_path):

@@ -23,6 +23,36 @@ DEFAULTS = {
     "restore_max_age_hours": 24, # SP6: max age (h) of a restored pile before drop-on-load (§4.4)
     "submit_ack_enabled": False, # D2 §6.1: prompt-submit ack tone, dark pending the owner's ear
     "keepalive_enabled": True,   # Bluetooth keep-alive (holds the audio device open while live)
+    # Every registered cue's default asset. In DEFAULTS (not bootstrap) so
+    # load_config()'s per-key _deep_merge heals an existing install: a kind
+    # added after a user's config.json was written still reaches them.
+    # bootstrap's old whole-key guard could not -- it is why `repoint` was
+    # silent for five weeks. Reverses edd0135 deliberately; see the plan.
+    "earcons": {
+        "permission": "/System/Library/Sounds/Funk.aiff",
+        "choice":     "/System/Library/Sounds/Ping.aiff",
+        "plan":       "/System/Library/Sounds/Submarine.aiff",
+        "error":      "/System/Library/Sounds/Sosumi.aiff",
+        "turn_done":  "/System/Library/Sounds/Tink.aiff",
+        # W6/W7 failure taxonomy: distinct KINDS, one shared tone — the owner's
+        # ear ruling (ear-batch-2 slot 1, 2026-08-01): every failure sounds Sosumi,
+        # like plain `error`; the paired WORD carries the class. Kinds stay
+        # distinct for words/config; a future re-split is config-level.
+        "error_misdirected": "/System/Library/Sounds/Sosumi.aiff",
+        "error_system":      "/System/Library/Sounds/Sosumi.aiff",
+        "permission_expired": "/System/Library/Sounds/Sosumi.aiff",
+        # D2 §6 silences (assets ratified by the ear-batch-2 audition 2026-08-01;
+        # swaps stay config-level).
+        "submit_ack": "/System/Library/Sounds/Morse.aiff",  # prompt-submit ack (dark by default)
+        "repoint":    "/System/Library/Sounds/Bottle.aiff", # workspace repoint on click
+        "crossing":   "/System/Library/Sounds/Frog.aiff",   # keep-going miss marker (prelude)
+        # §7 witness alarms — played via raw spawn (hotkeyd / the daemon), never
+        # the transient arbiter. Assets ratified (ear-batch-2, 2026-08-01).
+        "alarm_daemon_down":  "/System/Library/Sounds/Hero.aiff",
+        # Basso not Glass (ear-batch-2 slot 11): Glass doubles as the owner's
+        # out-of-band chat attention chime, so the alarm gets its own timbre.
+        "alarm_hotkeys_down": "/System/Library/Sounds/Basso.aiff",
+    },
 }
 
 
