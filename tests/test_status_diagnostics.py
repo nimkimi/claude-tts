@@ -165,3 +165,36 @@ def test_speaker_held_is_false_with_no_speaker_at_all():
     assert sessions.speaker() is None, sessions.speaker()
     st = daemon.handle_message(_msg(MsgType.STATUS, "A"))
     assert st["speaker_held"] is False, st
+
+
+def test_speaker_held_reads_the_speaker_not_the_foreground():
+    """The second discriminator, and it was NOT free: a producer keyed on
+    `foreground()` survived the whole suite until this pair existed, because
+    every other fixture here leaves the two coincident.
+
+    SP2 diverges them by design -- keep-going advances the VOICE (speaker)
+    while the workspace stays where he last acted -- and `foreground` is
+    already on the wire, so reaching for it is the natural wrong turn. Both
+    directions are pinned: a muted speaker behind a live workspace must read
+    True, and a live speaker behind a muted workspace must read False (that
+    second one is the dangerous direction -- it would blind the wedge row on a
+    genuinely stuck loop).
+    """
+    daemon, _, _, sessions, _ = make_daemon(foreground="A")
+    sessions.register("A", cwd="/x/alpha")
+    sessions.register("B", cwd="/x/bravo")
+    sessions.set_speaker("B")                  # voice on B, workspace still A
+    daemon._stream("A")
+    daemon._stream("B").stopped = True
+    st = daemon.handle_message(_msg(MsgType.STATUS, "A"))
+    assert sessions.foreground() == "A" and sessions.speaker() == "B", st
+    assert st["speaker_held"] is True, st
+
+    daemon2, _, _, sessions2, _ = make_daemon(foreground="A")
+    sessions2.register("A", cwd="/x/alpha")
+    sessions2.register("B", cwd="/x/bravo")
+    sessions2.set_speaker("B")
+    daemon2._stream("A").stopped = True         # the WORKSPACE is the muted one
+    daemon2._stream("B")
+    st2 = daemon2.handle_message(_msg(MsgType.STATUS, "A"))
+    assert st2["speaker_held"] is False, st2
