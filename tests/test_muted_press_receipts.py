@@ -185,6 +185,38 @@ _MESSAGE = {
 }
 
 
+# The gesture's OWN answer, for the rows where `spoken or earcons` provably
+# cannot tell it from a second sound the same press legitimately makes.
+#
+# `_arm` closes this leak by DRAINING the competitor wherever the competitor is
+# unrelated (chooser_commit's browse hint, stop_session's keep-going adoption).
+# These three cannot be drained: the other sound is produced by the gesture
+# itself, and removing it would stop exercising the branch under test.
+#
+#   nav_prev_response / nav_next_response -- _world() records two real turns so
+#   _nav_response does not take its `len(turns) < 2` early return, which is
+#   exactly what leaves the seek-and-play CONTENT (navigation.py:107) available
+#   to satisfy the row. Measured: navigation.py:102's orientation cue flipped to
+#   control_cue=False leaves the full suite green, and the sound observed is
+#   'older response'. Clearing the history to remove it would send the press
+#   down the no-turns branch instead.
+#
+#   catch_up -- _world() sets summarizer off, so ⌃⌘L's acknowledgement
+#   (catchup.py:80) and the digest fallback (catchup.py:183) BOTH speak, and
+#   they masked each other: silencing either alone left the suite green and only
+#   silencing both turned the row red. Both are named here, so each is now
+#   pinned on its own.
+#
+# Substring, not equality: a held control cue can still carry a folder prefix,
+# and this is a receipt about WHICH utterance was delivered, not about framing.
+_OWN_ANSWER = {
+    "nav_prev_response": ("Oldest response.",),
+    "nav_next_response": ("Back to the latest.",),
+    "catch_up": ("Catching up 2 items in bravo.",
+                 "Summary unavailable. Last: newer response."),
+}
+
+
 def test_the_enumeration_matches_the_declared_control_cues_exactly():
     """The `assert action in _MESSAGE` below sees ADDITIONS but is structurally
     blind to REMOVALS. Dropping an action's control_cue flag deletes its
@@ -215,6 +247,14 @@ def test_every_gesture_answers_on_a_muted_session(action):
     assert speaker.spoken or speaker.earcons, (
         "{0} pressed on a muted session produced no sound at all".format(action)
     )
+    for wanted in _OWN_ANSWER.get(action, ()):
+        assert any(wanted in said for said in speaker.spoken), (
+            "{0}: something was spoken, but not this gesture's own answer "
+            "{1!r}. Heard: {2}. This row passes on ANY sound, and for this "
+            "gesture the press makes a second one -- so without this "
+            "assertion the answer itself can go silent with the suite "
+            "green.".format(action, wanted, speaker.spoken)
+        )
     # The receipt only means something if the sound came out of a HELD stream.
     if action == "stop_session":
         # The one exemption, and it is RATIFIED, not a waiver. Fork 4

@@ -289,3 +289,61 @@ def test_a_decision_announcement_stays_silent_on_a_muted_session():
     assert speaker.spoken == [], (
         "a decision arriving on a muted session broke the mute"
     )
+
+
+def test_jump_decision_miss_respeaks_the_stored_prompt_on_a_muted_target():
+    """Spec row 2b, and it had no receipt at all.
+
+    The MISS path: the ask is answerable but already narrated, so the queue
+    holds nothing to drain to and on_jump_decision re-speaks the STORED prompt
+    off _pending_decisions instead. Flipping playback.py's control_cue on that
+    enqueue regresses to SPOKEN == [] -- the exact pre-branch defect this work
+    exists to remove -- with the whole suite green: the omnibus receipt's own
+    _arm gives the target a queued decision, so its jump_decision row takes the
+    HIT path and structurally cannot reach this line.
+
+    The stream is deliberately left with an EMPTY queue. has_decision() scans
+    queued items only, so an empty queue is what selects the miss path.
+    """
+    import threading
+
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
+    _muted(daemon, sessions, "B", "/x/bravo")
+    daemon._pending_decisions["B"] = {
+        "event": threading.Event(), "behavior": None,
+        "text": "Allow the write to config.json?", "item_id": 77,
+    }
+    assert not daemon._stream("B").queue.has_decision()
+    speaker.spoken.clear()
+    daemon.handle_message(_msg(MsgType.JUMP_DECISION, "B"))
+    for _ in range(4):
+        daemon._speak_loop_once()
+    assert any("Allow the write" in (s or "") for s in speaker.spoken), (
+        "the stored prompt was never re-spoken on the muted target -- row 2b "
+        "is back to the pre-branch silence: {0}".format(speaker.spoken)
+    )
+
+
+def test_a_crossed_jump_decision_names_the_folder_on_a_muted_target():
+    """playback.py's crossed-folder cue, another of the four sites where Task
+    5's flip created behaviour that never existed before this branch.
+
+    Crossed means the voice is on A while the ask is on B, so ⌃⌘D MOVES the
+    voice -- and the folder cue is the only thing that tells him it moved. On a
+    muted target it is voiced by the held branch or not at all, and the ask
+    that follows it is claimed separately (claim_head_as_control_cue), so the
+    ask being audible proves nothing about this cue.
+    """
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
+    sessions.register("A", cwd="/x/alpha")
+    _muted(daemon, sessions, "B", "/x/bravo")
+    sessions.set_speaker("A")                     # voice elsewhere -> crossed
+    daemon._enqueue("B", "permission", "A question needs your answer.", True)
+    speaker.spoken.clear()
+    daemon.handle_message(_msg(MsgType.JUMP_DECISION, "B"))
+    for _ in range(4):
+        daemon._speak_loop_once()
+    assert any("bravo" in (s or "") for s in speaker.spoken), (
+        "the crossed jump named no folder, so the voice moved silently: "
+        "{0}".format(speaker.spoken)
+    )
