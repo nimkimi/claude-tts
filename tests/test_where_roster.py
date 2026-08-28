@@ -93,7 +93,10 @@ def test_session_start_announces_folder_and_number(monkeypatch):
     assert len(q) == 1
     item = q.pop_next()
     assert item.text == "1, proj."
-    assert item.control_cue and item.names_session
+    # Task 10 reverts the birth announce off control_cue: it is an ambient
+    # announcement, not a gesture answer, so it must not bypass a mute.
+    # names_session is unchanged -- it still names itself.
+    assert item.names_session and not item.control_cue
 
 
 def test_announce_suppressed_at_verbosity_quiet(monkeypatch):

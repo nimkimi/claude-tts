@@ -156,6 +156,33 @@ def on_stop_session(ctx, msg):
         ctx.host._sanction_dead_read(fg, whole=False)
         # Provably not stopped: st.stopped = False, set 11 lines above.
         ctx.host._enqueue(fg, "prose", "Resumed.", False, control_cue=True, at_front=True)
+        # The session names itself the first time he can actually hear it. A
+        # session born under stop-all had its announce burned before delivery
+        # was possible and then destroyed at this very resume. Gated on the
+        # ARMED flag, never on "never announced": claim_announce is a bare
+        # test-and-set whose only caller is SESSION_START, so an unconditional
+        # claim here fires for every session that never ran one -- which is
+        # every fixture session -- and would break tests/test_daemon_stop.py:27
+        # and tests/test_frontier.py:219,246 by exact equality. And gated on
+        # is_live BEFORE the claim: _sanction_dead_read(fg, whole=False) just
+        # above sanctions exactly ONE pop, which "Resumed." consumes, so on a
+        # dead stream this second item is stranded -- no `entry=`, so no history
+        # transcript and no catch-up -- with the one-shot already spent.
+        # Short-circuiting leaves both the flag and the marker armed for the
+        # next audible chance. claim_announce stays the final arbiter, so even a
+        # re-armed flag can never speak the announce twice; and a
+        # quiet-verbosity resume leaves the flag armed for a later audible one.
+        if (st.announce_deferred
+                and ctx.host.config.get("verbosity", "everything") != "quiet"
+                and sessions.is_live(fg)
+                and sessions.claim_announce(fg)):
+            st.announce_deferred = False
+            folder = sessions.folder(fg)
+            ctx.host._enqueue(
+                fg, "prose",
+                "{0}, {1}.".format(sessions.number(fg),
+                                   folder or "Another session"),
+                False, names_session=True)
     else:
         # Stopping -> quiet-hold (SPEC §6). Cancel only if THIS session is in flight.
         st.stopped = True

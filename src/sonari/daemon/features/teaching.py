@@ -95,5 +95,11 @@ def maybe_hint(host, key, session) -> None:
         return
     if session is None:
         return
+    # ...and a stopped stream cannot speak it either. Burning the one-shot
+    # here loses the hint for every session for the rest of the daemon run --
+    # which is exactly what the docstring above already promises not to do.
+    st = host._streams.get(session)
+    if st is not None and st.stopped:
+        return
     host._hinted.add(key)
     host._enqueue(session, "prose", HINTS[key], False)

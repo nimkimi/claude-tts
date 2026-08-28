@@ -42,15 +42,22 @@ def _maybe_guide_setup(ctx, session: str, plugin_version: str) -> None:
     Silent when healthy. The check is a few file stats + a version compare
     (no launchctl) and never raises.
     """
+    # The entry guard is UNCHANGED and must stay -- dropping it re-nags on
+    # every SESSION_START for an already-guided session.
     if ctx.host._stream(session).guided:
         return
     try:
         state, cue = _setup_health(plugin_version or "")
     except Exception:  # noqa: BLE001 - guidance must never break a session
         return
+    st = ctx.host._stream(session)
+    if state == "ok" or not cue:
+        ctx.host._stream(session).guided = True   # nothing to say, ever
+        return
+    if st.stopped:
+        return                                    # leave it open for next time
     ctx.host._stream(session).guided = True
-    if state != "ok" and cue:
-        ctx.host._enqueue(session, "prose", cue, False)
+    ctx.host._enqueue(session, "prose", cue, False)
 
 
 @handler(MsgType.SET_FOREGROUND)
@@ -117,26 +124,33 @@ def on_set_foreground(ctx, msg):
         # SESSION_START, and the first already registered this id, so `is_new`
         # was always False here and the announce never fired. Claim it
         # explicitly instead — once per id, reset by unregister.
-        if ctx.verbosity != "quiet" and ctx.host.sessions.claim_announce(session):
-            # Registration announce (spec §6): "{folder}, {number}." so digit
-            # teleports are learnable eyes-free. Suppressed at quiet; never
-            # re-fired on resume/clear/compact of a known id. Lands in the new
-            # session's own stream (voiced now if it took the voice, else heard
-            # when keep-going/jump reaches it). names_session: it names itself.
-            folder = ctx.host.sessions.folder(session)
-            # Digit-first (grammar v2 consistency sweep): every dial digit in
-            # the app now obeys ONE rule — a number right before a name is a
-            # teleport key. The announce was the lone folder-first holdout,
-            # ending in a bare trailing digit with nothing to frame its role.
-            # Mechanical rename only (M1 sweep): this is an ambient announcement,
-            # not a gesture answer, so it does NOT belong under control_cue in
-            # spirit — Task 10 reverts it to unflagged once its marker lifecycle
-            # is fixed. Flagged here so that reversal is expected, not a regression.
-            ctx.host._enqueue(
-                session, "prose",
-                "{0}, {1}.".format(ctx.host.sessions.number(session),
-                                   folder or "Another session"),
-                False, control_cue=True, names_session=True)
+        st = ctx.host._stream(session)
+        if ctx.verbosity != "quiet":
+            if st.stopped:
+                # Undeliverable now: this stream was born muted under stopped-all
+                # (host.py _stream). ARM the announce instead of burning it. Arming
+                # is what makes the ctrl-cmd-S delivery below legitimate: only a
+                # session that ACTUALLY deferred an announce gets one at resume, so
+                # a plain resume of a session that never ran SESSION_START stays
+                # wordless -- which is the behaviour tests/test_daemon_stop.py:27
+                # and tests/test_frontier.py:219,246 pin by exact equality.
+                st.announce_deferred = True
+            elif ctx.host.sessions.claim_announce(session):
+                # Registration announce (spec §6): "{folder}, {number}." so digit
+                # teleports are learnable eyes-free. Suppressed at quiet; never
+                # re-fired on resume/clear/compact of a known id. Lands in the new
+                # session's own stream (voiced now if it took the voice, else heard
+                # when keep-going/jump reaches it). names_session: it names itself.
+                folder = ctx.host.sessions.folder(session)
+                # Digit-first (grammar v2 consistency sweep): every dial digit in
+                # the app now obeys ONE rule — a number right before a name is a
+                # teleport key. The announce was the lone folder-first holdout,
+                # ending in a bare trailing digit with nothing to frame its role.
+                ctx.host._enqueue(
+                    session, "prose",
+                    "{0}, {1}.".format(ctx.host.sessions.number(session),
+                                       folder or "Another session"),
+                    False, names_session=True)
         _maybe_guide_setup(ctx, session, msg.get("plugin_version", ""))
         if ctx.host._spearcons is not None:
             # Pre-render spearcons for the known roster in the background (Popen,

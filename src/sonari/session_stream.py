@@ -25,6 +25,13 @@ class SessionStream:
                                             # SESSION_START leg) delivers "Resumed."
                                             # AFTER the new-prompt clear. Transient —
                                             # never serialized.
+        self.announce_deferred = False       # Task 10: SESSION_START found this
+                                             # stream stopped, so the registration
+                                             # announce was ARMED, not claimed; the
+                                             # ctrl-cmd-S start that first makes the
+                                             # session audible delivers it. Transient
+                                             # — never serialized, like
+                                             # announce_resume above.
         self.warned_immediate = False       # warned once about immediate selection
         self.guided = False                 # received the setup-guidance cue once
         # SP4 frontier: the monotonic "furthest I've dealt with" high-water mark,
