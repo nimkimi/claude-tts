@@ -24,7 +24,8 @@ def _nav(ctx, session: str, to: str) -> None:
     else:
         ids = ctx.host.history.message_ids_in_turn(session, st.nav_turn)
     if not ids:
-        ctx.host._enqueue(session, "prose", "Nothing to navigate yet.", False)
+        ctx.host._enqueue(session, "prose", "Nothing to navigate yet.", False,
+                          control_cue=True)
         return
     n = len(ids)
     cur_id = st.nav_cursor
@@ -48,7 +49,8 @@ def _nav(ctx, session: str, to: str) -> None:
     # Seek-and-play: enqueue the target item AND every later one.
     for mid in ids[new:]:
         for e in ctx.host.history.entries_for_message(session, mid):
-            ctx.host._enqueue(session, e.kind, e.text, False, entry=e)
+            ctx.host._enqueue(session, e.kind, e.text, False, entry=e,
+                              control_cue=True)
 
 
 def _nav_response(ctx, session: str, direction: str) -> None:
@@ -95,7 +97,8 @@ def _nav_response(ctx, session: str, direction: str) -> None:
     ctx.host._enqueue(session, "prose", cue, False, control_cue=True)
     for mid in mids:
         for e in ctx.host.history.entries_for_message(session, mid):
-            ctx.host._enqueue(session, e.kind, e.text, False, entry=e)
+            ctx.host._enqueue(session, e.kind, e.text, False, entry=e,
+                              control_cue=True)
 
 
 @handler(MsgType.NAV)

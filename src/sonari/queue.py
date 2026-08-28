@@ -78,6 +78,17 @@ class SpeechQueue:
                 return item
         return None
 
+    def claim_head_as_control_cue(self) -> bool:
+        """Mark the head item as the answer to a deliberate press.
+
+        Marking the head rather than re-enqueuing preserves its entry, prelude
+        and forward provenance -- which a fresh _enqueue would lose.
+        """
+        if not self._items:
+            return False
+        self._items[0].control_cue = True
+        return True
+
     def jump_to_decision(self) -> "list[SpeechItem]":
         """Discard leading non-decision items so the next decision is at the front.
         Returns the discarded items so the caller can drop their heard-markers."""

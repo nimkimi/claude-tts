@@ -267,9 +267,10 @@ def on_reread_options(ctx, msg):
     # the workspace()-targeted sites above) — a dead foreground with the voice
     # idle strands either one without the single-item sanction (RR-2 shape).
     if text:
-        ctx.host._enqueue(fg, "choice", text, False,
+        ctx.host._enqueue(fg, "choice", text, False, control_cue=True,
                           at_front=ctx.host._sanction_dead_read(fg, whole=False))
     else:
         ctx.host._enqueue(fg, "prose", "No options right now.", False,
+                          control_cue=True,
                           at_front=ctx.host._sanction_dead_read(fg, whole=False))
     return None

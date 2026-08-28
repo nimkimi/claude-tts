@@ -248,6 +248,12 @@ def on_jump_decision(ctx, msg):
     st = ctx.host._streams.get(target)
     if st is not None:
         ctx.host._drop_pending(st.queue.jump_to_decision())
+        if st.stopped:
+            # ctrl-cmd-D IS the request to hear this ask. Marking the head
+            # rather than re-enqueuing preserves its entry/prelude/forward
+            # provenance. Gated on stopped so the un-muted path is
+            # byte-identical to today.
+            st.queue.claim_head_as_control_cue()
     ctx.host.speaker.cancel()
     # Compute folder once — reused by both the crossed-folder spearcon cue and
     # the raise on_failure lambda below (DRY; avoids a second sessions.folder()
