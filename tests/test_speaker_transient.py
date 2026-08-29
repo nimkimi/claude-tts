@@ -123,6 +123,19 @@ def test_player_returning_none_leaves_the_slot_empty():
     assert sp._transient_proc is None
 
 
+def test_player_returning_a_truthy_object_without_poll_is_rejected():
+    """The duck-type guard requires BOTH not-None AND hasattr(poll) -- a
+    player that returns something truthy but not proc-shaped (no .poll())
+    must be rejected exactly like None, not stored as the transient slot."""
+    class _NoPollProc:
+        pass
+
+    sp = Speaker(earcon_player=lambda path: _NoPollProc(),
+                 earcons={"error": "/snd/a.aiff"})
+    sp.transient("error")
+    assert sp._transient_proc is None
+
+
 def test_pitch_asset_resolves_the_packaged_chirp():
     sp = Speaker()
     up = sp.pitch_asset("up")

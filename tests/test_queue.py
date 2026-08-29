@@ -222,3 +222,15 @@ def test_insert_after_returns_false_when_anchor_absent():
     assert q.insert_after(999, [_item(2, text="render")]) is False
     assert len(q) == 1 and q.pop_next().text == "only"   # nothing inserted
 
+
+def test_claim_head_as_control_cue_marks_the_head_and_reports_success():
+    q = SpeechQueue()
+    q.enqueue(_item(1, text="ask"))
+    assert q.claim_head_as_control_cue() is True
+    assert q._items[0].control_cue is True
+
+
+def test_claim_head_as_control_cue_on_empty_queue_reports_failure():
+    q = SpeechQueue()
+    assert q.claim_head_as_control_cue() is False
+

@@ -44,6 +44,22 @@ def test_speak_calls_say_runner_with_voice_rate_and_blocks_on_wait():
     assert runner.procs[0].wait_calls == 1
 
 
+def test_set_voice_changes_the_voice_a_subsequent_speak_uses():
+    runner = RecordingRunner()
+    sp = Speaker(voice="Alex", rate=180, say_runner=runner)
+    sp.set_voice("Ava")
+    sp.speak("hello world")
+    assert runner.calls == [("hello world", "Ava", 180)]
+
+
+def test_set_rate_changes_the_rate_a_subsequent_speak_uses():
+    runner = RecordingRunner()
+    sp = Speaker(voice="Alex", rate=180, say_runner=runner)
+    sp.set_rate(220)
+    sp.speak("hello world")
+    assert runner.calls == [("hello world", "Alex", 220)]
+
+
 def test_speak_tracks_current_proc():
     runner = RecordingRunner()
     sp = Speaker(say_runner=runner)
@@ -312,6 +328,18 @@ def test_speak_without_external_epoch_uses_current_baseline():
     sp.speak("hello")                      # next speak starts clean
     assert made[0].wait_calls == 1         # played, not retroactively cancelled
     assert made[0].terminate_calls == 0
+
+
+def test_cancel_epoch_advances_on_every_cancel_never_collides():
+    """Each cancel() must hand out an epoch never seen before, so a baseline
+    captured between two cancels can tell them apart. A fresh instance's first
+    cancel (0 -> 1) can't distinguish +=1 from a flat set-to-1; the SECOND
+    cancel is where a set-to-1 regression collides with the first."""
+    sp = Speaker(say_runner=lambda t, v, r: FakePopen())
+    sp.cancel()
+    mid = sp.cancel_epoch()
+    sp.cancel()
+    assert sp.cancel_epoch() != mid
 
 
 # ---------------------------------------------------------------------------
