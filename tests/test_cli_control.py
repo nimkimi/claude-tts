@@ -5,23 +5,12 @@ import pytest
 from sonari import cli
 from sonari.cli import control
 from sonari.protocol import MsgType, PROTOCOL_VERSION
-import sonari.platform as platform
 
 
 def _sent(send_mock):
     assert send_mock.call_count == 1, send_mock.call_args_list
     args, kwargs = send_mock.call_args
     return args[0], args, kwargs
-
-
-@pytest.fixture
-def mac(monkeypatch):
-    """Pin the active platform to macOS so combo strings (e.g. 'Ctrl+Cmd+W')
-    are deterministic regardless of the host running the suite."""
-    monkeypatch.setattr(platform.sys, "platform", "darwin")
-    platform._CACHE = None
-    yield
-    platform._CACHE = None
 
 
 def test_status_sends_status_and_prints(capsys):

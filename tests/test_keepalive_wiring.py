@@ -84,6 +84,7 @@ def test_recheck_never_raises_into_the_speak_loop(monkeypatch):
     monkeypatch.setattr("sonari.sessions.SessionManager.session_ids",
                         lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
     daemon._keepalive_recheck()                   # must swallow, not raise
+    assert daemon.keepalive.status() == "idle"    # the failure left the manager untouched
 
 
 def _direct_daemon(**cfg_overrides):

@@ -190,7 +190,11 @@ class _CountingStore:
 
 
 class _RaisingStore:
+    def __init__(self):
+        self.calls = 0
+
     def save(self, data):
+        self.calls += 1
         raise RuntimeError("disk full")
 
 
@@ -225,9 +229,11 @@ def test_writer_coalesces_a_burst_into_one_save():
 
 def test_writer_flush_swallows_a_raising_save():
     from sonari.daemon.persistence import PersistenceWriter
-    writer = PersistenceWriter(_RaisingStore(), lambda: {"version": STATE_VERSION},
+    store = _RaisingStore()
+    writer = PersistenceWriter(store, lambda: {"version": STATE_VERSION},
                                threading.Lock())
     writer.flush()                               # must NOT raise
+    assert store.calls == 1                      # the raise was actually reached, not skipped
 
 
 def test_mark_dirty_acquires_no_lock():

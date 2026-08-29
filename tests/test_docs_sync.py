@@ -5,10 +5,6 @@ import importlib.util
 import pathlib
 import re
 
-import pytest
-
-import sonari.platform as platform
-
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -18,14 +14,6 @@ def _load_gen_docs():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
-
-
-@pytest.fixture
-def mac(monkeypatch):
-    monkeypatch.setattr(platform.sys, "platform", "darwin")
-    platform._CACHE = None
-    yield
-    platform._CACHE = None
 
 
 def test_readme_hotkey_island_is_current(mac):

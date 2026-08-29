@@ -87,6 +87,7 @@ def test_one_bad_hotkey_does_not_raise(monkeypatch):
     monkeypatch.setattr(daemon, "handle_message",
                         lambda m: (_ for _ in ()).throw(RuntimeError("boom")))
     daemon._dispatch_hotkey({"type": "stop"})   # swallowed, no raise
+    assert not daemon._lock.locked()            # the swallow released the lock too
 
 
 def test_reload_keymap_delegates_to_backend_reload(monkeypatch):

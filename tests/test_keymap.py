@@ -3,19 +3,6 @@ import json
 import pytest
 
 from sonari import keymap
-import sonari.platform as platform
-
-
-def _force(monkeypatch, plat):
-    monkeypatch.setattr(platform.sys, "platform", plat)
-    platform._CACHE = None
-
-
-@pytest.fixture
-def mac(monkeypatch):
-    _force(monkeypatch, "darwin")
-    yield
-    platform._CACHE = None
 
 
 def _patch_keymap_paths(monkeypatch, tmp_path):

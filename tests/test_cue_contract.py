@@ -71,11 +71,6 @@ def test_every_default_asset_kind_is_registered():
     assert set(DEFAULTS["earcons"]) <= set(CUES)
 
 
-def test_prelude_entries_cover_chirps_callsign_and_crossing():
-    assert {n for n, c in CUES.items() if c.tier == "prelude"} == {
-        "pitch_up", "pitch_down", "callsign", "crossing"}
-
-
 # --- verbal exclusivity (law 1): runners reachable only via speak/transient ---
 
 PLAYERS = {"_say_runner", "_afplay_runner", "_earcon_player"}

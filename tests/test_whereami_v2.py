@@ -3,7 +3,7 @@
 delegated): sentence entries, positive unity ("Voice and keyboard:"), inline
 decision role word sorted first, age as the word "stale", quiet collapse,
 diverged Keyboard clause carrying its own pile."""
-from sonari.protocol import PROTOCOL_VERSION
+from sonari.protocol import MsgType, PROTOCOL_VERSION
 from sonari.sessions import Identity
 from tests.daemon_helpers import make_daemon, stream_queue
 
@@ -73,6 +73,23 @@ def test_diverged_oracle_keyboard_carries_its_own_pile(monkeypatch):
     )
 
 
+# --- divergence: BOTH folders named + the Also-map, in one composed sentence ---
+def test_where_am_i_names_both_folders_and_the_also_map_under_divergence():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="A")
+    sessions.set_foreground("A", cwd="/x/web")          # keyboard/workspace folder = web
+    sessions.register("B", cwd="/x/api")
+    sessions.set_speaker("B")                            # voice=B (api); keyboard=A (web) -> diverged
+    sessions.register("C", cwd="/x/etl")                # number 3
+    daemon._enqueue("C", "prose", "c backlog", False)   # a waiting background
+    sessions.register("D", cwd="/x/logs")               # number 4
+    daemon._stream("D").stopped = True                  # a muted background
+    daemon.handle_message(_msg(MsgType.WHERE_AM_I, ""))
+    daemon._speak_loop_once()
+    assert speaker.spoken == [
+        "Voice: api 2, playing. Keyboard: web 1. Also: 3 etl, 1 waiting. 4 logs, muted."
+    ]
+
+
 def test_all_other_sessions_quiet_says_all_quiet():
     daemon, queue, speaker, sessions, config = make_daemon()
     sessions.register("fg", cwd="/x/fg")
@@ -120,6 +137,20 @@ def test_muted_only_sorts_after_piles():
     assert _where(daemon, speaker, "fg") == (
         "Voice and keyboard: fg 1, playing. Also: 3 c, 1 unheard. 2 b, muted."
     )
+
+
+# --- muted BACKGROUND streams are NAMED in the Also-map (fg excluded, F3);
+#     independent of voice_state ---
+def test_where_am_i_muted_backgrounds_are_named_in_the_also_map():
+    daemon, queue, speaker, sessions, config = make_daemon(foreground="fg")
+    sessions.set_foreground("fg", cwd="/x/work")
+    sessions.register("b1", cwd="/x/api")               # number 2
+    sessions.register("b2", cwd="/x/db")                # number 3
+    daemon._stream("b1").stopped = True
+    daemon._stream("b2").stopped = True                 # two individually-muted backgrounds
+    daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
+    daemon._speak_loop_once()
+    assert speaker.spoken == ["Voice and keyboard: work 1, playing. Also: 2 api, muted. 3 db, muted."]
 
 
 def test_two_quiet_sessions_collapse_with_a_word_count():

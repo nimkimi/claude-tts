@@ -51,7 +51,7 @@ def test_the_full_teardown_order_is_ask_then_unload_then_stop(tmp_path):
     assert order == ["asked", "unloaded", "stopped"], order
 
 
-def test_a_piped_uninstall_prints_the_question_but_does_not_speak_it(tmp_path):
+def test_a_piped_uninstall_prints_the_question_but_does_not_speak_it(tmp_path, capsys):
     """Same tty discipline as doctor (T3): speaking a question we will not wait
     for an answer to is noise in a script."""
     with mock.patch("sonari.paths.STATE_PATH", _state(tmp_path)), \
@@ -61,6 +61,7 @@ def test_a_piped_uninstall_prints_the_question_but_does_not_speak_it(tmp_path):
          mock.patch("sonari.cli._platform"):
         install_cmd.uninstall()
     spoken.assert_not_called()
+    assert "Delete it?" in capsys.readouterr().out   # the question was actually printed
 
 
 def test_purge_flag_deletes_the_transcripts(tmp_path):

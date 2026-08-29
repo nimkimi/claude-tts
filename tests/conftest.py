@@ -266,3 +266,17 @@ def _no_silent_cues(request):
     daemon_helpers._LIVE_FAKE_SPEAKERS.clear()
     _assert_no_silent_cues(
         speakers, request.node.get_closest_marker("expects_silent_cue"))
+
+
+@pytest.fixture
+def mac(monkeypatch):
+    """Pin the active platform to macOS so platform-derived output (hotkey
+    keycodes, combo strings, generated-doc islands) is deterministic
+    regardless of the host actually running the suite.
+    """
+    import sonari.platform as platform
+
+    monkeypatch.setattr(platform.sys, "platform", "darwin")
+    platform._CACHE = None
+    yield
+    platform._CACHE = None
