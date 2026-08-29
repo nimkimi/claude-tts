@@ -16,7 +16,10 @@ def msg(t, session, **kw):
 
 @pytest.mark.xfail(
     strict=True,
-    reason="BUG-8 (pre-existing at 073b82b): a stream that was never "
+    reason="BUG-8 (pre-existing at 073b82b -- `git show "
+           "073b82b:src/sonari/daemon/host.py` confirms _snapshot_state, "
+           "_restore_state and _compose_restore_line are byte-identical at "
+           "base): a stream that was never "
            "registered on the roster survives a snapshot/restore round trip "
            "forever, and the boot line keeps asserting it is muted with no "
            "name and no key that clears it; awaiting owner fix decision -- "
@@ -44,6 +47,12 @@ def test_bug8_orphan_muted_stream_is_immortal_across_a_restore():
     discoverable and clearable through that same truth-teller, not a
     standing false alarm with no remedy. His live state (state.json,
     2026-08-29) already carries two such orphans.
+
+    NOTE (deliberate deviation from FakeSpeaker.spoken): the ratified basis
+    itself is structural (roster membership), not a specific spoken
+    sentence -- the audible symptom (a boot line naming an orphan, forever)
+    flows from the divergence this asserts directly, so the assertion pins
+    the divergence rather than one incidental rendering of it.
     """
     src, _, _, sessions, _ = make_daemon(foreground=None)
     # An orphan stream: some past content path reached it, but it was NEVER
@@ -71,8 +80,10 @@ def test_bug8_orphan_muted_stream_is_immortal_across_a_restore():
 
 @pytest.mark.xfail(
     strict=True,
-    reason="BUG-12 (pre-existing at 073b82b, per the hunter's own base-tree "
-           "control run): a content stream the daemon never registered on "
+    reason="BUG-12 (pre-existing at 073b82b -- `git show "
+           "073b82b:src/sonari/daemon/host.py` confirms _select_keep_going "
+           "and the roster-only registration sites are byte-identical at "
+           "base): a content stream the daemon never registered on "
            "the roster is never auto-voiced, even with the voice flowing and "
            "idle; awaiting owner fix decision -- see HUNT dossier finding 11.",
 )
@@ -120,8 +131,12 @@ def test_bug12_a_content_stream_the_daemon_never_registered_is_never_auto_voiced
 
 @pytest.mark.xfail(
     strict=True,
-    reason="BUG-13 (pre-existing at 073b82b, per the hunter's own base-tree "
-           "control run): a roster entry with no history at all is invisible "
+    reason="BUG-13 (pre-existing at 073b82b -- `git show "
+           "073b82b:src/sonari/daemon/host.py` confirms the bounded-staleness "
+           "sweep's `for sid, sd in hist.items()` loop, and `git show "
+           "073b82b:src/sonari/sessions.py`'s unregister() with its single "
+           "lifecycle.py caller, are byte-identical at base): a roster entry "
+           "with no history at all is invisible "
            "to the bounded-staleness sweep and survives forever, contrary to "
            "the sp6 Not-Doing list's own covering claim; awaiting owner fix "
            "decision -- see HUNT dossier finding 13.",
@@ -150,6 +165,11 @@ def test_bug13_a_historyless_roster_entry_survives_the_bounded_staleness_sweep_f
     A history-less roster entry (a session that registered and never spoke)
     must not be immortal; it is exactly the ghost the bounded-staleness drop
     was meant to cover.
+
+    NOTE (deliberate deviation from FakeSpeaker.spoken): the ratified basis
+    is the sweep's own covering claim (a roster-membership fact), so the
+    assertion is on roster membership directly -- the same structural test
+    the sweep itself performs on every OTHER stale entry.
     """
     from sonari.daemon.persistence import STATE_VERSION
 

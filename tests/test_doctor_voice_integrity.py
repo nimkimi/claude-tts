@@ -20,8 +20,10 @@ REPO_SRC = str(Path(__file__).resolve().parent.parent / "src")
 
 @pytest.mark.xfail(
     strict=True,
-    reason="BUG-7 (pre-existing at 073b82b, per the hunter's own base-tree "
-           "control run): the voice row's fail-open guard only fires on an "
+    reason="BUG-7 (_voice_row is new-in-receipts, added at 54cc167 -- "
+           "`git show 073b82b:src/sonari/cli/doctor.py` has no _voice_row -- "
+           "over the PRE-EXISTING tts.py list_voices() union widening it "
+           "consumes): the voice row's fail-open guard only fires on an "
            "EMPTY listing, not an UNREADABLE one -- with the neural venv "
            "provisioned, a failed native `say -v ?` still leaves a non-empty "
            "Kokoro-only listing, and a working `say` voice reads RED; "
@@ -105,8 +107,10 @@ def test_bug11_spoken_verdict_claims_healthy_with_a_present_but_broken_kokoro_ve
 
 @pytest.mark.xfail(
     strict=True,
-    reason="BUG-10 (pre-existing at 073b82b, per the hunter's own base-tree "
-           "control run, DOWNGRADED verdict): the hooks-installed row checks "
+    reason="BUG-10 (pre-existing at 073b82b -- the adjudicator's own "
+           "`git show 073b82b:.../supervisor.py` confirms hooks_doctor_row() "
+           "is byte-identical at base; DOWNGRADED verdict): the "
+           "hooks-installed row checks "
            "only the plugin's OWN source tree, never whether Claude Code can "
            "fire a hook at all -- doctor still speaks 'healthy' under total "
            "hook silence; awaiting owner fix decision -- see HUNT dossier "

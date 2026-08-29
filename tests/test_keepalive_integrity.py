@@ -12,12 +12,14 @@ from sonari.daemon.keepalive import KeepAliveManager
 
 @pytest.mark.xfail(
     strict=True,
-    reason="BUG-9 (new-in-receipts, wired 2026-08-24): the prescribed "
-           "'keepalive off' then 'keepalive on' recovery does nothing when "
-           "both land inside one utterance -- no speak-loop recheck runs "
-           "between them, so the manager never observes the edge that "
-           "forgives a give-up; awaiting owner fix decision -- see HUNT "
-           "dossier finding 17.",
+    reason="BUG-9 (pre-existing at 073b82b -- git show confirms "
+           "on_set_keepalive, _keepalive_recheck's reap-gated set_enabled "
+           "call, and set_enabled's False->True-edge-only forgiveness are "
+           "all byte-identical at base): the prescribed 'keepalive off' "
+           "then 'keepalive on' recovery does nothing when both land inside "
+           "one utterance -- no speak-loop recheck runs between them, so "
+           "the manager never observes the edge that forgives a give-up; "
+           "awaiting owner fix decision -- see HUNT dossier finding 17.",
 )
 def test_bug9_keepalive_off_then_on_landing_in_one_utterance_silently_does_nothing():
     """BUG-9 (CONFIRMED, finding 17, severity medium).
@@ -76,8 +78,10 @@ def test_bug9_keepalive_off_then_on_landing_in_one_utterance_silently_does_nothi
 
 @pytest.mark.xfail(
     strict=True,
-    reason="BUG-14 (pre-existing at 073b82b, per the hunter's own base-tree "
-           "control run): a spawn that cannot even start gives up "
+    reason="BUG-14 (pre-existing at 073b82b -- `git show "
+           "073b82b:src/sonari/daemon/keepalive.py` confirms _spawn_locked's "
+           "except-Exception handling is byte-identical at base): a spawn "
+           "that cannot even start gives up "
            "immediately, bypassing the spec's own 5-strike bound entirely; "
            "awaiting owner fix decision -- see HUNT dossier finding 16.",
 )
@@ -106,6 +110,13 @@ def test_bug14_one_failed_spawn_gives_up_immediately_bypassing_the_five_strike_b
     afplay raises FileNotFoundError out of Popen -- the spec's OWN
     parenthetical assigns exactly this cannot-start case the 5-strike path,
     and the code gives up on strike 1.
+
+    NOTE (deliberate deviation from FakeSpeaker.spoken): the ratified basis
+    is the spec's own strike-counting rule, a fact about the manager's
+    internal state (KeepAliveManager has no speaker/queue of its own to
+    assert on) -- doctor's keepalive row (cli/doctor.py _keepalive_row)
+    reads this exact status() value verbatim, so the assertion pins what
+    the audible surface will report one hop upstream of the FakeSpeaker.
     """
     def flaky_popen(cmd):
         raise OSError("fork failed: resource temporarily unavailable")
