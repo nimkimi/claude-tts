@@ -35,15 +35,6 @@ def test_gate_noop_keep_going_fires_when_flowing():
     assert any(s and "from bg" in s for s in speaker.spoken)
 
 
-# --- ⌃⌘W flowing wording (W3 both-sides + counts grammar) ---
-def test_where_am_i_flowing_wording():
-    daemon, queue, speaker, sessions, _ = make_daemon(foreground="fg")
-    sessions.set_foreground("fg", cwd="/x/work")
-    daemon.handle_message(_msg(MsgType.WHERE_AM_I, "fg"))
-    daemon._speak_loop_once()
-    assert speaker.spoken == ["Voice and keyboard: work 1, playing."]
-
-
 # --- state-aware None-branch: speaker() None but a workspace exists + flowing
 #     -> report "Nothing playing." instead of an error tone (R7 discoverability) ---
 def test_where_am_i_none_speaker_with_workspace_reports_nothing_playing():

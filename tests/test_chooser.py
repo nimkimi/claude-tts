@@ -119,7 +119,7 @@ def test_muted_session_stays_browsable_with_muted_suffix():
 
 
 def test_dead_tty_phantom_filtered_from_candidates(monkeypatch):
-    # MIGRATED W1 coverage (test_sp3fix_ring pattern).
+    # MIGRATED W1 coverage (test_sp3_ring pattern).
     _liveness(monkeypatch, dead={"/dev/ttysB"})
     daemon, queue, speaker, sessions, _ = make_daemon(foreground="A")
     _ident(sessions, "A", "/dev/ttysA")
