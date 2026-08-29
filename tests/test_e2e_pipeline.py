@@ -16,6 +16,13 @@ from sonari.daemon import SpeechDaemon
 from sonari.daemon.features import lifecycle, teaching
 from sonari.config import DEFAULTS
 
+# Module import (never the bare name -- tests/ and the repo root are both on
+# sys.path without an __init__.py, so `daemon_helpers` and
+# `tests.daemon_helpers` would be two distinct modules with two distinct
+# _LIVE_FAKE_SPEAKERS lists; conftest's drain only ever sees the latter).
+# Also avoids shadowing this file's own local make_daemon().
+from tests import daemon_helpers
+
 
 @pytest.fixture(autouse=True)
 def _silence_setup_cue(monkeypatch):
@@ -30,15 +37,29 @@ class FakeSpeaker:
 
     Mirrors the public surface SpeechDaemon uses: speak/cancel/earcon/
     set_voice/set_rate. speak() is synchronous here (no threads) so the
-    drain helper produces a deterministic ordering.
+    drain helper produces a deterministic ordering. earcon()/transient()
+    resolve against `earcons` the same single lookup the real Speaker does:
+    a kind that resolves is logged as ("earcon", kind); a kind that does NOT
+    resolve is silence -- recorded in silent_cues, never appended to the
+    ordered log, since nothing would have played. The instance registers
+    with daemon_helpers._LIVE_FAKE_SPEAKERS so conftest's autouse drain
+    still fails the test if a silent cue fires here, same as every other
+    daemon test. (Only transient() is reachable from the real daemon --
+    src/sonari/daemon/host.py calls speaker.transient(kind), never
+    .earcon() -- but the honesty flip covers both so a caller of either
+    gets the same true-or-silent contract.)
     """
 
-    def __init__(self, log):
+    def __init__(self, log, earcons=None):
         self.log = log
         self.voice = None
         self.rate = DEFAULTS["rate"]
         self.cancelled = 0
         self._epoch = 0
+        self._earcons = dict(
+            daemon_helpers._default_earcons() if earcons is None else earcons)
+        self.silent_cues: list[str] = []
+        daemon_helpers._LIVE_FAKE_SPEAKERS.append(self)
 
     def speak(self, text, cancel_epoch=None):
         self.log.append(("text", text))
@@ -50,13 +71,20 @@ class FakeSpeaker:
         self.cancelled += 1
         self._epoch += 1
 
-    def earcon(self, kind):
+    def _resolve_transient(self, kind):
+        # A cue that resolves to nothing is not an earcon -- it is silence,
+        # and logging it as one is what let `repoint` ship dead.
+        path = self._earcons.get(kind)
+        if path is None:
+            self.silent_cues.append(kind)
+            return
         self.log.append(("earcon", kind))
 
+    def earcon(self, kind):
+        self._resolve_transient(kind)
+
     def transient(self, kind):
-        # Same log entry as earcon() — the earcon->transient migration must not
-        # change what these ordering assertions observe.
-        self.log.append(("earcon", kind))
+        self._resolve_transient(kind)
 
     def set_voice(self, v):
         self.voice = v
@@ -84,12 +112,28 @@ def drain_queue(daemon, speaker):
 
 def make_daemon():
     log = []
-    speaker = FakeSpeaker(log)
     sessions = SessionManager(background_policy="earcon_only")
     cfg = {k: (dict(v) if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
     cfg["verbosity"] = "everything"
+    speaker = FakeSpeaker(log, earcons=cfg["earcons"])
     daemon = SpeechDaemon(speaker, sessions, cfg)
     return daemon, speaker, log
+
+
+@pytest.mark.expects_silent_cue
+def test_local_fake_speaker_records_a_silent_cue_not_an_earcon():
+    """A kind absent from the resolved table must not enter the ordered log
+    as ("earcon", kind) -- it silently resolved to nothing, same as a real
+    Speaker would. Direct construction, bypassing make_daemon/the daemon, so
+    this is a receipt for the fake itself, not for any one call site. Covers
+    the reachable path (transient()); earcon() shares the same resolution
+    method, so a second identical assertion would add coverage but no new
+    information."""
+    log = []
+    speaker = FakeSpeaker(log, earcons={})
+    speaker.transient("repoint")
+    assert log == []
+    assert speaker.silent_cues == ["repoint"]
 
 
 def feed_event(daemon, event, payload):

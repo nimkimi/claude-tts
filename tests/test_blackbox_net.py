@@ -16,6 +16,12 @@ from sonari.daemon import SpeechDaemon
 from sonari.daemon.features import lifecycle
 from sonari.config import DEFAULTS
 
+# Module import (never the bare name -- tests/ and the repo root are both on
+# sys.path without an __init__.py, so `daemon_helpers` and
+# `tests.daemon_helpers` would be two distinct modules with two distinct
+# _LIVE_FAKE_SPEAKERS lists; conftest's drain only ever sees the latter).
+from tests import daemon_helpers
+
 
 @pytest.fixture(autouse=True)
 def _silence_setup_cue(monkeypatch):
@@ -27,14 +33,24 @@ class FakeSpeaker:
 
     cancel() is recorded as ("cancel", None) so cut-on-switch is observable in
     the log; speak() returns self.complete (True) so drain_once mirrors a clean
-    completion (no pause-requeue)."""
+    completion (no pause-requeue). transient() resolves against `earcons` the
+    same single lookup the real Speaker does: a kind that resolves is logged
+    as ("earcon", kind); a kind that does NOT resolve is silence -- it is
+    recorded in silent_cues, never appended to the ordered log, since nothing
+    would have played. The instance registers with
+    daemon_helpers._LIVE_FAKE_SPEAKERS so conftest's autouse drain still fails
+    the test if a silent cue fires here, same as every other daemon test."""
 
-    def __init__(self, log):
+    def __init__(self, log, earcons=None):
         self.log = log
         self.voice = None
         self.rate = DEFAULTS["rate"]
         self.complete = True
         self._epoch = 0
+        self._earcons = dict(
+            daemon_helpers._default_earcons() if earcons is None else earcons)
+        self.silent_cues: list[str] = []
+        daemon_helpers._LIVE_FAKE_SPEAKERS.append(self)
 
     def speak(self, text, cancel_epoch=None):
         self.log.append(("text", text))
@@ -48,8 +64,12 @@ class FakeSpeaker:
         self._epoch += 1
 
     def transient(self, kind):
-        # Logs ('earcon', kind) — the earcon->transient migration must not change
-        # what these ordering assertions observe.
+        # A cue that resolves to nothing is not an earcon -- it is silence,
+        # and logging it as one is what let `repoint` ship dead.
+        path = self._earcons.get(kind)
+        if path is None:
+            self.silent_cues.append(kind)
+            return
         self.log.append(("earcon", kind))
 
     def set_voice(self, v):
@@ -64,13 +84,13 @@ def make_net(verbosity="everything", foreground="fg",
     """A real SpeechDaemon wired to the recording FakeSpeaker. Returns
     (daemon, speaker, log, sessions, config)."""
     log = []
-    speaker = FakeSpeaker(log)
     sessions = SessionManager(background_policy=background_policy)
     if foreground is not None:
         sessions.set_foreground(foreground)
     config = {k: (dict(v) if isinstance(v, dict) else v)
               for k, v in DEFAULTS.items()}
     config["verbosity"] = verbosity
+    speaker = FakeSpeaker(log, earcons=config["earcons"])
     daemon = SpeechDaemon(speaker, sessions, config)
     return daemon, speaker, log, sessions, config
 
@@ -110,6 +130,24 @@ def drain(daemon, limit=1000):
     for _ in range(limit):
         if not drain_once(daemon):
             return
+
+
+# ---------------------------------------------------------------------------
+# Family: this file's own FakeSpeaker honesty (receipt for the local class --
+# test_fake_speaker_receipt.py only covers the shared daemon_helpers one)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.expects_silent_cue
+def test_local_fake_speaker_records_a_silent_cue_not_an_earcon():
+    """A kind absent from the resolved table must not enter the ordered log
+    as ("earcon", kind) -- it silently resolved to nothing, same as a real
+    Speaker would. Direct construction, bypassing make_net/the daemon, so
+    this is a receipt for the fake itself, not for any one call site."""
+    log = []
+    speaker = FakeSpeaker(log, earcons={})
+    speaker.transient("repoint")
+    assert log == []
+    assert speaker.silent_cues == ["repoint"]
 
 
 # ---------------------------------------------------------------------------
