@@ -122,7 +122,14 @@ def test_nav_replays_then_live_prose_for_foreground_is_spoken():
 def test_nav_with_empty_history_announces():
     daemon, queue, *_ = make_daemon(foreground="fg")
     _nav(daemon, "prev")
-    assert any("Nothing to navigate" in s.text for s in _drain(queue))
+    items = _drain(queue)
+    # Exact equality, not substring: a prefix/suffix corruption of this spoken
+    # sentence must be caught, not silently pass a looser "contains" check.
+    assert [s.text for s in items] == ["Nothing to navigate yet."]
+    # Not a decision: flipping this would exempt an ordinary empty-history cue
+    # from queue-cap eviction and make jump_to_decision/has_decision treat a
+    # browsing session as though it had an unanswered decision pending.
+    assert all(it.is_decision is False for it in items)
 
 
 def test_nav_steps_by_paragraph_within_one_message():
@@ -257,6 +264,24 @@ def test_next_response_returns_to_latest_with_boundary_cue():
     assert daemon._stream("fg").nav_turn is None           # anchored back to live
 
 
+def test_next_response_steps_forward_one_turn_at_a_time():
+    # Every other next_response test goes straight to the newest turn in one
+    # step, where the min(..., len(turns)-1) clamp masks +1 vs +2 (both land
+    # on the same boundary index). With 4+ turns, parking on the OLDEST and
+    # pressing next_response once must land on the SECOND-oldest turn, not
+    # skip past it -- and its cue's plural branch ("2 responses back.") must
+    # render intact, not corrupted.
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    _responses(daemon, "fg", ["R1.", "R2.", "R3.", "R4."])
+    _drain(queue)
+    for _ in range(3):
+        daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})
+        _drain(queue)
+    # now parked on R1, the oldest
+    daemon.handle_message({"type": "nav", "to": "next_response", "session": "fg"})
+    assert [s.text for s in _drain(queue)] == ["2 responses back.", "R2."]
+
+
 def test_response_nav_with_one_response_says_no_other():
     daemon, queue, *_ = make_daemon(foreground="fg")
     _responses(daemon, "fg", ["Only."])
@@ -285,6 +310,35 @@ def test_live_prose_while_parked_on_past_response_enqueues_after_replay():
     assert "R2." in texts and "Live more." in texts
     assert texts.index("Live more.") > texts.index("R2.")    # after the replay, not interleaved
     assert daemon._stream("fg").nav_turn is not None         # still parked, not yanked to live
+
+
+def test_prev_response_then_next_step_anchors_cursor_at_the_responses_start():
+    # nav_cursor must anchor at the START of the response _nav_response just
+    # jumped to (None == "follow live"), so a FOLLOWING single-step nav starts
+    # from there. Chains prev_response with a message-step nav -- nothing else
+    # in the suite exercises that combination.
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    h = daemon.history
+    h.record("fg", "prose", "A0"); h.end_message("fg")
+    h.record("fg", "prose", "A1"); h.end_message("fg")
+    h.record("fg", "prose", "A2"); h.end_message("fg")
+    h.start_turn("fg")
+    h.record("fg", "prose", "B0"); h.end_message("fg")
+    _drain(queue)
+    daemon.handle_message({"type": "nav", "to": "prev_response", "session": "fg"})   # parks on turn A
+    _drain(queue)
+    daemon.handle_message({"type": "nav", "to": "next", "session": "fg"})
+    assert [s.text for s in _drain(queue)] == ["A1", "A2"]
+
+
+def test_nav_with_no_to_key_defaults_to_prev():
+    # A malformed/legacy client message omitting "to" entirely must fall back
+    # to "prev", not silently drop the press (total silence on an uncrossed
+    # target).
+    daemon, queue, *_ = make_daemon(foreground="fg")
+    _seed(daemon)
+    daemon.handle_message({"type": "nav", "session": "fg"})
+    assert [s.text for s in _drain(queue)] == ["m1", "m2"]
 
 
 def test_back_to_latest_with_empty_live_turn_pins_anchor_not_none():

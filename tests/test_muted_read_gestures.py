@@ -324,6 +324,29 @@ def test_jump_decision_miss_respeaks_the_stored_prompt_on_a_muted_target():
     )
 
 
+def test_a_crossed_nav_names_the_folder_on_a_muted_target():
+    """on_nav's own crossed-folder cue -- the sibling of
+    test_a_crossed_jump_decision_names_the_folder_on_a_muted_target below, at a
+    different call site (navigation.py's on_nav, not playback.py's
+    on_jump_decision). Its control_cue is the entire audibility path for this
+    cue on a muted target; nothing else in the suite drives nav's crossed cue
+    through the held/stopped speak loop the way it does here."""
+    daemon, _, speaker, sessions, _ = make_daemon(foreground="B")
+    sessions.register("A", cwd="/x/alpha")
+    _muted(daemon, sessions, "B", "/x/bravo")
+    daemon.history.record("B", "prose", "the message")
+    daemon.history.end_message("B")
+    sessions.set_speaker("A")                     # voice elsewhere -> crossed
+    speaker.spoken.clear()
+    daemon.handle_message(_msg(MsgType.NAV, "B", to="prev"))
+    for _ in range(5):
+        daemon._speak_loop_once()
+    assert any("bravo" in (s or "") for s in speaker.spoken), (
+        "the crossed nav named no folder, so the voice moved silently: "
+        "{0}".format(speaker.spoken)
+    )
+
+
 def test_a_crossed_jump_decision_names_the_folder_on_a_muted_target():
     """playback.py's crossed-folder cue, another of the four sites where Task
     5's flip created behaviour that never existed before this branch.

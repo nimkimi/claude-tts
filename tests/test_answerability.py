@@ -14,6 +14,7 @@ from tests.daemon_helpers import make_daemon
 
 DECISIONS_SRC = (pathlib.Path(__file__).resolve().parents[1]
                  / "src" / "sonari" / "daemon" / "features" / "decisions.py")
+FEATURES_DIR = DECISIONS_SRC.parent
 
 
 def _msg(t, session, **kw):
@@ -56,16 +57,32 @@ def _decision_functions():
     return {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
 
 
+def _functions_in(src_path):
+    tree = ast.parse(src_path.read_text(encoding="utf-8"))
+    return {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+
+
 def test_the_only_decision_enqueue_lives_in_the_announce_chokepoint():
-    for name, fn in _decision_functions().items():
-        for node in ast.walk(fn):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "_enqueue"
-                    and len(node.args) >= 4
-                    and isinstance(node.args[3], ast.Constant)
-                    and node.args[3].value is True):
-                assert name == "_announce_decision", \
-                    "is_decision=True enqueue outside the chokepoint: {0}".format(name)
+    # Widened beyond decisions.py to every daemon/features/*.py module: the
+    # chokepoint rule ("is_decision=True enqueues ONLY from
+    # _announce_decision") is a property of the whole feature surface, not
+    # just the file that happens to own the legitimate case. A sibling module
+    # (e.g. navigation.py) passing a stray literal True is exactly as
+    # dangerous as decisions.py itself doing so -- it would make an ordinary
+    # cue exempt from queue-cap eviction and able to block jump_to_decision --
+    # and no other module has anywhere near this scrutiny.
+    for src_path in sorted(FEATURES_DIR.glob("*.py")):
+        is_decisions_file = (src_path == DECISIONS_SRC)
+        for name, fn in _functions_in(src_path).items():
+            for node in ast.walk(fn):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "_enqueue"
+                        and len(node.args) >= 4
+                        and isinstance(node.args[3], ast.Constant)
+                        and node.args[3].value is True):
+                    assert is_decisions_file and name == "_announce_decision", \
+                        "is_decision=True enqueue outside the chokepoint: {0}:{1}".format(
+                            src_path.name, name)
 
 
 def test_answerable_true_is_passed_only_by_the_blocking_permission():
