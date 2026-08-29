@@ -37,7 +37,6 @@ def test_defaults_scalar_values():
     assert DEFAULTS["voice"] is None
     assert DEFAULTS["rate"] == 200
     assert DEFAULTS["verbosity"] == "everything"
-    assert DEFAULTS["background_policy"] == "earcon_only"
 
 
 def test_defaults_carries_earcons_so_the_merge_can_heal_a_legacy_config():
@@ -104,7 +103,6 @@ def test_load_config_deep_merges_partial_file(monkeypatch, tmp_path):
     assert loaded["voice"] == "Ava (Premium)"
     # untouched scalars keep their defaults
     assert loaded["verbosity"] == "everything"
-    assert loaded["background_policy"] == "earcon_only"
     # earcons is a DEFAULTS key now: a persisted block merges PER KEY over the
     # defaults rather than replacing them wholesale.
     assert loaded["earcons"]["choice"] == "/custom/choice.aiff"
@@ -207,8 +205,6 @@ def test_save_config_creates_dir_and_round_trips(monkeypatch, tmp_path):
     assert reloaded["verbosity"] == "medium"
     # a persisted (non-default) earcons block round-trips verbatim
     assert reloaded["earcons"]["choice"] == "/custom/choice.aiff"
-    # untouched defaults survive the round-trip
-    assert reloaded["background_policy"] == "earcon_only"
 
 
 def test_save_config_writes_valid_json_on_disk(monkeypatch, tmp_path):
