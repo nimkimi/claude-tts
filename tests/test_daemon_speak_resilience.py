@@ -122,7 +122,7 @@ def test_error_earcon_failure_is_contained(monkeypatch):
     # about containment, not about that call landing.
     with mock.patch("sonari.cli.voiceout.speak_direct") as speak_direct:
         daemon._speak_loop_once()                # must return normally despite both raising
-    speak_direct.assert_called_once()            # the documented #54 gap-B fallback actually fired
+    assert speak_direct.call_count == 1          # the documented #54 gap-B fallback actually fired
 
 
 # ---------------------------------------------------------------------------
