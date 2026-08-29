@@ -111,7 +111,8 @@ def test_a_kind_absent_from_the_table_is_silent_now_that_nothing_rescues_it():
 
 
 def test_transient_without_player_is_noop():
-    Speaker().transient("error")          # must not raise
+    sp = Speaker(earcons={"error": "/snd/a.aiff"})
+    sp.transient("error")                 # must not raise
 
 
 def test_player_returning_none_leaves_the_slot_empty():

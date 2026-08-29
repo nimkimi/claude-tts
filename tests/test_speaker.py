@@ -103,6 +103,7 @@ def test_cancel_with_no_current_proc_is_noop():
     sp = Speaker(say_runner=RecordingRunner())
     # Never called speak; cancel must not raise.
     sp.cancel()
+    assert sp.cancel_epoch() == 1   # the epoch still bumps on the no-proc path
 
 
 # ---------------------------------------------------------------------------

@@ -97,6 +97,7 @@ def test_a_memo_write_failure_never_raises():
     client_mod.reset_failure_memo()
     with mock.patch.object(client_mod, "DAEMON_FAIL_MEMO_PATH", bogus_memo_path), \
          mock.patch.object(client_mod, "_connectable", return_value=False), \
-         mock.patch.object(client_mod, "ensure_running"), \
+         mock.patch.object(client_mod, "ensure_running") as spawn, \
          mock.patch("time.sleep"):
         client_mod.ensure_daemon(timeout=1.0)   # must not raise
+    assert spawn.call_count == 1   # the OSError-prone memo path was actually reached

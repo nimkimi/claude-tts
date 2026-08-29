@@ -120,8 +120,9 @@ def test_error_earcon_failure_is_contained(monkeypatch):
     # D4 T15: cue() raising here now trips the #54 gap-B fallback (speak_direct,
     # a real `say` shell-out) — mocked so the suite stays silent; this test is
     # about containment, not about that call landing.
-    with mock.patch("sonari.cli.voiceout.speak_direct"):
+    with mock.patch("sonari.cli.voiceout.speak_direct") as speak_direct:
         daemon._speak_loop_once()                # must return normally despite both raising
+    speak_direct.assert_called_once()            # the documented #54 gap-B fallback actually fired
 
 
 # ---------------------------------------------------------------------------

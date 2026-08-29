@@ -76,3 +76,4 @@ def test_falls_back_to_direct_say_when_the_cue_itself_cannot_speak():
         except RuntimeError:
             daemon._signal_speak_failure(None)
     direct.assert_called_once()
+    assert SPEAK_FAILURE_WORD in direct.call_args.args[0], "gap-B fallback dropped the word"
